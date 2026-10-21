@@ -1,0 +1,20 @@
+{
+  "name": "dy-superpowers",
+  "interface": {
+    "displayName": "HRP 项目交付助手"
+  },
+  "plugins": [
+    {
+      "name": "dy_superpowers",
+      "source": {
+        "source": "local",
+        "path": "./plugins/dy_superpowers"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

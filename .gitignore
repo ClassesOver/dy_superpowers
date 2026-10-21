@@ -1,0 +1,35 @@
+# 本地环境与凭据：不入库
+.env
+.env.*
+!.env.example
+
+# 工作区运行时数据：项目记忆、本地追踪、插件扫描状态
+.dy_superpowers/
+.mimosa/
+
+# Python 运行与打包产物
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.egg-info/
+.venv/
+
+# 测试与覆盖率
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.hypothesis/
+
+# 静态检查缓存
+.mypy_cache/
+.ruff_cache/
+
+# 编辑器与操作系统
+.idea/
+.vscode/
+.DS_Store
+*.swp

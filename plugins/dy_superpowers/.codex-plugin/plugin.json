@@ -1,0 +1,22 @@
+{
+  "name": "dy_superpowers",
+  "version": "0.1.0",
+  "description": "面向 Odoo 12 项目的 HRP 项目交付助手。",
+  "author": {
+    "name": "dy_superpowers 维护者"
+  },
+  "license": "MIT",
+  "keywords": ["HRP", "Odoo 12", "项目交付", "配置管理"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "HRP 项目交付助手",
+    "shortDescription": "HRP 项目交付助手",
+    "longDescription": "提供工作区内的项目交付流程和 Odoo 12 配置引擎边界。",
+    "developerName": "dy_superpowers 维护者",
+    "category": "生产力",
+    "capabilities": ["交互式流程", "项目交付", "Odoo 配置规划"],
+    "defaultPrompt": ["检查当前 HRP 项目的交付状态。"]
+  }
+}

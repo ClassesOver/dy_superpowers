@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "dy-superpowers-odoo",
+            "tool": "dy_session_initialize",
+            "input": {
+              "trace_id": "${session_id}",
+              "source": "${source}"
+            },
+            "timeout": 10,
+            "statusMessage": "正在读取当前工作区记忆"
+          }
+        ]
+      }
+    ]
+  }
+}
