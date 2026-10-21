@@ -65,6 +65,8 @@ class BasicMemoryAdapter:
                 "expected_version": BASIC_MEMORY_VERSION,
                 "project": BASIC_MEMORY_PROJECT,
                 "results": results,
+                "has_more": bool(payload.get("has_more", False)) or len(results) >= 20 if isinstance(payload, dict) else len(results) >= 20,
+                "completeness_note": "搜索仅用于定位，满页时可能还有结果；使用 dy_memory_read 读取白名单文件全文，调研事实须经专用读取工具复核。",
             }
         except (FileNotFoundError, OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
             return self._local_fallback(query.strip())
@@ -117,8 +119,7 @@ class BasicMemoryAdapter:
                 config = json.loads(config_file.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 config = {}
-            entry = config.get("projects", {}).get(BASIC_MEMORY_PROJECT, {})
-            if isinstance(entry, dict) and Path(entry.get("path", "")).resolve() == self.memory_root:
+            if self._configured_path(config) == self.memory_root:
                 return
         self.config_dir.mkdir(parents=True, exist_ok=True)
         try:
@@ -146,12 +147,24 @@ class BasicMemoryAdapter:
             config = json.loads(config_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return False
-        entry = config.get("projects", {}).get(BASIC_MEMORY_PROJECT, {})
-        return isinstance(entry, dict) and Path(entry.get("path", "")).resolve() == self.memory_root
+        return self._configured_path(config) == self.memory_root
+
+    @staticmethod
+    def _configured_path(config: Any) -> Path | None:
+        if not isinstance(config, dict) or not isinstance(config.get("projects", {}), dict):
+            raise ValueError("Basic Memory 配置结构无效")
+        entry = config.get("projects", {}).get(BASIC_MEMORY_PROJECT)
+        if entry is None:
+            return None
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or not entry["path"]:
+            raise ValueError("Basic Memory 项目路径无效")
+        return Path(entry["path"]).resolve()
 
     def _local_fallback(self, query: str) -> dict[str, Any]:
         terms = [term.casefold() for term in query.split() if term.strip()]
         results: list[dict[str, Any]] = []
+        total_matches = 0
+        read_full_files = []
         for name in sorted(MEMORY_FILES):
             content = WorkspaceMemory(self.workspace).read(name)
             matches = [
@@ -160,6 +173,9 @@ class BasicMemoryAdapter:
                 if all(term in line.casefold() for term in terms)
             ]
             if matches:
+                total_matches += len(matches)
+                if len(matches) > 20:
+                    read_full_files.append(name)
                 results.append({"name": name, "matches": matches[:20]})
         return {
             "backend": "local-fallback",
@@ -167,4 +183,8 @@ class BasicMemoryAdapter:
             "expected_version": BASIC_MEMORY_VERSION,
             "project": BASIC_MEMORY_PROJECT,
             "results": results,
+            "has_more": bool(read_full_files),
+            "total_matches": total_matches,
+            "read_full_files": read_full_files,
+            "completeness_note": "每份文件最多展示 20 条匹配；使用 dy_memory_read 读取 read_full_files 中的完整文件，调研事实须经专用读取工具复核。",
         }

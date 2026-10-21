@@ -17,6 +17,7 @@ EVENT_FIELDS = {
     "event", "span_id", "parent_span_id", "operation", "tool", "status",
     "duration_ms", "error_type", "project_id", "target_id", "plan_version", "source_ref", "memory_file",
     "skill", "check_order", "research_id", "result", "evidence_ref",
+    "model", "module", "count",
 }
 SECRET_VALUE_PATTERN = re.compile(
     r"(?i)((?:password|passwd|token|secret|api[_-]?key|credential)\s*[:=]\s*)([^\s,;]+)|"
@@ -27,6 +28,7 @@ TRACE_RESULTS = {"通过", "部分通过", "不通过", "不适用", "待确认"
 OTEL_EVENT_FIELDS = {
     "event", "operation", "tool", "status", "duration_ms", "error_type",
     "skill", "check_order", "result", "memory_file",
+    "model", "module", "count", "research_id",
 }
 
 

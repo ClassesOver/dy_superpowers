@@ -7,7 +7,7 @@
 - 插件清单和插件内 MCP 服务端注册；
 - 当前工作区单项目 Markdown 记忆读写工具；
 - 按检查键保存、读取并保留历史版本的模块调研记忆工具；
-- 计划结构校验工具；
+- 计划结构校验，以及声明范围内巡检覆盖、调研版本和验收依据校验工具；
 - 插件运行追踪的结构化记录、脱敏和查询工具；
 - OpenTelemetry OTLP trace 导出。
 - MCP 工具调用前后生命周期 hook；
@@ -66,3 +66,5 @@ Jaeger UI 位于 `http://127.0.0.1:33047`。OTLP/gRPC 外部端口为 `33048`，
 单个工作区只对应一个项目。项目记忆必须位于工作区的 `.dy_superpowers/`，不得读取或写入其他工作区的记忆。
 
 插件只注册一个 MCP Server：`dy-superpowers-odoo`。可选安装 Basic Memory `0.23.2` 后，现有 MCP Server 的 `dy_memory_search` 会调用其 CLI 建立当前工作区索引。Basic Memory 不可用时自动回退本地 Markdown 搜索，不影响插件其他功能。安装方式和目录隔离规则见 [docs/memory.md](docs/memory.md)。
+
+调研修订与范围停用使用 `expected_revision` 和稳定 `scope_id`；普通记忆更新使用 `expected_content` 防止覆盖其他会话的新内容。巡检结果使用 `dy_inspection_validate` 检查声明范围内的覆盖与证据链，详见 [巡检校验合同](docs/inspection-validation.md)。校验不验证证据真实性，不授予业务或记忆写入权限。

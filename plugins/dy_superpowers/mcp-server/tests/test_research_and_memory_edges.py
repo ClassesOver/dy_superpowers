@@ -76,7 +76,7 @@ def test_write_and_read_supports_multiple_check_keys(tmp_path):
     assert first is not None
     assert second is not None
 
-    write_record(workspace, research_arguments(conclusion="费用模块及OCR本期上线"))
+    write_record(workspace, research_arguments(conclusion="费用模块及OCR本期上线", expected_revision=first["revision"]))
     revised = read_record(workspace, "expense", "EXP-1-001", "01")
     assert revised["conclusion"] == "费用模块及OCR本期上线"
     assert read_record(workspace, "expense", "EXP-1-002", "01") is not None

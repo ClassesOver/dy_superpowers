@@ -187,3 +187,25 @@ def test_index_timeout_returns_current_markdown_instead_of_stale_index(tmp_path,
     result = adapter.search('当前')
     assert result['available'] is False
     assert result['results'] == [{'name': 'profile.md', 'matches': ['当前结论']}]
+
+
+def test_fallback_reports_omitted_matches_and_full_read_route(tmp_path, monkeypatch):
+    memory = tmp_path / '.dy_superpowers'
+    memory.mkdir()
+    (memory / 'profile.md').write_text('\n'.join(f'项目记录{i}' for i in range(25)), encoding='utf-8')
+    adapter = BasicMemoryAdapter(tmp_path)
+    monkeypatch.setattr(adapter, '_ensure_project', lambda: (_ for _ in ()).throw(FileNotFoundError()))
+    result = adapter.search('项目')
+    assert result['has_more'] is True
+    assert result['total_matches'] == 25
+    assert result['read_full_files'] == ['profile.md']
+    assert len(result['results'][0]['matches']) == 20
+
+
+def test_full_backend_page_is_marked_as_potentially_incomplete(tmp_path, monkeypatch):
+    adapter = BasicMemoryAdapter(tmp_path)
+    monkeypatch.setattr(adapter, '_ensure_project', lambda: None)
+    monkeypatch.setattr(adapter, '_run', lambda args: json.dumps({'results': [{}] * 20}))
+    result = adapter.search('项目')
+    assert result['has_more'] is True
+    assert 'dy_memory_read' in result['completeness_note']

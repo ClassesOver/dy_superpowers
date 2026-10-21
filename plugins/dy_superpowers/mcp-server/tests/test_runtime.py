@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from dy_superpowers_mcp import TraceStore, WorkspaceMemory, redact, validate_plan
 from dy_superpowers_mcp import telemetry, trace as trace_module
 from dy_superpowers_mcp.trace import REDACTED
-from dy_superpowers_mcp.research import write_record
+from dy_superpowers_mcp.research import read_record, write_record
 import server
 from server import handle
 
@@ -72,6 +72,7 @@ def test_confirmed_research_record_is_stored_by_key_and_keeps_history(workspace)
     assert "error" not in saved
 
     updated = {**first, "trace_id": "research-b", "conclusion": "费用模块及OCR本期上线", "evidence_ref": "需求文档#7"}
+    updated["expected_revision"] = read_record(workspace, "expense", "EXP-1-001", "01")["revision"]
     saved = call_tool("dy_research_record_write", updated, workspace)
     assert "error" not in saved
 
@@ -112,10 +113,18 @@ def test_research_record_write_rejects_workspace_symlink_escape(workspace, tmp_p
 
 def test_concurrent_research_updates_preserve_every_revision(workspace):
     def update(index):
-        return write_record(
-            workspace,
-            research_arguments(conclusion=f"费用模块第{index}次确认", evidence_ref=f"需求文档#{index}"),
-        )
+        # 每次冲突后重新读取；测试重试只针对这些人工构造的独立确认修订。
+        for _ in range(8):
+            current = read_record(workspace, "expense", "EXP-1-001", "01")
+            arguments = research_arguments(conclusion=f"费用模块第{index}次确认", evidence_ref=f"需求文档#{index}")
+            if current:
+                arguments["expected_revision"] = current["revision"]
+            try:
+                return write_record(workspace, arguments)
+            except ValueError as exc:
+                if "冲突" not in str(exc) and "expected_revision" not in str(exc):
+                    raise
+        raise AssertionError("并发修订未能在重试预算内提交")
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = list(executor.map(update, range(8)))

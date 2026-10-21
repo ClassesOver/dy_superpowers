@@ -8,6 +8,24 @@ from dataclasses import dataclass
 from typing import Any
 
 
+class TimeoutTransport(xmlrpc.client.Transport):
+    """对 HTTP 连接和套接字读取设置超时。"""
+
+    def make_connection(self, host):
+        connection = super().make_connection(host)
+        connection.timeout = 20
+        return connection
+
+
+class TimeoutSafeTransport(xmlrpc.client.SafeTransport):
+    """保持 HTTPS 证书校验，并设置相同超时。"""
+
+    def make_connection(self, host):
+        connection = super().make_connection(host)
+        connection.timeout = 20
+        return connection
+
+
 class OdooConfigurationError(ValueError):
     """连接配置缺失或不合法。"""
 
@@ -41,8 +59,9 @@ class OdooReadClient:
     def __init__(self, settings: OdooSettings, proxy_factory=xmlrpc.client.ServerProxy) -> None:
         base = settings.url.rstrip("/")
         self.settings = settings
-        self._common = proxy_factory(f"{base}/xmlrpc/2/common", allow_none=True)
-        self._object = proxy_factory(f"{base}/xmlrpc/2/object", allow_none=True)
+        transport = TimeoutSafeTransport if base.startswith("https://") else TimeoutTransport
+        self._common = proxy_factory(f"{base}/xmlrpc/2/common", allow_none=True, transport=transport())
+        self._object = proxy_factory(f"{base}/xmlrpc/2/object", allow_none=True, transport=transport())
         try:
             self.uid = self._common.authenticate(settings.database, settings.username, settings.password, {})
         except Exception as exc:  # xmlrpc.client.Fault and transport errors are intentionally redacted
@@ -87,7 +106,7 @@ class OdooReadClient:
             domain.append(["state", "=", "installed"])
         if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
             raise OdooConfigurationError("offset 必须是不小于 0 的整数")
-        return self.search_read("ir.module.module", domain, ["name", "shortdesc", "latest_version", "state", "depends"], 100, offset)
+        return self.search_read("ir.module.module", domain, ["name", "shortdesc", "latest_version", "state", "dependencies_id"], 100, offset)
 
 
 def validate_read_arguments(arguments: dict[str, Any]) -> tuple[str, list[Any], list[str], int, int]:

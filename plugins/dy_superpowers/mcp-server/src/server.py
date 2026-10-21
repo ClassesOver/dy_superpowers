@@ -19,16 +19,18 @@ from dy_superpowers_mcp.odoo_xmlrpc import OdooConfigurationError, OdooReadClien
 from dy_superpowers_mcp.knowledge import module_info as knowledge_module_info, search as knowledge_search
 from dy_superpowers_mcp.research import read_record, write_record
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
+from dy_superpowers_mcp.inspection import validate_inspection
 
 
 TOOLS = {
     "dy_session_initialize": "初始化或恢复当前工作区会话并返回项目记忆索引；需要时使用记忆工具读取完整内容。",
+    "dy_inspection_validate": "校验声明范围内的巡检覆盖、证据引用、当前调研与矩阵版本；不验证证据真实性或授予写入授权。",
     "dy_validate_plan": "校验分阶段交付或配置计划结构；校验通过不代表获得执行授权。",
     "dy_trace_event": "追加经过字段过滤和脱敏的插件运行追踪事件。",
     "dy_trace_read": "读取当前工作区关联的运行追踪事件。",
     "dy_memory_read": "读取当前工作区允许的项目记忆文件。",
     "dy_memory_search": "使用 Basic Memory 索引搜索当前工作区记忆；服务不可用时回退本地 Markdown。",
-    "dy_memory_write": "在用户确认后更新当前工作区项目记忆。",
+    "dy_memory_write": "用户确认后更新工作区记忆；修改已有文件必须提供最近读取的 expected_content，冲突时重新合并。",
     "dy_odoo_read": "连接 Odoo 12 并执行受限的 search_read 只读查询。",
     "dy_odoo_record_search": "按 Odoo Forge 的记录搜索命名执行受限的 search_read 只读查询。",
     "dy_odoo_record_read": "读取指定 Odoo 记录的受限只读数据。",
@@ -38,7 +40,7 @@ TOOLS = {
     "dy_knowledge_module_info": "读取本地 HRP/Odoo 模块知识。",
     "dy_knowledge_search": "按中文或英文关键词搜索本地 HRP/Odoo 模块知识。",
     "dy_research_record_write": "在用户确认后追加模块调研结论并保留历史版本。",
-    "dy_research_record_read": "读取当前工作区指定检查键的最新调研结论。",
+    "dy_research_record_read": "读取指定检查键和 scope 的最新调研结论；多范围时必须指定 scope。",
 }
 
 MEMORY_READ_FILES = [
@@ -98,6 +100,7 @@ TOOL_SCHEMAS = {
             "name": {"type": "string", "enum": MEMORY_WRITE_FILES},
             "content": {"type": "string"},
             "confirmed": {"type": "boolean"},
+            "expected_content": {"type": "string", "description": "更新已有文件必须提供最近读取的完整原文；冲突时重新读取合并。"},
         },
     },
     "dy_odoo_read": {
@@ -126,8 +129,18 @@ TOOL_SCHEMAS = {
     "dy_knowledge_module_info": {"type": "object", "required": ["trace_id", "module"], "properties": {"trace_id": {"type": "string"}, "module": {"type": "string"}}},
     "dy_knowledge_search": {"type": "object", "required": ["trace_id", "query"], "properties": {"trace_id": {"type": "string"}, "query": {"type": "string"}}},
     "dy_research_record_write": {"type": "object", "required": ["trace_id", "module", "check_order", "research_id", "config_item", "conclusion", "scope", "confirmed_by", "confirmed_at", "confirmed"], "properties": {"trace_id": {"type": "string"}, "module": {"type": "string"}, "check_order": {"type": "string"}, "research_id": {"type": "string"}, "config_item": {"type": "string"}, "conclusion": {"type": "string"}, "scope": {"type": "string"}, "evidence_ref": {"type": "string"}, "confirmed_by": {"type": "string"}, "confirmed_at": {"type": "string"}, "confirmed": {"type": "boolean"}}},
-    "dy_research_record_read": {"type": "object", "required": ["trace_id", "module", "check_order", "research_id"], "properties": {"trace_id": {"type": "string"}, "module": {"type": "string"}, "check_order": {"type": "string"}, "research_id": {"type": "string"}}},
+    "dy_research_record_read": {"type": "object", "required": ["trace_id", "module", "check_order", "research_id"], "properties": {"trace_id": {"type": "string"}, "module": {"type": "string"}, "check_order": {"type": "string"}, "research_id": {"type": "string"}, "scope": {"type": "string"}}},
 }
+
+TOOL_SCHEMAS["dy_inspection_validate"] = {"type": "object", "required": ["trace_id", "report"], "properties": {"trace_id": {"type": "string"}, "report": {"type": "object"}}}
+TOOL_SCHEMAS["dy_research_record_write"]["properties"].update({
+    "expected_revision": {"type": "string", "description": "已有记录必须提供读取版本；冲突时重新读取并确认。"},
+    "scope_id": {"type": "string", "description": "稳定范围标识；首次可省略，后续沿用读取值。"},
+    "status": {"type": "string", "enum": ["confirmed", "retired"]},
+    "retirement_reason": {"type": "string"},
+    "repair": {"type": "boolean", "description": "损坏记录经核实并确认后显式修复。"},
+})
+TOOL_SCHEMAS["dy_research_record_read"]["properties"]["scope_id"] = {"type": "string"}
 
 
 class ToolRequestError(Exception):
@@ -152,6 +165,15 @@ def parse_request(line: str) -> dict:
     return request
 
 
+def append_trace(store: TraceStore, trace_id: str, event: dict) -> bool:
+    try:
+        store.append(trace_id, event)
+        return True
+    except OSError as exc:
+        sys.stderr.write(f"本地操作追踪写入失败（{type(exc).__name__}），请检查日志目录。\n")
+        return False
+
+
 def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     if name == "dy_session_initialize":
         source = arguments.get("source")
@@ -174,9 +196,16 @@ def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStor
             "source_ref": source,
             "span_id": span_id,
         }
-        store.append(arguments["trace_id"], event)
+        append_trace(store, arguments["trace_id"], event)
         record_otel_event(otel_span, event)
         return context
+    if name == "dy_inspection_validate":
+        result = validate_inspection(workspace, arguments.get("report"))
+        event = {"event": "inspection.validate", "operation": "validate", "tool": name,
+                 "status": "ok", "result": result["gate"], "span_id": span_id}
+        append_trace(store, arguments["trace_id"], event)
+        record_otel_event(otel_span, event)
+        return result
     if name == "dy_validate_plan":
         if "plan" not in arguments:
             raise ToolRequestError(-32602, "plan is required")
@@ -187,9 +216,9 @@ def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStor
             raise ToolRequestError(-32602, "event must be an object")
         if event.get("event") in {"tool.start", "tool.error", "tool.end"}:
             raise ToolRequestError(-32602, "tool lifecycle events are reserved")
-        store.append(arguments["trace_id"], event)
+        stored = append_trace(store, arguments["trace_id"], event)
         record_otel_event(otel_span, event)
-        return {"stored": True, "trace_id": arguments["trace_id"]}
+        return {"stored": stored, "trace_id": arguments["trace_id"]}
     if name == "dy_trace_read":
         return [event for event in store.read(arguments["trace_id"]) if event.get("span_id") != span_id]
     memory = WorkspaceMemory(workspace)
@@ -200,7 +229,7 @@ def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStor
         except ValueError as exc:
             raise ToolRequestError(-32602, str(exc)) from exc
         event = {"event": "memory.read", "operation": "read", "tool": name, "status": "ok", "memory_file": memory_file, "span_id": span_id}
-        store.append(arguments["trace_id"], event)
+        append_trace(store, arguments["trace_id"], event)
         record_otel_event(otel_span, event)
         return content
     if name == "dy_memory_search":
@@ -222,7 +251,7 @@ def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStor
             "result": "ok" if result.get("available") else "未知",
             "span_id": span_id,
         }
-        store.append(arguments["trace_id"], event)
+        append_trace(store, arguments["trace_id"], event)
         record_otel_event(otel_span, event)
         return result
     if name == "dy_memory_write":
@@ -231,9 +260,13 @@ def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStor
         content = arguments.get("content")
         if not isinstance(content, str):
             raise ToolRequestError(-32602, "content must be text")
-        path = memory.write(arguments.get("name", ""), content, confirmed=True)
+        try:
+            path = memory.write(arguments.get("name", ""), content, confirmed=True,
+                                expected_content=arguments.get("expected_content"))
+        except ValueError as exc:
+            raise ToolRequestError(-32602, str(exc)) from exc
         event = {"event": "memory.write", "operation": "write", "tool": name, "status": "ok", "memory_file": path.name, "span_id": span_id}
-        store.append(arguments["trace_id"], event)
+        append_trace(store, arguments["trace_id"], event)
         record_otel_event(otel_span, event)
         return {"written": True, "name": path.name}
     if name in {"dy_odoo_read", "dy_odoo_record_search"}:
@@ -245,7 +278,7 @@ def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStor
         except OdooRPCError as exc:
             raise ToolRequestError(-32603, str(exc)) from exc
         event = {"event": "odoo.read", "operation": "search_read", "tool": name, "status": "ok", "model": model, "count": len(result), "span_id": span_id}
-        store.append(arguments["trace_id"], event)
+        append_trace(store, arguments["trace_id"], event)
         record_otel_event(otel_span, event)
         return result
     if name in {"dy_odoo_record_read", "dy_odoo_model_fields", "dy_odoo_module_list_installed", "dy_odoo_module_info"}:
@@ -273,7 +306,7 @@ def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStor
                     result = client.module_records(installed_only=True, offset=arguments.get("offset", 0))
                     operation = "module_list_installed"
             event = {"event": "odoo.read", "operation": operation, "tool": name, "status": "ok", "model": model, "count": len(result) if isinstance(result, list) else len(result), "span_id": span_id}
-            store.append(arguments["trace_id"], event)
+            append_trace(store, arguments["trace_id"], event)
             record_otel_event(otel_span, event)
             return result
         except OdooConfigurationError as exc:
@@ -294,13 +327,14 @@ def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStor
             raise ToolRequestError(-32602, str(exc)) from exc
         except ValueError as exc:
             raise ToolRequestError(-32602, str(exc)) from exc
-        event = {"event": "research.write", "operation": "confirmed_record", "tool": name, "status": "ok", "module": arguments["module"], "check_order": arguments["check_order"], "research_id": arguments["research_id"], "span_id": span_id}
-        store.append(arguments["trace_id"], event)
+        operation = "repair_record" if arguments.get("repair") else "retire_scope" if result["status"] == "retired" else "confirmed_record"
+        event = {"event": "research.write", "operation": operation, "tool": name, "status": "ok", "module": arguments["module"], "check_order": arguments["check_order"], "research_id": arguments["research_id"], "span_id": span_id}
+        append_trace(store, arguments["trace_id"], event)
         record_otel_event(otel_span, event)
         return result
     if name == "dy_research_record_read":
         try:
-            result = read_record(workspace, arguments["module"], arguments["check_order"], arguments["research_id"])
+            result = read_record(workspace, arguments["module"], arguments["check_order"], arguments["research_id"], scope=arguments.get("scope"), scope_id=arguments.get("scope_id"))
         except ValueError as exc:
             raise ToolRequestError(-32602, str(exc)) from exc
         return result or {"found": False, "check_key": f"{arguments['module']}:{arguments['check_order']}:{arguments['research_id']}"}
@@ -326,7 +360,7 @@ def execute_tool(name: str, arguments: object, workspace: Path) -> tuple[object,
     with tool_span(trace_id, workspace, name) as otel_span:
         try:
             start_event = {"event": "tool.start", "tool": name, "status": "running", "span_id": span_id}
-            store.append(trace_id, start_event)
+            append_trace(store, trace_id, start_event)
             record_otel_event(otel_span, start_event)
             started = True
             result = _dispatch_tool(name, arguments, workspace, store, span_id, otel_span)
@@ -342,14 +376,14 @@ def execute_tool(name: str, arguments: object, workspace: Path) -> tuple[object,
                 if error is not None:
                     error_event = {"event": "tool.error", "tool": name, "status": "error", "error_type": error_type, "span_id": span_id}
                     try:
-                        store.append(trace_id, error_event)
+                        append_trace(store, trace_id, error_event)
                     except Exception:
                         pass
                     record_otel_event(otel_span, error_event)
                     mark_otel_error(otel_span, error_type)
                 end_event = {"event": "tool.end", "tool": name, "status": status, "duration_ms": round((time.monotonic() - start) * 1000, 2), "span_id": span_id}
                 try:
-                    store.append(trace_id, end_event)
+                    append_trace(store, trace_id, end_event)
                 except Exception:
                     if error is None:
                         error = {"code": -32603, "message": "tool execution failed"}
@@ -427,9 +461,9 @@ def run_fastmcp() -> None:
         return invoke("dy_memory_search", {"trace_id": trace_id, "query": query})
 
     @server.tool()
-    def dy_memory_write(trace_id: str, name: str, content: str, confirmed: bool) -> dict:
-        """仅在用户确认后更新当前工作区项目记忆。"""
-        return invoke("dy_memory_write", {"trace_id": trace_id, "name": name, "content": content, "confirmed": confirmed})
+    def dy_memory_write(trace_id: str, name: str, content: str, confirmed: bool, expected_content: str | None = None) -> dict:
+        """用户确认后更新记忆；修改已有文件必须提供最近读取的完整 expected_content，冲突时重新合并。"""
+        return invoke("dy_memory_write", {"trace_id": trace_id, "name": name, "content": content, "confirmed": confirmed, "expected_content": expected_content})
 
     @server.tool()
     def dy_odoo_read(trace_id: str, model: str, method: str = "search_read", args: list | None = None, kwargs: dict | None = None) -> list[dict]:
@@ -472,14 +506,19 @@ def run_fastmcp() -> None:
         return invoke("dy_knowledge_search", {"trace_id": trace_id, "query": query})
 
     @server.tool()
-    def dy_research_record_write(trace_id: str, module: str, check_order: str, research_id: str, config_item: str, conclusion: str, scope: str, confirmed_by: str, confirmed_at: str, confirmed: bool, evidence_ref: str = "") -> dict:
-        """用户确认后，将模块调研结论按检查键写入当前工作区，并保留旧版本。"""
-        return invoke("dy_research_record_write", {"trace_id": trace_id, "module": module, "check_order": check_order, "research_id": research_id, "config_item": config_item, "conclusion": conclusion, "scope": scope, "confirmed_by": confirmed_by, "confirmed_at": confirmed_at, "confirmed": confirmed, "evidence_ref": evidence_ref})
+    def dy_research_record_write(trace_id: str, module: str, check_order: str, research_id: str, config_item: str, conclusion: str, scope: str, confirmed_by: str, confirmed_at: str, confirmed: bool, evidence_ref: str = "", expected_revision: str | None = None, scope_id: str | None = None, status: str = "confirmed", retirement_reason: str = "", repair: bool = False) -> dict:
+        """确认后保存调研；已有记录必须提供 expected_revision 和稳定 scope_id；停用需 status=retired 及原因，损坏修复需 repair=true。"""
+        return invoke("dy_research_record_write", {"trace_id": trace_id, "module": module, "check_order": check_order, "research_id": research_id, "config_item": config_item, "conclusion": conclusion, "scope": scope, "confirmed_by": confirmed_by, "confirmed_at": confirmed_at, "confirmed": confirmed, "evidence_ref": evidence_ref, "expected_revision": expected_revision, "scope_id": scope_id, "status": status, "retirement_reason": retirement_reason, "repair": repair})
 
     @server.tool()
-    def dy_research_record_read(trace_id: str, module: str, check_order: str, research_id: str) -> dict:
-        """按模块和检查键读取当前工作区最新的已确认调研结论。"""
-        return invoke("dy_research_record_read", {"trace_id": trace_id, "module": module, "check_order": check_order, "research_id": research_id})
+    def dy_research_record_read(trace_id: str, module: str, check_order: str, research_id: str, scope: str | None = None, scope_id: str | None = None) -> dict:
+        """按检查键及 scope 读取最新确认结论；多个适用范围时必须指定 scope。"""
+        return invoke("dy_research_record_read", {"trace_id": trace_id, "module": module, "check_order": check_order, "research_id": research_id, "scope": scope, "scope_id": scope_id})
+
+    @server.tool()
+    def dy_inspection_validate(trace_id: str, report: dict) -> dict:
+        """校验声明范围的巡检覆盖、证据引用、调研及矩阵版本；不验证证据真实性，也不自动保存。"""
+        return invoke("dy_inspection_validate", {"trace_id": trace_id, "report": report})
 
     server.run(transport="stdio")
 

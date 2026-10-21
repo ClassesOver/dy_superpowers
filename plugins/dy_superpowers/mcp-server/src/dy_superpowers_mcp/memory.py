@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from .storage import atomic_write, record_lock
+
 MEMORY_FILES = {
     "preferences.md",
     "profile.md",
@@ -36,7 +38,7 @@ class WorkspaceMemory:
             return ""
         return path.read_text(encoding="utf-8")
 
-    def write(self, name: str, content: str, *, confirmed: bool = False) -> Path:
+    def write(self, name: str, content: str, *, confirmed: bool = False, expected_content: str | None = None) -> Path:
         if confirmed is not True:
             raise PermissionError("memory updates require explicit user confirmation")
         if not isinstance(content, str):
@@ -45,5 +47,11 @@ class WorkspaceMemory:
             raise ValueError("module-research.md must be updated through the research record tools")
         directory, path = self._paths(name)
         directory.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        with record_lock(path):
+            current = self.read(name)
+            if path.exists() and expected_content is None:
+                raise ValueError("更新已有记忆必须提供读取时的 expected_content 原文")
+            if expected_content is not None and current != expected_content:
+                raise ValueError("记忆更新冲突，请重新读取并合并，再确认写入")
+            atomic_write(path, content)
         return path
