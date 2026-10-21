@@ -26,3 +26,7 @@ uv tool install --prerelease=allow basic-memory==0.23.2
 ```
 
 可通过 `DY_BASIC_MEMORY_COMMAND` 指定 CLI 路径。`BASIC_MEMORY_CONFIG_DIR`、`BASIC_MEMORY_MCP_PROJECT` 由适配器按工作区设置，不使用共享默认项目。Basic Memory 只用于搜索加速，不能覆盖 Markdown 事实源，也不能把查询正文或记忆正文写入 trace。
+
+适配器在每次搜索前运行 `reindex --search --project dy-superpowers` 刷新全文索引，并固定使用文本搜索、关闭语义模型加载。该方式不需要下载向量模型；刷新失败或超时则回退本地搜索。搜索前检查记忆目录、索引目录及其子项的符号链接，拒绝通过链接访问其他路径；回退读取复用工作区记忆白名单和路径校验。
+
+跨会话调研待办复用 `delivery-register.md`：用户确认后保存检查键、阻塞原因和下一条问题，不保存未确认答案。恢复时读取台账并按检查键复核最新确认结论；待办本身不构成验收依据。

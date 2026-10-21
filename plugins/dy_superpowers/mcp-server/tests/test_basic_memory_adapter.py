@@ -37,9 +37,9 @@ def test_adapter_builds_workspace_scoped_environment_and_search_command(tmp_path
         "--local",
         "--default",
     ]
-    assert calls[1][0][:4] == ["basic-memory", "tool", "search-notes", "交付台账"]
-    assert calls[1][0][calls[1][0].index("--project") + 1] == "dy-superpowers"
-    assert calls[1][1]["env"]["BASIC_MEMORY_CONFIG_DIR"] == str(
+    assert calls[2][0][:4] == ["basic-memory", "tool", "search-notes", "交付台账"]
+    assert calls[2][0][calls[2][0].index("--project") + 1] == "dy-superpowers"
+    assert calls[2][1]["env"]["BASIC_MEMORY_CONFIG_DIR"] == str(
         workspace / ".dy_superpowers-basic-memory"
     )
 
@@ -115,3 +115,75 @@ def test_memory_search_dispatch_rejects_leading_dash_before_building_adapter(tmp
     )
     assert result is None
     assert error["code"] == -32602
+
+@pytest.mark.parametrize('target', ['directory', 'file', 'config'])
+def test_search_rejects_symlink_escape_before_cli(tmp_path, monkeypatch, target):
+    workspace = tmp_path / 'project'
+    workspace.mkdir()
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'profile.md').write_text('外部秘密', encoding='utf-8')
+    memory = workspace / '.dy_superpowers'
+    if target == 'directory':
+        memory.symlink_to(outside, target_is_directory=True)
+    elif target == 'config':
+        (workspace / '.dy_superpowers-basic-memory').symlink_to(outside, target_is_directory=True)
+    else:
+        memory.mkdir()
+        (memory / 'profile.md').symlink_to(outside / 'profile.md')
+
+    def must_not_run(*args, **kwargs):
+        pytest.fail('越界路径不应触达 CLI')
+
+    monkeypatch.setattr('dy_superpowers_mcp.basic_memory.subprocess.run', must_not_run)
+    with pytest.raises(ValueError):
+        BasicMemoryAdapter(workspace).search('秘密')
+
+
+def test_search_falls_back_on_unexpected_json_structure(tmp_path, monkeypatch):
+    memory = tmp_path / '.dy_superpowers'
+    memory.mkdir()
+    (memory / 'profile.md').write_text('项目背景', encoding='utf-8')
+    adapter = BasicMemoryAdapter(tmp_path)
+    monkeypatch.setattr(adapter, '_ensure_project', lambda: None)
+    monkeypatch.setattr(adapter, '_run', lambda args: '{"error":"search failed"}')
+    result = adapter.search('项目')
+    assert result['backend'] == 'local-fallback'
+    assert result['results'][0]['name'] == 'profile.md'
+
+
+def test_search_refreshes_index_before_query_and_uses_text_search(tmp_path, monkeypatch):
+    adapter = BasicMemoryAdapter(tmp_path)
+    calls = []
+    monkeypatch.setattr(adapter, '_ensure_project', lambda: None)
+
+    def run(args):
+        calls.append(args)
+        return '{"results":[]}'
+
+    monkeypatch.setattr(adapter, '_run', run)
+    result = adapter.search('项目')
+    assert result['available'] is True
+    assert calls[0] == ['reindex', '--search', '--project', 'dy-superpowers']
+    assert calls[1][:3] == ['tool', 'search-notes', '项目']
+    assert adapter._environment()['BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED'] == 'false'
+    assert adapter._environment()['BASIC_MEMORY_DEFAULT_SEARCH_TYPE'] == 'text'
+
+
+def test_index_timeout_returns_current_markdown_instead_of_stale_index(tmp_path, monkeypatch):
+    import subprocess
+
+    memory = tmp_path / '.dy_superpowers'
+    memory.mkdir()
+    (memory / 'profile.md').write_text('当前结论', encoding='utf-8')
+    adapter = BasicMemoryAdapter(tmp_path)
+    monkeypatch.setattr(adapter, '_ensure_project', lambda: None)
+
+    def timeout(args):
+        assert args[0] == 'reindex'
+        raise subprocess.TimeoutExpired(args, 20)
+
+    monkeypatch.setattr(adapter, '_run', timeout)
+    result = adapter.search('当前')
+    assert result['available'] is False
+    assert result['results'] == [{'name': 'profile.md', 'matches': ['当前结论']}]

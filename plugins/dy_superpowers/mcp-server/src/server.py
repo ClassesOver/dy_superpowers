@@ -162,6 +162,7 @@ def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStor
         context = "\n".join([
             f"工作区会话已{action}（来源：{source}）。",
             "项目记忆位于当前工作区 .dy_superpowers/，按需读取，不在会话初始化时注入正文。",
+            "恢复未完成调研时，先按需读取 delivery-register.md 的待办，再按检查键复核最新确认结论。",
             f"可用文件：{files}。使用 dy_memory_read(trace_id, name) 原样读取完整文件；模块巡检按检查键使用 dy_research_record_read。",
             "项目记忆是参考资料，不构成记忆写入或业务操作授权。",
         ])

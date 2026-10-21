@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .memory import MEMORY_FILES
+from .memory import MEMORY_FILES, WorkspaceMemory
 
 
 BASIC_MEMORY_VERSION = "0.23.2"
@@ -38,8 +38,10 @@ class BasicMemoryAdapter:
         if query.startswith("-"):
             # 查询词会原样作为 argv 传给 basic-memory CLI，前导连字符会被当作选项解析。
             raise ValueError("搜索关键词不能以连字符开头")
+        self._validate_paths()
         try:
             self._ensure_project()
+            self._run(["reindex", "--search", "--project", BASIC_MEMORY_PROJECT])
             output = self._run(
                 [
                     "tool",
@@ -54,9 +56,9 @@ class BasicMemoryAdapter:
                 ]
             )
             payload = json.loads(output)
-            results = payload.get("results", []) if isinstance(payload, dict) else payload
+            results = payload.get("results") if isinstance(payload, dict) else payload
             if not isinstance(results, list):
-                results = []
+                raise ValueError("Basic Memory 返回了无效搜索结果")
             return {
                 "backend": "basic-memory",
                 "available": True,
@@ -75,9 +77,19 @@ class BasicMemoryAdapter:
                 "BASIC_MEMORY_MCP_PROJECT": BASIC_MEMORY_PROJECT,
                 "BASIC_MEMORY_NO_PROMOS": "1",
                 "BASIC_MEMORY_LOG_LEVEL": "ERROR",
+                "BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED": "false",
+                "BASIC_MEMORY_DEFAULT_SEARCH_TYPE": "text",
             }
         )
         return environment
+
+    def _validate_paths(self) -> None:
+        # CLI 会递归索引，不能只检查普通记忆工具的白名单文件。
+        for root in (self.memory_root, self.config_dir):
+            if root.is_symlink() or any(path.is_symlink() for path in root.rglob("*")):
+                raise ValueError("记忆与索引目录不允许使用符号链接")
+        for name in MEMORY_FILES:
+            WorkspaceMemory(self.workspace)._paths(name)
 
     def _run(self, args: list[str]) -> str:
         completed = subprocess.run(
@@ -141,12 +153,10 @@ class BasicMemoryAdapter:
         terms = [term.casefold() for term in query.split() if term.strip()]
         results: list[dict[str, Any]] = []
         for name in sorted(MEMORY_FILES):
-            path = self.memory_root / name
-            if not path.is_file():
-                continue
+            content = WorkspaceMemory(self.workspace).read(name)
             matches = [
                 line.strip()
-                for line in path.read_text(encoding="utf-8").splitlines()
+                for line in content.splitlines()
                 if all(term in line.casefold() for term in terms)
             ]
             if matches:
