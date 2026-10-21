@@ -7,6 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
+import server
 
 
 def test_adapter_builds_workspace_scoped_environment_and_search_command(tmp_path, monkeypatch):
@@ -70,7 +71,7 @@ def test_adapter_falls_back_to_workspace_markdown_when_basic_memory_unavailable(
     assert result["results"] == [{"name": "profile.md", "matches": ["项目使用 Odoo 12"]}]
 
 
-def test_adapter_rejects_workspace_escape_and_empty_query(tmp_path):
+def test_adapter_rejects_empty_query_and_pins_memory_root_to_workspace(tmp_path):
     workspace = tmp_path / "project"
     workspace.mkdir()
     adapter = BasicMemoryAdapter(workspace)
@@ -78,5 +79,39 @@ def test_adapter_rejects_workspace_escape_and_empty_query(tmp_path):
     with pytest.raises(ValueError, match="非空"):
         adapter.search(" ")
 
-    escaped = BasicMemoryAdapter(workspace / "child")
-    assert escaped.memory_root == (workspace / "child").resolve() / ".dy_superpowers"
+    scoped = BasicMemoryAdapter(workspace / "child")
+    assert scoped.memory_root == (workspace / "child").resolve() / ".dy_superpowers"
+
+
+def test_adapter_rejects_leading_dash_query_without_spawning_subprocess(tmp_path, monkeypatch):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    adapter = BasicMemoryAdapter(workspace)
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("不应触达 basic-memory CLI")
+
+    monkeypatch.setattr("dy_superpowers_mcp.basic_memory.subprocess.run", must_not_run)
+
+    with pytest.raises(ValueError, match="连字符"):
+        adapter.search("--project=other")
+
+
+def test_memory_search_dispatch_rejects_leading_dash_before_building_adapter(tmp_path, monkeypatch):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
+
+    def must_not_construct(workspace_arg):
+        raise AssertionError("参数校验应先于适配器构造")
+
+    monkeypatch.setattr(server, "BasicMemoryAdapter", must_not_construct)
+
+    result, error = server.execute_tool(
+        "dy_memory_search",
+        {"trace_id": "memory-dash", "query": "--local"},
+        workspace,
+    )
+    assert result is None
+    assert error["code"] == -32602

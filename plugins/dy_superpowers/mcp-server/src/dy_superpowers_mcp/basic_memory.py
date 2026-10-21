@@ -34,13 +34,17 @@ class BasicMemoryAdapter:
     def search(self, query: str) -> dict[str, Any]:
         if not isinstance(query, str) or not query.strip():
             raise ValueError("搜索关键词必须是非空文本")
+        query = query.strip()
+        if query.startswith("-"):
+            # 查询词会原样作为 argv 传给 basic-memory CLI，前导连字符会被当作选项解析。
+            raise ValueError("搜索关键词不能以连字符开头")
         try:
             self._ensure_project()
             output = self._run(
                 [
                     "tool",
                     "search-notes",
-                    query.strip(),
+                    query,
                     "--json",
                     "--local",
                     "--project",
@@ -56,7 +60,7 @@ class BasicMemoryAdapter:
             return {
                 "backend": "basic-memory",
                 "available": True,
-                "version": BASIC_MEMORY_VERSION,
+                "expected_version": BASIC_MEMORY_VERSION,
                 "project": BASIC_MEMORY_PROJECT,
                 "results": results,
             }
@@ -150,7 +154,7 @@ class BasicMemoryAdapter:
         return {
             "backend": "local-fallback",
             "available": False,
-            "version": BASIC_MEMORY_VERSION,
+            "expected_version": BASIC_MEMORY_VERSION,
             "project": BASIC_MEMORY_PROJECT,
             "results": results,
         }

@@ -3,8 +3,9 @@
 .env.*
 !.env.example
 
-# 工作区运行时数据：项目记忆、本地追踪、插件扫描状态
+# 工作区运行时数据：项目记忆、本地追踪、插件扫描状态、Basic Memory 索引
 .dy_superpowers/
+.dy_superpowers-basic-memory/
 .mimosa/
 
 # Python 运行与打包产物

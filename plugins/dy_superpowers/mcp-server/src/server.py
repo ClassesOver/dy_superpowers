@@ -206,7 +206,13 @@ def _dispatch_tool(name: str, arguments: dict, workspace: Path, store: TraceStor
         query = arguments.get("query")
         if not isinstance(query, str) or not query.strip():
             raise ToolRequestError(-32602, "搜索关键词必须是非空文本")
-        result = BasicMemoryAdapter(workspace).search(query)
+        query = query.strip()
+        if query.startswith("-"):
+            raise ToolRequestError(-32602, "搜索关键词不能以连字符开头")
+        try:
+            result = BasicMemoryAdapter(workspace).search(query)
+        except ValueError as exc:
+            raise ToolRequestError(-32602, str(exc)) from exc
         event = {
             "event": "memory.search",
             "operation": "search",

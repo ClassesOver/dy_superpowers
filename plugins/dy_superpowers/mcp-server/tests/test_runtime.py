@@ -389,7 +389,7 @@ def test_memory_search_uses_optional_basic_memory_and_records_status_only(worksp
             return {
                 "backend": "local-fallback",
                 "available": False,
-                "version": "0.23.2",
+                "expected_version": "0.23.2",
                 "project": "dy-superpowers",
                 "results": [{"name": "profile.md", "matches": ["项目使用 Odoo 12"]}],
             }
