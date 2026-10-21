@@ -12,7 +12,7 @@
               "source": "${source}"
             },
             "timeout": 10,
-            "statusMessage": "正在读取当前工作区记忆"
+            "statusMessage": "正在恢复当前工作区记忆索引"
           }
         ]
       }

@@ -326,15 +326,15 @@ def test_trace_read_excludes_its_own_lifecycle_events(workspace):
     assert [event["event"] for event in stored] == ["tool.start", "tool.end"]
 
 
-def test_plugin_mcp_starts_from_project_workspace(workspace, tmp_path, monkeypatch):
+def test_compatibility_server_starts_from_project_workspace(workspace, tmp_path, monkeypatch):
     plugin_root = Path(__file__).parents[2]
     config = json.loads((plugin_root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]["dy-superpowers-odoo"]
     assert "${PLUGIN_ROOT}" in " ".join(config["args"])
     assert config.get("cwd") is None
-    args = [argument.replace("${PLUGIN_ROOT}", str(plugin_root)) for argument in config["args"]]
     monkeypatch.setenv("PLUGIN_ROOT", str(plugin_root))
+    # 禁用 site-packages，单独验证未安装 SDK 时的兼容入口。
     process = subprocess.run(
-        [config["command"], *args],
+        [sys.executable, "-S", str(plugin_root / "mcp-server/src/server.py")],
         cwd=workspace,
         input=json.dumps({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",

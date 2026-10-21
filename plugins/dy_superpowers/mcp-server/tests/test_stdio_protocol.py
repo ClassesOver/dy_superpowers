@@ -4,7 +4,7 @@ import asyncio
 import importlib.util
 import json
 import os
-import sys
+import shutil
 from pathlib import Path
 
 import pytest
@@ -15,13 +15,21 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
-    plugin = Path(__file__).parents[2]
+    source = Path(__file__).parents[2]
+    plugin = tmp_path / 'installed-plugin'
+    shutil.copytree(source, plugin, ignore=shutil.ignore_patterns(
+        '.venv', '.pytest_cache', '__pycache__', '*.egg-info'
+    ))
+    config = json.loads((plugin / '.mcp.json').read_text(encoding='utf-8'))['mcpServers']['dy-superpowers-odoo']
+    assert config['command'] == 'uv'
+    assert '--frozen' in config['args']
+    assert config.get('cwd') is None
     workspace = tmp_path / 'project'
     workspace.mkdir()
     env = {**os.environ, 'OTEL_SDK_DISABLED': 'true', 'CODEX_HOME': str(tmp_path / 'codex')}
     params = StdioServerParameters(
-        command=sys.executable,
-        args=[str(plugin / 'mcp-server/src/server.py')],
+        command=config['command'],
+        args=[arg.replace('${PLUGIN_ROOT}', str(plugin)) for arg in config['args']],
         env=env,
         cwd=str(workspace),
     )
@@ -48,8 +56,9 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
                 assert read.model_dump(by_alias=True)["isError"] is False
                 assert read.content[0].text == '协议测试记忆'
 
-    asyncio.run(asyncio.wait_for(exercise(), timeout=20))
+    asyncio.run(asyncio.wait_for(exercise(), timeout=60))
     assert (workspace / '.dy_superpowers/profile.md').read_text(encoding='utf-8') == '协议测试记忆'
+    assert not (plugin / '.dy_superpowers').exists()
     events = [json.loads(line) for path in (tmp_path / 'codex').rglob('*.jsonl')
               for line in path.read_text(encoding='utf-8').splitlines()]
     assert events

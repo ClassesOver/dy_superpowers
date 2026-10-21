@@ -40,14 +40,14 @@ Hook 边界见 [docs/hooks.md](docs/hooks.md)。
 
 ## 启动插件
 
-安装 MCP 服务端依赖并从插件目录启动：
+先安装 uv 并确保 Codex 启动时可从 PATH 找到它。插件通过 `uv run --frozen --project` 使用随包分发的 `uv.lock` 安装依赖并启动；首次启动需要访问 Python 包源，后续使用本地环境。需要提前准备依赖时，在市场仓库根目录执行：
 
 ```bash
-python3 -m pip install -e plugins/dy_superpowers/mcp-server
-python3 plugins/dy_superpowers/mcp-server/src/server.py
+uv sync --frozen --project plugins/dy_superpowers/mcp-server
+uv run --frozen --project plugins/dy_superpowers/mcp-server python plugins/dy_superpowers/mcp-server/src/server.py
 ```
 
-Codex 通过 `.mcp.json` 的 `${PLUGIN_ROOT}` 路径启动插件代码，进程工作目录维持为当前项目工作区，因此项目记忆始终写入该工作区。服务优先使用 MCP Python SDK 的 stdio 传输；若 SDK 不可用，会运行内置的 stdio JSON-RPC 兼容入口。OpenTelemetry 依赖未安装或 Jaeger 不可达时，外部导出不可用，但本地 trace 和工具调用仍可继续。
+Codex 通过 `.mcp.json` 的 `${PLUGIN_ROOT}` 定位插件和依赖项目，`--project` 不切换进程工作目录，因此项目记忆始终写入当前项目工作区。市场安装本身不安装 Python 依赖；标准启动在插件内创建 `.venv`，使用 MCP Python SDK 的 stdio 传输。直接执行 `server.py` 时仍保留无 SDK 的 JSON-RPC 兼容入口。Jaeger 不可达时，外部导出不可用，但本地 trace 和工具调用仍可继续。
 
 ## 可选：独立遥测服务
 
