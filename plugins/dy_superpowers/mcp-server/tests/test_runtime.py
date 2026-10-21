@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from dy_superpowers_mcp import TraceStore, WorkspaceMemory, redact, validate_plan
 from dy_superpowers_mcp import telemetry, trace as trace_module
+from dy_superpowers_mcp.trace import REDACTED
 from dy_superpowers_mcp.research import write_record
 import server
 from server import handle
@@ -205,12 +206,12 @@ def test_invalid_json_is_reported_without_crashing_server():
 
 def test_trace_redacts_sensitive_fields():
     assert redact({"token": "secret", "nested": {"password": "pw"}}) == {
-        "token": "[REDACTED]",
-        "nested": {"password": "[REDACTED]"},
+        "token": REDACTED,
+        "nested": {"password": REDACTED},
     }
     assert redact({"operation": "Bearer abc123", "source_ref": "api_key=secret"}) == {
-        "operation": "Bearer [REDACTED]",
-        "source_ref": "api_key=[REDACTED]",
+        "operation": f"Bearer {REDACTED}",
+        "source_ref": f"api_key={REDACTED}",
     }
 
 

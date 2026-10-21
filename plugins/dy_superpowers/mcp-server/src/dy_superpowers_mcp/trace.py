@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 SENSITIVE_PARTS = ("password", "passwd", "token", "secret", "api_key", "apikey", "credential")
+REDACTED = "[REDACTED]"
 TRACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 EVENT_FIELDS = {
     "event", "span_id", "parent_span_id", "operation", "tool", "status",
@@ -32,13 +33,13 @@ OTEL_EVENT_FIELDS = {
 def redact(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            key: "[REDACTED]" if any(part in key.lower() for part in SENSITIVE_PARTS) else redact(item)
+            key: REDACTED if any(part in key.lower() for part in SENSITIVE_PARTS) else redact(item)
             for key, item in value.items()
         }
     if isinstance(value, list):
         return [redact(item) for item in value]
     if isinstance(value, str):
-        return SECRET_VALUE_PATTERN.sub(lambda match: f"{match.group(1) or match.group(3)}[REDACTED]", value)
+        return SECRET_VALUE_PATTERN.sub(lambda match: f"{match.group(1) or match.group(3)}{REDACTED}", value)
     return value
 
 
