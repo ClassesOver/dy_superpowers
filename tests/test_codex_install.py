@@ -37,3 +37,39 @@ def test_codex_installs_plugin_from_clean_marketplace(tmp_path):
     inventory = run('list', '--marketplace', 'dy-superpowers')
     assert any(item['name'] == 'dy_superpowers' and item['installed'] and item['enabled']
                for item in inventory['installed'])
+
+
+@pytest.mark.skipif(shutil.which('codex') is None, reason='需要本机 Codex CLI')
+def test_codex_loads_frontmatter_with_its_own_scalar_and_duplicate_rules(tmp_path):
+    codex_home = tmp_path / 'codex'
+    skills_root = codex_home / 'skills'
+    skills_root.mkdir(parents=True)
+    fixtures = {
+        'boolean-scalar': 'name: on\ndescription: UNIQUE_VALID_BOOLEAN_SCALAR\n',
+        'date-scalar': 'name: 2026-10-21\ndescription: UNIQUE_VALID_DATE_SCALAR\n',
+        'duplicate-name': 'name: first\nname: second\ndescription: UNIQUE_DUPLICATE_NAME\n',
+        'duplicate-description': (
+            'name: duplicate-description\ndescription: first\n'
+            'description: UNIQUE_DUPLICATE_DESCRIPTION\n'
+        ),
+    }
+    for directory, frontmatter in fixtures.items():
+        skill_dir = skills_root / directory
+        skill_dir.mkdir()
+        (skill_dir / 'SKILL.md').write_text(
+            f'---\n{frontmatter}---\n# Fixture skill\n', encoding='utf-8')
+
+    home = tmp_path / 'home'
+    home.mkdir()
+    env = {**os.environ, 'CODEX_HOME': str(codex_home), 'HOME': str(home)}
+    result = subprocess.run(
+        ['codex', 'debug', 'prompt-input'], cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    prompt = json.dumps(json.loads(result.stdout), ensure_ascii=False)
+
+    assert 'UNIQUE_VALID_BOOLEAN_SCALAR' in prompt
+    assert 'UNIQUE_VALID_DATE_SCALAR' in prompt
+    assert 'UNIQUE_DUPLICATE_NAME' not in prompt
+    assert 'UNIQUE_DUPLICATE_DESCRIPTION' not in prompt

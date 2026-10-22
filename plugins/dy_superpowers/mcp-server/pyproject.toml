@@ -2,15 +2,21 @@
 name = "dy-superpowers-mcp"
 version = "0.1.0"
 description = "dy_superpowers Codex 插件的工作区级 MCP 运行时"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "mcp[cli]>=1.0.0",
+    "basic-memory==0.23.2",
+    "mcp[cli]>=2,<3",
+    "jsonschema>=4.20,<5",
+    "requests>=2.32,<3",
     "opentelemetry-sdk>=1.44,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.44,<2",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8"]
+test = [
+    "pytest>=8",
+    "pyyaml>=6,<7",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

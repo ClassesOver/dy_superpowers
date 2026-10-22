@@ -10,6 +10,47 @@ from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 import server
 
 
+def test_basic_memory_required_version_is_installed():
+    from importlib.metadata import version
+
+    assert version("basic-memory") == "0.23.2"
+
+
+def test_default_adapter_uses_cli_from_its_python_environment(tmp_path, monkeypatch):
+    monkeypatch.delenv("DY_BASIC_MEMORY_COMMAND", raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "venv/bin/python"))
+    assert BasicMemoryAdapter(tmp_path).command == str(tmp_path / "venv/bin/basic-memory")
+
+
+def test_required_backend_indexes_and_searches_workspace(tmp_path, monkeypatch):
+    monkeypatch.delenv("DY_BASIC_MEMORY_COMMAND", raising=False)
+    memory = tmp_path / ".dy_superpowers"
+    memory.mkdir()
+    (memory / "profile.md").write_text("# 项目背景\n\nmandatorybackendprobe\n", encoding="utf-8")
+
+    result = BasicMemoryAdapter(tmp_path).search("mandatorybackendprobe")
+
+    assert result["backend"] == "basic-memory", result
+    assert result["available"] is True
+    assert result["results"], result
+    assert (tmp_path / ".dy_superpowers-basic-memory/config.json").is_file()
+
+
+@pytest.mark.parametrize('original', [
+    '# 项目背景\n\nimmutablememoryprobe\n',
+    '---\ntitle: 已有项目背景\ntype: note\n---\n\nimmutablememoryprobe\n',
+])
+def test_search_does_not_rewrite_authoritative_markdown(tmp_path, monkeypatch, original):
+    monkeypatch.delenv('DY_BASIC_MEMORY_COMMAND', raising=False)
+    memory = tmp_path / '.dy_superpowers'
+    memory.mkdir()
+    path = memory / 'profile.md'
+    path.write_text(original, encoding='utf-8')
+    result = BasicMemoryAdapter(tmp_path).search('immutablememoryprobe')
+    assert result['backend'] == 'basic-memory' and result['results']
+    assert path.read_bytes() == original.encode('utf-8')
+
+
 def test_adapter_builds_workspace_scoped_environment_and_search_command(tmp_path, monkeypatch):
     workspace = tmp_path / "project"
     workspace.mkdir()
@@ -44,6 +85,29 @@ def test_adapter_builds_workspace_scoped_environment_and_search_command(tmp_path
     )
 
 
+def test_module_search_scans_later_basic_memory_pages(tmp_path, monkeypatch):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    adapter = BasicMemoryAdapter(workspace, command="basic-memory")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[1:3] == ["tool", "search-notes"]:
+            page = int(command[command.index("--page") + 1])
+            rows = ([{"path": "modules/account/research.md", "title": "其他模块"}]
+                    if page == 1 else [{"path": "modules/expense/research.md", "title": "目标模块"}])
+            return type("Completed", (), {"returncode": 0, "stdout": json.dumps({
+                "results": rows, "has_more": page == 1,
+            }), "stderr": ""})()
+        return type("Completed", (), {"returncode": 0, "stdout": "{}", "stderr": ""})()
+
+    monkeypatch.setattr("dy_superpowers_mcp.basic_memory.subprocess.run", fake_run)
+    result = adapter.search("配置", module="expense")
+    assert [row["title"] for row in result["results"]] == ["目标模块"]
+    assert [int(call[call.index("--page") + 1]) for call in calls if "--page" in call] == [1, 2]
+
+
 def test_basic_memory_runtime_directory_is_outside_indexed_memory(tmp_path):
     workspace = tmp_path / "project"
     adapter = BasicMemoryAdapter(workspace)
@@ -69,6 +133,19 @@ def test_adapter_falls_back_to_workspace_markdown_when_basic_memory_unavailable(
     assert result["backend"] == "local-fallback"
     assert result["available"] is False
     assert result["results"] == [{"name": "profile.md", "matches": ["项目使用 Odoo 12"]}]
+
+
+def test_module_scoped_fallback_search_does_not_mix_project_memory(tmp_path, monkeypatch):
+    memory = tmp_path / '.dy_superpowers'
+    module_dir = memory / 'modules' / 'expense'
+    module_dir.mkdir(parents=True)
+    (memory / 'profile.md').write_text('费用项目背景配置', encoding='utf-8')
+    (module_dir / 'research.md').write_text('费用模块配置结论', encoding='utf-8')
+    adapter = BasicMemoryAdapter(tmp_path)
+    monkeypatch.setattr(adapter, '_ensure_project', lambda: (_ for _ in ()).throw(FileNotFoundError()))
+    result = adapter.search('费用', module='expense')
+    assert result['backend'] == 'local-fallback'
+    assert [row['name'] for row in result['results']] == ['modules/expense/research.md']
 
 
 def test_adapter_rejects_empty_query_and_pins_memory_root_to_workspace(tmp_path):

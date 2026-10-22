@@ -11,10 +11,10 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 import server
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
-from dy_superpowers_mcp.memory import WorkspaceMemory
+from dy_superpowers_mcp.memory import WorkspaceMemory, module_memory_path
 from dy_superpowers_mcp.knowledge import module_info
-from dy_superpowers_mcp.odoo_xmlrpc import OdooReadClient, OdooSettings
-from dy_superpowers_mcp.research import read_record, write_record
+from dy_superpowers_mcp.odoo_jsonrpc import OdooReadClient, OdooSettings
+from dy_superpowers_mcp.research import read_record, write_record, _legacy_visible
 from dy_superpowers_mcp.trace import TraceStore, otel_event_attributes, sanitize_trace_event
 
 
@@ -25,20 +25,47 @@ def research_data(**updates):
     return {**data, **updates}
 
 
-def test_module_query_uses_odoo12_dependency_relation():
-    class Proxy:
-        def authenticate(self, *args):
-            return 1
+def test_module_query_uses_odoo12_dependency_relation(monkeypatch):
+    monkeypatch.setenv("DY_ODOO_ALLOWED_ORIGINS", "http://odoo")
+    calls = []
 
-        def execute_kw(self, database, uid, password, model, method, args, kwargs):
+    class Response:
+        def __init__(self, result):
+            self.result = result
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"jsonrpc": "2.0", "id": calls[-1]["json"]["id"], "result": self.result}
+
+    class Session:
+        trust_env = True
+
+        def post(self, url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            params = kwargs["json"]["params"]
+            if params["service"] == "common":
+                return Response(1)
+            model_kwargs = params["args"][6]
             # 标准 Odoo 12 模型字段；拒绝 manifest 中才存在的 depends。
             allowed = {"name", "shortdesc", "latest_version", "state", "dependencies_id"}
-            assert set(kwargs["fields"]) <= allowed
-            return [{"name": "account", "dependencies_id": [7]}]
+            assert set(model_kwargs["fields"]) <= allowed
+            return Response([{"name": "account", "dependencies_id": [7]}])
 
+        def close(self):
+            pass
+
+    session = Session()
     client = OdooReadClient(OdooSettings("http://odoo", "db", "u", "p"),
-                            proxy_factory=lambda *args, **kwargs: Proxy())
+                            session_factory=lambda: session)
     assert client.module_records()[0]["dependencies_id"] == [7]
+    assert len(calls) == 2
+    assert all(call["url"] == "http://odoo/jsonrpc" for call in calls)
+    assert calls[0]["json"]["params"] == {
+        "service": "common", "method": "login", "args": ["db", "u", "p"],
+    }
+    assert calls[1]["json"]["params"]["args"][:3] == ["db", 1, "p"]
 
 
 def test_account_knowledge_distinguishes_posting_from_payment():
@@ -49,15 +76,35 @@ def test_account_knowledge_distinguishes_posting_from_payment():
 
 
 @pytest.mark.parametrize("url", ["http://odoo", "https://odoo"])
-def test_odoo_transport_has_finite_connection_timeout(url):
+def test_odoo_jsonrpc_has_finite_timeout_and_does_not_follow_redirects(url, monkeypatch):
+    monkeypatch.setenv("DY_ODOO_ALLOWED_ORIGINS", url)
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"jsonrpc": "2.0", "id": calls[-1]["json"]["id"], "result": 1}
+
+    class Session:
+        trust_env = True
+
+        def post(self, endpoint, **kwargs):
+            calls.append({"endpoint": endpoint, **kwargs})
+            return Response()
+
+        def close(self):
+            pass
+
+    session = Session()
     client = OdooReadClient(OdooSettings(url, "db", "u", "p"),
-                            proxy_factory=lambda *args, **kwargs: type("Proxy", (), {
-                                "authenticate": lambda *args: 1,
-                                "transport": kwargs.get("transport"),
-                            })())
-    transport = client._object.transport
-    assert transport is not None
-    assert transport.make_connection("odoo").timeout == 20
+                            session_factory=lambda: session)
+    assert session.trust_env is False
+    assert calls[0]["endpoint"] == f"{url}/jsonrpc"
+    assert calls[0]["timeout"] == 20
+    assert calls[0]["allow_redirects"] is False
+    client.close()
 
 
 @pytest.mark.parametrize("config", [[], {"projects": []}, {"projects": None},
@@ -83,7 +130,10 @@ def test_trace_preserves_operation_metadata_without_body():
 
 def test_manual_visible_edit_is_rejected_before_research_use(tmp_path):
     write_record(tmp_path, research_data())
-    path = tmp_path / ".dy_superpowers/module-research.md"
+    path = module_memory_path(tmp_path, "account")
+    current = read_record(tmp_path, "account", "1", "01")
+    current.pop("revision")
+    path.write_text("\n".join(_legacy_visible(current)))
     path.write_text(path.read_text().replace("- 调研结论：按月关闭", "- 调研结论：按年关闭"))
     with pytest.raises(ValueError, match="不一致"):
         read_record(tmp_path, "account", "1", "01")
@@ -182,12 +232,12 @@ def test_scoped_research_is_accessible_through_tool(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     write_record(tmp_path, research_data())
     write_record(tmp_path, research_data(scope="公司B"))
-    result, error = server.execute_tool("dy_research_record_read", {
+    result, error = server.execute_tool("dy_module_memory_read", {
         "trace_id": "scope-read", "module": "account", "check_order": "1", "research_id": "01", "scope": "公司A",
     }, tmp_path)
     assert error is None
-    assert result["scope"] == "公司A"
-    result, error = server.execute_tool("dy_research_record_read", {
+    assert result["records"][0]["scope"] == "公司A"
+    result, error = server.execute_tool("dy_module_memory_read", {
         "trace_id": "scope-ambiguous", "module": "account", "check_order": "1", "research_id": "01",
     }, tmp_path)
     assert result is None

@@ -15,12 +15,13 @@ description: 在巡检 Odoo 12 HRP 费用模块交付、配置、权限、费用
 - 只检查本期交付范围。已安装不等于已配置或已验收；后期、不交付和不适用项不能判为缺失。
 - 不猜测公司的制度、预算、审批、税务或付款口径。缺少依据时标记“待确认/未知”。
 - 默认只读。涉及配置修改、数据写入、安装模块、重跑凭证或生产操作时，先生成计划，经目标级授权后才能执行。
-- 每次 MCP 调用必须带 `trace_id`，并记录开始、范围、检查项、证据读取、补充调研状态、异常、结论和结束事件。trace 只记录调研编号、状态、文件名和工具结果，不记录问题/回答正文、记忆正文或员工个人信息。
-- 项目记忆仅限当前工作区。用 `dy_memory_read` 读取已确认的 `.dy_superpowers/module-research.md` 等允许文件；新结论由 `module-research` skill 在用户确认后写入，不得把模板、推测或未确认回答当成记忆。
+- 每次 MCP 调用必须带 `trace_id`，并记录开始、范围、检查项、证据读取、补充调研状态、异常、结论和结束事件。工具自动追踪允许的记忆/调研正文、搜索词和脱敏查询条件；不记录密码、令牌、常见个人字段值或 Odoo 返回行。未确认问答不手工写入 trace。
+- 每个子项调用记忆、调研或 Odoo 工具时，附带可选 `trace_context`：`skill=expense-inspection`、`module=expense`、矩阵原始 `check_order` 和 `research_id`；已读取确认记录时再附带原样返回的 `scope_id`、`revision`。仅传已知标识，不编造范围或版本；跨轮任务沿用 `trace_id`，详见[运行边界](../../docs/runtime-boundaries.md#链路与业务标签)。
+- 项目记忆仅限当前工作区。用 `dy_module_memory_read` 按检查键读取已确认的模块调研记录；新结论由 `module-research` skill 在用户确认后写入，不得把模板、推测或未确认回答当成记忆。
 
 ## Odoo 证据工具
 
-真实 Odoo 状态需用同一 `trace_id` 的只读工具核验：先用 `dy_odoo_module_list_installed` / `dy_odoo_module_info` 确认模块（模块列表每页最多 100 条，返回满页时必须继续用 offset 翻页，直到取全量后才能下“未安装”结论），再用 `dy_odoo_model_fields` 确认字段，最后用 `dy_odoo_record_search` 定位配置或业务样例，并用 `dy_odoo_record_read` 读取最小必要字段。结果需回链到“检查顺序 + 调研子项编号”，只有证据足以支撑对应验收标准时才可判通过；空结果、权限不足、连接失败或字段含义不明均记为 `未知/未检查/待确认`。
+真实 Odoo 状态需用同一 `trace_id` 的只读工具核验。每次 Odoo 调用都在 `trace_context` 中传递已确认的模块、检查顺序、子项、调研版本、`scope_id` 和环境；再用 `dy_odoo_module_list_installed` / `dy_odoo_module_info` 确认模块（模块列表每页最多 100 条，返回满页时必须继续用 offset 翻页，直到取全量后才能下“未安装”结论），用 `dy_odoo_model_fields` 确认字段，最后用 `dy_odoo_record_search` 定位配置或业务样例，并用 `dy_odoo_record_read` 读取最小必要字段。结果需回链到“检查顺序 + 调研子项编号”，只有证据足以支撑对应验收标准时才可判通过；空结果、权限不足、连接失败或字段含义不明均记为 `未知/未检查/待确认`。
 
 `dy_knowledge_module_info` 和 `dy_knowledge_search` 只用于解释模块、模型和常见流程，不是项目事实来源，也不能覆盖实时 Odoo 返回或用户已确认的调研结论。业务记录正文不写入 trace、记忆或矩阵；trace 仅保留工具、模型、操作、数量、状态及证据引用。
 
@@ -36,7 +37,7 @@ description: 在巡检 Odoo 12 HRP 费用模块交付、配置、权限、费用
 8. **形成结论**：每项只使用 `通过/部分通过/不通过/不适用/待确认/未检查/未知`；将配置问题、资料缺口、业务决策和外部开发需求分开。
 9. **回链交付对象**：把问题、证据和验证结果关联到项目需求、交付物、验收条件和必要的配置计划；不得将项目事实写回插件参考矩阵。不得写入密码、令牌、员工个人信息或生产业务明细。
 
-巡检调用补充调研时必须传递原 `trace_id`、`检查顺序 + 子项编号`、阻塞原因、对应“验收标准（调研后）”及已知事实。调研返回后用 `dy_research_record_read` 携带稳定 `scope_id` 复核记录，只恢复 `confirmed` 子项；`pending` 或 `needs_confirmation` 子项继续保持 `待确认/未检查`，不得因已发起问题而判通过。
+巡检调用补充调研时必须传递原 `trace_id`、`检查顺序 + 子项编号`、阻塞原因、对应“验收标准（调研后）”及已知事实。调研返回后用 `dy_module_memory_read` 携带稳定 `scope_id` 复核并从 `records[0]` 获取记录，只恢复 `confirmed` 子项；`pending` 或 `needs_confirmation` 子项继续保持 `待确认/未检查`，不得因已发起问题而判通过。
 
 ## 检查重点
 
@@ -51,9 +52,9 @@ description: 在巡检 Odoo 12 HRP 费用模块交付、配置、权限、费用
 
 按 [交付记录要求](../../docs/delivery-domain.md) 为每个子项和适用范围记录本次结果，保留调研 `revision` 与 `scope_id`、对应验收标准完整原文、矩阵文件 SHA-256、带时区的验证时间和最小证据引用。跨公司不得共用结论；调研工具报不一致或范围不明确时保持“待确认”，不得绕过校验。
 
-先按 [巡检校验合同](../../docs/inspection-validation.md) 声明本次完整检查范围，调用 `dy_inspection_validate`；遗漏项必须明确记录为未检查或待确认。`valid=false` 时修正记录，不能报告门禁通过；`valid=true` 只代表记录校验通过，还须检查 `gate`。验证时间必须晚于所用调研修订，不能仅替换版本号沿用旧验证。
+先按[巡检校验合同](../../docs/inspection-validation.md)列出完整模块矩阵：纳入项放入 `expected_checks`，范围外子项放入 `excluded_checks` 并说明理由。每个范围内子项都须有一条当前结果记录。调用 `dy_inspection_validate`；`valid=false` 时修正记录，不能报告门禁通过；`valid=true` 只代表记录校验通过，还须检查 `gate`。验证时间须带时区、不得晚于当前时间并晚于所用调研修订；Odoo 证据须引用同一工作区 trace 中该模型的成功读取。
 
-向用户展示报告、校验结果及其限制并获保存确认后，读取 `delivery-register.md`，保留其他内容，用 `dy_memory_write` 将刚读取的完整原文作为 `expected_content` 合并保存；冲突时重新合并并确认。未保存时明确说明结果仅在本次会话。复查新增记录并引用前次记录，不覆盖原结果。调研修订、范围或标准变化后，受影响项先转为待复查；未消除的阻塞不得汇总为通过。
+向用户展示报告和校验限制并获保存确认后，调用 `dy_inspection_report_save`，提供完整报告和 `confirmed=true`，无需生成编号。工具会重新校验，并自动生成含 UTC 时间戳及唯一后缀的报告编号，按日期保存到 `.dy_superpowers/reports/expense/<YYYY-MM-DD>/<report-id>.md`；响应会返回实际编号和路径。使用响应中的模块与报告编号调用 `dy_inspection_report_read` 复核保存内容。调研修订、范围或标准变化后，受影响项先转为待复查；未消除的阻塞不得汇总为通过。
 
 ## 输出合同
 

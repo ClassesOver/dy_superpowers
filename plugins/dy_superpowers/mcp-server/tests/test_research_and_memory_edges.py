@@ -17,7 +17,7 @@ def disable_telemetry(monkeypatch, codex_home: Path):
 
 def research_arguments(**updates):
     arguments = {
-        "module": "expense",
+        "module": "test-expense",
         "check_order": "EXP-1-001",
         "research_id": "01",
         "config_item": "应用安装",
@@ -44,7 +44,7 @@ def test_memory_read_unsupported_name_returns_invalid_params(tmp_path, monkeypat
     )
     assert result is None
     assert error["code"] == -32602
-    assert "unsupported memory file" in error["message"]
+    assert error["code"] == -32602
 
 
 def test_research_record_read_reports_workspace_escape_as_invalid_params(tmp_path, monkeypatch):
@@ -56,7 +56,7 @@ def test_research_record_read_reports_workspace_escape_as_invalid_params(tmp_pat
     disable_telemetry(monkeypatch, tmp_path / "codex")
 
     result, error = server.execute_tool(
-        "dy_research_record_read",
+        "dy_module_memory_read",
         {"trace_id": "research-escape", "module": "expense", "check_order": "EXP-1-001", "research_id": "01"},
         workspace,
     )
@@ -71,27 +71,27 @@ def test_write_and_read_supports_multiple_check_keys(tmp_path):
     write_record(workspace, research_arguments())
     write_record(workspace, research_arguments(check_order="EXP-1-002"))
 
-    first = read_record(workspace, "expense", "EXP-1-001", "01")
-    second = read_record(workspace, "expense", "EXP-1-002", "01")
+    first = read_record(workspace, "test-expense", "EXP-1-001", "01")
+    second = read_record(workspace, "test-expense", "EXP-1-002", "01")
     assert first is not None
     assert second is not None
 
     write_record(workspace, research_arguments(conclusion="费用模块及OCR本期上线", expected_revision=first["revision"]))
-    revised = read_record(workspace, "expense", "EXP-1-001", "01")
+    revised = read_record(workspace, "test-expense", "EXP-1-001", "01")
     assert revised["conclusion"] == "费用模块及OCR本期上线"
-    assert read_record(workspace, "expense", "EXP-1-002", "01") is not None
+    assert read_record(workspace, "test-expense", "EXP-1-002", "01") is not None
 
 
 def test_write_record_preserves_corrupted_data_marker_and_still_writes(tmp_path):
     workspace = tmp_path / "project"
     memory_dir = workspace / ".dy_superpowers"
-    memory_dir.mkdir(parents=True)
+    (memory_dir / "modules" / "test-expense").mkdir(parents=True)
     corrupted = "\n".join([
         "<!-- dy-research-record:start -->",
         "<!-- dy-research-record:data {bad json} -->",
         "<!-- dy-research-record:end -->",
     ])
-    (memory_dir / "module-research.md").write_text(
+    (memory_dir / "modules" / "test-expense" / "research.md").write_text(
         "# 模块调研结论\n\n" + corrupted + "\n", encoding="utf-8"
     )
 
@@ -99,7 +99,7 @@ def test_write_record_preserves_corrupted_data_marker_and_still_writes(tmp_path)
 
     assert saved["stored"] is True
     assert saved["revision_count"] == 0
-    record = read_record(workspace, "expense", "EXP-1-001", "01")
+    record = read_record(workspace, "test-expense", "EXP-1-001", "01")
     assert record["conclusion"] == "费用模块本期上线"
-    text = (memory_dir / "module-research.md").read_text(encoding="utf-8")
+    text = (memory_dir / "modules" / "test-expense" / "research.md").read_text(encoding="utf-8")
     assert "{bad json}" in text

@@ -1,13 +1,20 @@
 """使用官方 MCP 客户端验证插件服务的实际 stdio 协议。"""
 
 import asyncio
+import hashlib
 import importlib.util
 import json
 import os
 import shutil
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 
 import pytest
+
+
+# 占位凭据值：测试断言该值绝不进入本地 trace 或 OTLP 载荷。
+ODOO_TEST_PLACEHOLDER = 'value-must-not-leak-2605'
 
 
 @pytest.mark.skipif(importlib.util.find_spec('mcp') is None, reason='需要 MCP SDK')
@@ -27,7 +34,19 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
     assert config.get('cwd') is None
     workspace = tmp_path / 'project'
     workspace.mkdir()
-    env = {**os.environ, 'OTEL_SDK_DISABLED': 'true', 'CODEX_HOME': str(tmp_path / 'codex')}
+    class UnavailableOdooHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_error(503)
+
+        def log_message(self, format, *args):
+            pass
+
+    rpc = ThreadingHTTPServer(('127.0.0.1', 0), UnavailableOdooHandler)
+    rpc_thread = Thread(target=rpc.serve_forever, daemon=True)
+    rpc_thread.start()
+    origin = f'http://127.0.0.1:{rpc.server_address[1]}'
+    env = {**os.environ, 'ODOO_URL': origin, 'DY_ODOO_ALLOWED_ORIGINS': origin,
+           'ODOO_DB': 'db', 'ODOO_USERNAME': 'u', 'ODOO_PASSWORD': 'p', 'OTEL_SDK_DISABLED': 'true', 'CODEX_HOME': str(tmp_path / 'codex')}
     params = StdioServerParameters(
         command=config['command'],
         args=[arg.replace('${PLUGIN_ROOT}', str(plugin)) for arg in config['args']],
@@ -43,8 +62,8 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
                 assert 'dy_memory_search' in {tool.name for tool in tools.tools}
                 schemas = {tool.name: tool.model_dump(by_alias=True)["inputSchema"] for tool in tools.tools}
                 assert 'expected_content' in schemas['dy_memory_write']['properties']
-                assert 'scope' in schemas['dy_research_record_read']['properties']
-                assert 'scope_id' in schemas['dy_research_record_read']['properties']
+                assert 'scope' in schemas['dy_module_memory_read']['properties']
+                assert 'scope_id' in schemas['dy_module_memory_read']['properties']
                 assert 'expected_revision' in schemas['dy_research_record_write']['properties']
                 assert 'dy_inspection_validate' in schemas
                 initialized = await session.call_tool(
@@ -62,11 +81,15 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
                 })
                 assert read.model_dump(by_alias=True)["isError"] is False
                 assert read.content[0].text == '协议测试记忆'
-                with pytest.raises(MCPError, match='冲突'):
+                with pytest.raises(MCPError, match='冲突') as conflict:
                     await session.call_tool('dy_memory_write', {
                         'trace_id': 'protocol-conflict', 'name': 'profile.md',
                         'content': '过时覆盖', 'confirmed': True, 'expected_content': '旧快照',
                     })
+                assert conflict.value.code == -32602
+                with pytest.raises(MCPError) as unavailable:
+                    await session.call_tool('dy_odoo_record_search', {'trace_id': 'rpc-failure', 'model': 'account.move'})
+                assert unavailable.value.code == -32603
                 updated = await session.call_tool('dy_memory_write', {
                     'trace_id': 'protocol-update', 'name': 'profile.md',
                     'content': '协议测试记忆（修订）', 'confirmed': True,
@@ -80,10 +103,10 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
                     'confirmed_at': '2026-10-21',
                 }
                 await session.call_tool('dy_research_record_write', research_args)
-                research = await session.call_tool('dy_research_record_read', {
+                research = await session.call_tool('dy_module_memory_read', {
                     'trace_id': 'protocol-research-read', 'module': 'expense', 'check_order': '1', 'research_id': '01',
                 })
-                current = json.loads(research.content[0].text)
+                current = json.loads(research.content[0].text)['records'][0]
                 with pytest.raises(MCPError, match='expected_revision'):
                     await session.call_tool('dy_research_record_write', research_args)
                 retired = await session.call_tool('dy_research_record_write', {
@@ -96,11 +119,168 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
                 })
                 assert json.loads(validation.content[0].text)['valid'] is False
 
-    asyncio.run(asyncio.wait_for(exercise(), timeout=60))
+    try:
+        asyncio.run(asyncio.wait_for(exercise(), timeout=60))
+    finally:
+        rpc.shutdown()
+        rpc.server_close()
+        rpc_thread.join(timeout=2)
     assert (workspace / '.dy_superpowers/profile.md').read_text(encoding='utf-8') == '协议测试记忆（修订）'
     assert not (plugin / '.dy_superpowers').exists()
     events = [json.loads(line) for path in (tmp_path / 'codex').rglob('*.jsonl')
               for line in path.read_text(encoding='utf-8').splitlines()]
     assert events
-    assert '协议测试记忆' not in json.dumps(events, ensure_ascii=False)
-    assert '协议调研确认' not in json.dumps(events, ensure_ascii=False)
+    assert '协议测试记忆' in json.dumps(events, ensure_ascii=False)
+    assert '协议调研确认' in json.dumps(events, ensure_ascii=False)
+
+
+@pytest.mark.skipif(importlib.util.find_spec('mcp') is None, reason='需要 MCP SDK')
+def test_stdio_odoo_read_succeeds_over_jsonrpc_and_records_redacted_trace(tmp_path):
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    source = Path(__file__).parents[2]
+    plugin = tmp_path / 'installed-plugin'
+    shutil.copytree(source, plugin, ignore=shutil.ignore_patterns(
+        '.venv', '.pytest_cache', '__pycache__', '*.egg-info'
+    ))
+    config = json.loads((plugin / '.mcp.json').read_text(encoding='utf-8'))['mcpServers']['dy-superpowers-odoo']
+    workspace = tmp_path / 'project'
+    workspace.mkdir()
+    rpc_calls = []
+    otlp_payloads = []
+
+    class OdooHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            request_body = self.rfile.read(int(self.headers['Content-Length']))
+            if self.path == '/v1/traces':
+                otlp_payloads.append(request_body)
+                response = b''
+                content_type = 'application/x-protobuf'
+            else:
+                request = json.loads(request_body)
+                params = request['params']
+                if self.path == '/jsonrpc' and params['service'] == 'common' and params['method'] == 'login':
+                    rpc_calls.append(request)
+                    result = 17
+                elif self.path == '/jsonrpc' and params['service'] == 'object' and params['method'] == 'execute_kw':
+                    rpc_calls.append(request)
+                    result = [{'name': 'dy_fin_acc', 'state': 'installed'}]
+                else:
+                    self.send_error(404)
+                    return
+                response = json.dumps({
+                    'jsonrpc': '2.0', 'id': request['id'], 'result': result,
+                }).encode()
+                content_type = 'application/json'
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+        def log_message(self, format, *args):
+            pass
+
+    rpc = ThreadingHTTPServer(('127.0.0.1', 0), OdooHandler)
+    rpc_thread = Thread(target=rpc.serve_forever, daemon=True)
+    rpc_thread.start()
+    origin = f'http://127.0.0.1:{rpc.server_port}'
+    codex_home = tmp_path / 'codex'
+    env = {
+        **os.environ,
+        'ODOO_URL': origin,
+        'DY_ODOO_ALLOWED_ORIGINS': origin,
+        'ODOO_DB': 'test-db',
+        'ODOO_USERNAME': 'consultant',
+        'ODOO_PASSWORD': ODOO_TEST_PLACEHOLDER,
+        'DY_OTLP_ALLOWED_ORIGINS': origin,
+        'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT': f'{origin}/v1/traces',
+        'OTEL_BSP_SCHEDULE_DELAY': '100',
+        'OTEL_BSP_EXPORT_TIMEOUT': '1000',
+        'CODEX_HOME': str(codex_home),
+    }
+    env.pop('VIRTUAL_ENV', None)
+    params = StdioServerParameters(
+        command=config['command'],
+        args=[arg.replace('${PLUGIN_ROOT}', str(plugin)) for arg in config['args']],
+        env=env,
+        cwd=str(workspace),
+    )
+
+    async def exercise():
+        async with stdio_client(params) as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                result = await session.call_tool('dy_odoo_module_list_installed', {
+                    'trace_id': 'odoo-success', 'offset': 0,
+                })
+                assert result.model_dump(by_alias=True)['isError'] is False
+                assert json.loads(result.content[0].text) == [
+                    {'name': 'dy_fin_acc', 'state': 'installed'},
+                ]
+                trace = await session.call_tool('dy_trace_read', {'trace_id': 'odoo-success'})
+                events = json.loads(trace.content[0].text)
+                event = next(event for event in events if event.get('operation') == 'module_list_installed')
+                assert event['workspace_id'] == hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()[:16]
+                assert event['result_count'] == 1
+                assert event['limit'] == 100
+                assert ODOO_TEST_PLACEHOLDER not in json.dumps(events)
+                searched = await session.call_tool('dy_odoo_record_search', {
+                    'trace_id': 'odoo-domain-success', 'model': 'res.partner',
+                    'args': [[['state', '=', 'posted']]],
+                    'kwargs': {'fields': ['name'], 'limit': 10, 'offset': 3},
+                })
+                assert searched.model_dump(by_alias=True)['isError'] is False
+                query_trace = await session.call_tool('dy_trace_read', {'trace_id': 'odoo-domain-success'})
+                query_events = json.loads(query_trace.content[0].text)
+                query_event = next(event for event in query_events if event.get('event') == 'odoo.read')
+                assert json.loads(query_event['domain']) == [['state', '=', 'posted']]
+                memory_body = '可追踪的工作区记忆内容'
+                written = await session.call_tool('dy_memory_write', {
+                    'trace_id': 'memory-content-success', 'name': 'profile.md',
+                    'content': memory_body, 'confirmed': True,
+                })
+                assert written.model_dump(by_alias=True)['isError'] is False
+                read = await session.call_tool('dy_memory_read', {
+                    'trace_id': 'memory-content-success', 'name': 'profile.md',
+                })
+                assert read.content[0].text == memory_body
+
+    try:
+        asyncio.run(asyncio.wait_for(exercise(), timeout=60))
+    finally:
+        rpc.shutdown()
+        rpc.server_close()
+        rpc_thread.join(timeout=2)
+
+    assert len(rpc_calls) == 3
+    assert all(call['jsonrpc'] == '2.0' and call['method'] == 'call' for call in rpc_calls)
+    assert [call['params']['service'] for call in rpc_calls] == ['common', 'object', 'object']
+    assert rpc_calls[0]['params']['method'] == 'login'
+    assert rpc_calls[0]['params']['args'] == ['test-db', 'consultant', ODOO_TEST_PLACEHOLDER]
+    object_call = rpc_calls[1]['params']
+    assert object_call['method'] == 'execute_kw'
+    assert object_call['args'][:5] == ['test-db', 17, ODOO_TEST_PLACEHOLDER, 'ir.module.module', 'search_read']
+    assert object_call['args'][5] == [[['state', '=', 'installed']]]
+    assert object_call['args'][6] == {
+        'fields': ['name', 'shortdesc', 'latest_version', 'state', 'dependencies_id'],
+        'limit': 100,
+        'offset': 0,
+    }
+    search_call = rpc_calls[2]['params']['args']
+    assert search_call[3:5] == ['res.partner', 'search_read']
+    assert search_call[5] == [[['state', '=', 'posted']]]
+    assert otlp_payloads
+    otlp_data = b''.join(otlp_payloads)
+    assert b'dy_odoo_module_list_installed' in otlp_data
+    assert b'odoo.module.list.installed' in otlp_data
+    assert b'dy.workflow_id' in otlp_data
+    assert b'dy.span_role' in otlp_data
+    assert b'module_list_installed' in otlp_data
+    assert b'dy.workspace_id' in otlp_data
+    assert hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()[:16].encode() in otlp_data
+    assert b'dy.domain_term_count' in otlp_data
+    assert b'posted' in otlp_data
+    assert '可追踪的工作区记忆内容'.encode() in otlp_data
+    assert ODOO_TEST_PLACEHOLDER.encode() not in otlp_data

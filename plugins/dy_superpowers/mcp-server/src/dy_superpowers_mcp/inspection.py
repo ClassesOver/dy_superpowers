@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .research import read_record
+from .trace import TraceStore
 
 KEY_FIELDS = ("module", "check_order", "research_id", "scope_id", "environment")
 RESULTS = {"通过", "部分通过", "不通过", "不适用", "待确认", "未检查", "未知"}
@@ -62,6 +63,10 @@ def validate_inspection(workspace: Path, report: object) -> dict:
     if not isinstance(records, list):
         error("records", "巡检记录必须是列表")
         records = []
+    excluded = report.get("excluded_checks", [])
+    if not isinstance(excluded, list):
+        error("excluded_checks", "范围外检查项必须是列表")
+        excluded = []
     expected_keys = set()
     for index, item in enumerate(expected):
         current = key(item, f"expected_checks[{index}]")
@@ -69,6 +74,31 @@ def validate_inspection(workspace: Path, report: object) -> dict:
             error(f"expected_checks[{index}]", "预期检查范围重复")
         if current:
             expected_keys.add(current)
+    excluded_keys = set()
+    scopes = {}
+    for index, item in enumerate(expected):
+        current = key(item, f"expected_checks[{index}]")
+        if current:
+            scopes.setdefault((current[0], current[3], current[4]), set()).add((current[1], current[2]))
+    for index, item in enumerate(excluded):
+        path = f"excluded_checks[{index}]"
+        current = key(item, path)
+        if current is None:
+            continue
+        if current in excluded_keys or current in expected_keys:
+            error(path, "范围外检查项重复或同时出现在预期范围中")
+        excluded_keys.add(current)
+        if not isinstance(item.get("reason"), str) or not item["reason"].strip():
+            error(f"{path}.reason", "范围外检查项必须说明排除理由")
+        scopes.setdefault((current[0], current[3], current[4]), set()).add((current[1], current[2]))
+    for scope, declared in scopes.items():
+        try:
+            _, standards = _matrix(scope[0])
+            matrix_keys = set(standards)
+            if declared != matrix_keys:
+                error("expected_checks", f"模块 {scope[0]} 的声明范围未完整覆盖矩阵；缺项必须作为 excluded_checks 明确说明")
+        except (ValueError, OSError):
+            error("expected_checks", f"模块 {scope[0]} 的巡检矩阵不可用")
     seen = set()
     record_ids = set()
     for index, record in enumerate(records):
@@ -95,6 +125,8 @@ def validate_inspection(workspace: Path, report: object) -> dict:
                 verified_at = None
         except (ValueError, AttributeError):
             error(f"{path}.verified_at", "验证时间必须使用 ISO 8601 格式")
+        if verified_at is not None and verified_at.astimezone(timezone.utc) > datetime.now(timezone.utc):
+            error(f"{path}.verified_at", "验证时间不能晚于当前时间")
         result = record.get("result")
         if not isinstance(result, str) or result not in RESULTS:
             error(f"{path}.result", "巡检结果不属于允许状态")
@@ -113,8 +145,38 @@ def validate_inspection(workspace: Path, report: object) -> dict:
             error(f"{path}.module", "模块矩阵不可用")
         if result in DEFINITIVE:
             evidence = record.get("evidence_refs")
-            if not isinstance(evidence, list) or not evidence or any(not isinstance(ref, str) or not ref.strip() for ref in evidence):
+            if not isinstance(evidence, list) or not evidence:
                 error(f"{path}.evidence_refs", "明确结论必须提供最小证据引用")
+            else:
+                for evidence_index, evidence_ref in enumerate(evidence):
+                    evidence_path = f"{path}.evidence_refs[{evidence_index}]"
+                    if not isinstance(evidence_ref, dict) or evidence_ref.get("kind") not in {"odoo", "document", "memory", "manual"} or not isinstance(evidence_ref.get("reference"), str) or not evidence_ref["reference"].strip():
+                        error(evidence_path, "证据引用必须包含合法 kind 和非空 reference")
+                    elif evidence_ref["kind"] == "odoo":
+                        trace_id = evidence_ref.get("trace_id")
+                        model = evidence_ref.get("model")
+                        if not isinstance(trace_id, str) or not isinstance(model, str) or not model.strip():
+                            error(evidence_path, "Odoo 证据必须包含 trace_id 和 model")
+                        else:
+                            events = TraceStore(workspace).read(trace_id)
+                            reads = [event for event in events
+                                     if event.get("event") == "odoo.read" and event.get("status") == "ok"
+                                     and event.get("tool") in {"dy_odoo_record_search", "dy_odoo_record_read",
+                                                               "dy_odoo_module_info", "dy_odoo_module_list_installed"}
+                                     and event.get("model") == model
+                                     and event.get("operation") in {"search_read", "record_read", "module_info", "module_list_installed"}]
+                            expected_context = {"module": record["module"], "check_order": record["check_order"],
+                                                "research_id": record["research_id"], "scope_id": record["scope_id"],
+                                                "revision": record.get("research_revision"),
+                                                "environment": record.get("environment")}
+                            reads = [event for event in reads
+                                     if isinstance(event.get("trace_context"), dict)
+                                     and all(event["trace_context"].get(key) == value
+                                             for key, value in expected_context.items())]
+                            completed = {(event.get("span_id"), event.get("tool")) for event in events
+                                         if event.get("event") == "tool.end" and event.get("status") == "ok"}
+                            if not any((event.get("span_id"), event.get("tool")) in completed for event in reads):
+                                error(evidence_path, "trace_id 中没有对应模型的成功 Odoo 读取事件")
         if result in DEFINITIVE or record.get("research_revision"):
             try:
                 research = read_record(workspace, record["module"], record["check_order"], record["research_id"], scope_id=record["scope_id"])

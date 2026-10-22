@@ -1,29 +1,13 @@
-"""受限的 Odoo 12 XML-RPC 只读适配器。"""
+"""受限的 Odoo 12 JSON-RPC 只读适配器。"""
 
 from __future__ import annotations
 
 import os
-import xmlrpc.client
 from dataclasses import dataclass
+from threading import RLock
 from typing import Any
 
-
-class TimeoutTransport(xmlrpc.client.Transport):
-    """对 HTTP 连接和套接字读取设置超时。"""
-
-    def make_connection(self, host):
-        connection = super().make_connection(host)
-        connection.timeout = 20
-        return connection
-
-
-class TimeoutSafeTransport(xmlrpc.client.SafeTransport):
-    """保持 HTTPS 证书校验，并设置相同超时。"""
-
-    def make_connection(self, host):
-        connection = super().make_connection(host)
-        connection.timeout = 20
-        return connection
+from .endpoints import validate_endpoint
 
 
 class OdooConfigurationError(ValueError):
@@ -41,12 +25,20 @@ class OdooSettings:
     username: str
     password: str
 
+    def __post_init__(self):
+        try:
+            validate_endpoint(self.url, "DY_ODOO_ALLOWED_ORIGINS")
+        except ValueError as exc:
+            raise OdooConfigurationError(str(exc)) from exc
+
     @classmethod
     def from_environment(cls) -> "OdooSettings":
         # 环境变量名 = 字段名大写加 ODOO_ 前缀（database 特例为 ODOO_DB）。
         names = {"url": "ODOO_URL", "database": "ODOO_DB"}
         names.update({field: f"ODOO_{field.upper()}" for field in ("username", "password")})
-        values = {field: os.environ.get(env_name, "").strip() for field, env_name in names.items()}
+        values = {field: os.environ.get(env_name, "") for field, env_name in names.items()}
+        for field in ("url", "database", "username"):
+            values[field] = values[field].strip()
         missing = [env_name for field, env_name in names.items() if not values[field]]
         if missing:
             raise OdooConfigurationError("缺少 Odoo 连接配置: " + ", ".join(missing))
@@ -56,30 +48,74 @@ class OdooSettings:
 class OdooReadClient:
     """只暴露 search_read，连接参数来自环境变量。"""
 
-    def __init__(self, settings: OdooSettings, proxy_factory=xmlrpc.client.ServerProxy) -> None:
+    def __init__(self, settings: OdooSettings, session_factory=None) -> None:
         base = settings.url.rstrip("/")
         self.settings = settings
-        transport = TimeoutSafeTransport if base.startswith("https://") else TimeoutTransport
-        self._common = proxy_factory(f"{base}/xmlrpc/2/common", allow_none=True, transport=transport())
-        self._object = proxy_factory(f"{base}/xmlrpc/2/object", allow_none=True, transport=transport())
+        self._rpc_url = f"{base}/jsonrpc"
+        if session_factory is None:
+            import requests
+
+            session_factory = requests.Session
+        self._session = session_factory()
+        self._session.trust_env = False
+        self._lock = RLock()
+        self._request_id = 0
         try:
-            self.uid = self._common.authenticate(settings.database, settings.username, settings.password, {})
-        except Exception as exc:  # xmlrpc.client.Fault and transport errors are intentionally redacted
+            self.uid = self._rpc("common", "login", [settings.database, settings.username, settings.password])
+        except Exception as exc:
+            self.close()
             raise OdooRPCError("Odoo 认证失败") from exc
-        if not isinstance(self.uid, int) or self.uid <= 0:
+        if not isinstance(self.uid, int) or isinstance(self.uid, bool) or self.uid <= 0:
+            self.close()
             raise OdooRPCError("Odoo 认证失败")
+
+    def close(self):
+        self._session.close()
+
+    def _rpc(self, service: str, method: str, args: list[Any]) -> Any:
+        with self._lock:
+            self._request_id += 1
+            request_id = self._request_id
+            request = {
+                "jsonrpc": "2.0",
+                "method": "call",
+                "params": {"service": service, "method": method, "args": args},
+                "id": request_id,
+            }
+            try:
+                response = self._session.post(
+                    self._rpc_url,
+                    json=request,
+                    timeout=20,
+                    allow_redirects=False,
+                )
+                response.raise_for_status()
+                payload = response.json()
+            except Exception as exc:
+                raise OdooRPCError("Odoo JSON-RPC 请求失败") from exc
+            if (not isinstance(payload, dict) or payload.get("jsonrpc") != "2.0"
+                    or payload.get("id") != request_id):
+                raise OdooRPCError("Odoo JSON-RPC 返回格式无效")
+            if "error" in payload:
+                raise OdooRPCError("Odoo JSON-RPC 调用失败")
+            if "result" not in payload:
+                raise OdooRPCError("Odoo JSON-RPC 返回格式无效")
+            return payload["result"]
+
+    def _execute_kw(self, model: str, method: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
+        return self._rpc("object", "execute_kw", [
+            self.settings.database,
+            self.uid,
+            self.settings.password,
+            model,
+            method,
+            args,
+            kwargs,
+        ])
 
     def search_read(self, model: str, domain: list[Any], fields: list[str], limit: int, offset: int = 0) -> list[dict[str, Any]]:
         try:
-            result = self._object.execute_kw(
-                self.settings.database,
-                self.uid,
-                self.settings.password,
-                model,
-                "search_read",
-                [domain],
-                {"fields": fields, "limit": limit, "offset": offset},
-            )
+            result = self._execute_kw(model, "search_read", [domain], {"fields": fields, "limit": limit, "offset": offset})
         except Exception as exc:
             raise OdooRPCError("Odoo 只读请求失败") from exc
         if not isinstance(result, list):
@@ -91,7 +127,7 @@ class OdooReadClient:
 
     def fields_get(self, model: str) -> dict[str, Any]:
         try:
-            result = self._object.execute_kw(self.settings.database, self.uid, self.settings.password, model, "fields_get", [], {"attributes": ["string", "type", "required", "readonly", "relation", "store"]})
+            result = self._execute_kw(model, "fields_get", [], {"attributes": ["string", "type", "required", "readonly", "relation", "store"]})
         except Exception as exc:
             raise OdooRPCError("Odoo 字段元数据读取失败") from exc
         if not isinstance(result, dict):
@@ -100,8 +136,10 @@ class OdooReadClient:
 
     def module_records(self, module: str | None = None, installed_only: bool = False, offset: int = 0) -> list[dict[str, Any]]:
         domain: list[Any] = []
-        if module:
-            domain.append(["name", "=", module])
+        if module is not None:
+            if not isinstance(module, str) or not module.strip():
+                raise OdooConfigurationError("module 必须是非空模块名")
+            domain.append(["name", "=", module.strip()])
         if installed_only:
             domain.append(["state", "=", "installed"])
         if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
@@ -112,7 +150,7 @@ class OdooReadClient:
 def validate_read_arguments(arguments: dict[str, Any]) -> tuple[str, list[Any], list[str], int, int]:
     method = arguments.get("method", "search_read")
     if method != "search_read":
-        raise OdooConfigurationError("dy_odoo_read 仅支持 read-only 方法 search_read")
+        raise OdooConfigurationError("仅支持 search_read 只读查询")
     model = arguments.get("model")
     if not isinstance(model, str) or not model or len(model) > 128 or any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789_." for ch in model):
         raise OdooConfigurationError("model 必须是合法的 Odoo 模型名")

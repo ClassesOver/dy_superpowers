@@ -11,3 +11,17 @@ codex plugin marketplace add <仓库路径>
 运行前安装 uv 并确保 Codex 可从 PATH 找到它。插件首次启动按 `uv.lock` 准备 Python 依赖，需要可用包源；详细说明见 [插件启动说明](plugins/dy_superpowers/README.md)。
 
 catalog 中的插件 ID 为 `dy_superpowers`。遥测 collector 在 `telemetry/` 下单独运行，不属于插件包；MCP 服务随插件位于 `plugins/dy_superpowers/mcp-server/`，由插件 `.mcp.json` 注册。
+
+安装插件后，`.mcp.json` 会自动为插件 MCP 进程配置本机 OTLP/HTTP 端点 `http://127.0.0.1:33049/v1/traces`，且遥测范围固定为本插件。Collector 不可达不会阻断插件；如需远程端点，可用 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 和 `DY_OTLP_ALLOWED_ORIGINS` 覆盖并授权。
+
+## 插件校验
+
+安装 Codex CLI 和 uv 后，在仓库根目录运行：
+
+```bash
+bash scripts/validate-plugin.sh
+```
+
+这是仓库提供的校验入口，调用 pytest 和官方 Codex CLI；依赖由 `uv.lock` 固定。它解析 MCP/hooks 配置、检查插件内部引用与技能入口，并在临时 `CODEX_HOME` 中执行市场注册、插件安装及启用状态检查。随后检查 hook 与工具注册的契约，并在临时工作区启动 MCP，验证握手、工具发现、记忆和调研读写。测试使用模拟 Odoo，不访问真实业务环境或修改日常 Codex 配置。缺少 `codex` 或 `uv` 时立即失败。
+
+已核对 Codex CLI `0.163.0` 和官方公开的 [plugin-creator](https://github.com/openai/skills/tree/main/skills/.system/plugin-creator)：CLI 没有 `plugin validate` 子命令，该技能包也没有 `validate_plugin.py`。本仓库采用官方 CLI 的实际安装流程验证兼容性，不依赖不存在的脚本。此检查覆盖配置引用、市场安装、hook 契约和 MCP 协议冒烟，不代表真实 Odoo 环境或 Codex 会话 hook 的完整联调验收；插件能力说明见 [OpenAI 官方文档](https://developers.openai.com/codex/plugins/)。

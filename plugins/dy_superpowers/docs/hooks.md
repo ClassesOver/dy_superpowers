@@ -4,7 +4,7 @@
 
 插件通过 `.codex-plugin/plugin.json` 声明 `hooks/hooks.json`，在 Codex `SessionStart` 调用同一插件内 MCP 服务的 `dy_session_initialize`。Codex 提供的会话 ID 用作 trace ID，来源字段用于区分启动、恢复、清空、压缩和 fork。
 
-初始化工具只返回当前工作区记忆索引和读取指引，不读取或注入记忆正文，也不创建 `.dy_superpowers/`。需要项目背景、偏好、决策或交付台账时，按需调用 `dy_memory_read(trace_id, name)` 读取完整原文；模块巡检按检查键调用 `dy_research_record_read`，避免将整份调研记忆无差别加入上下文。MCP 记忆读取没有插件设置的字符截断上限。
+初始化工具只返回当前工作区记忆索引和读取指引，不读取或注入记忆正文，也不创建 `.dy_superpowers/`。需要项目背景、偏好、决策或交付台账时，按需调用 `dy_memory_read(trace_id, name)` 读取完整原文；模块巡检调用 `dy_module_memory_read`，按检查键读取时从 `records[0]` 获取记录，避免把整份调研历史加入上下文。MCP 记忆读取没有插件设置的字符截断上限。
 
 注入内容是项目背景，不构成记忆写入、Odoo 操作或其他业务动作的授权。Codex hook 信任策略仍适用；启用 hook 后，MCP 服务进程会在会话初始化时启动。
 
@@ -21,7 +21,7 @@ MCP 工具调用经过统一运行时：
   -> tool.end
 ```
 
-工具校验 trace ID、参数、记忆文件白名单及记忆写入确认状态。工作区记忆读取和 SessionStart 仅追加操作元数据到 trace，包含操作类型、来源和文件名，不记录记忆正文。模块调研问答、员工信息和业务明细也不写入 trace。
+工具校验 trace ID、参数、记忆文件白名单及记忆写入确认状态。每个 span 和本地事件都带稳定的 `workspace_id`；工具生命周期记录状态、耗时和错误类别。记忆读取/写入记录 Markdown 正文，搜索记录搜索词与返回摘要，调研读取/写入记录对应记录内容；Odoo 搜索记录 domain 条件和值，不记录返回行。密码、令牌及常见个人字段值脱敏，正文单条上限为 64 KiB。
 
 外部 OpenTelemetry 不可达时，插件继续使用本地 JSONL trace；遥测后端可用性不是 MCP 工具成功的前置条件。
 

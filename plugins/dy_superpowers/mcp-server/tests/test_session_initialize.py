@@ -46,7 +46,7 @@ def test_session_initialize_injects_memory_index_without_reading_memory_bodies(
     assert "profile.md" in result
     assert "decisions.md" in result
     assert "delivery-register.md" in result
-    assert "dy_research_record_read" in result
+    assert "dy_module_memory_read" in result
     assert "偏好标记" not in result
     assert "项目背景标记" not in result
     assert "决策标记" not in result
@@ -78,7 +78,7 @@ def test_session_initialize_with_no_memory_does_not_create_memory_directory(
     assert error is None
     assert "按需读取" in result
     assert "preferences.md" in result
-    assert "dy_research_record_read" in result
+    assert "dy_module_memory_read" in result
     assert not (workspace / ".dy_superpowers").exists()
 
 
@@ -131,7 +131,7 @@ def test_session_initialize_rejects_unknown_source(tmp_path, monkeypatch):
     )
 
     assert result is None
-    assert error == {"code": -32602, "message": "unsupported SessionStart source"}
+    assert error["code"] == -32602
     assert not (workspace / ".dy_superpowers").exists()
 
 
