@@ -1,13 +1,10 @@
 """记忆读取错误码与调研记录损坏标记容错的边界测试。"""
-import sys
 from pathlib import Path
-
-
-PLUGIN_ROOT = Path(__file__).parents[2]
-sys.path.insert(0, str(PLUGIN_ROOT / "mcp-server/src"))
 
 import server
 from dy_superpowers_mcp.research import read_record, write_record
+
+PLUGIN_ROOT = Path(__file__).parents[2]
 
 
 def disable_telemetry(monkeypatch, codex_home: Path):

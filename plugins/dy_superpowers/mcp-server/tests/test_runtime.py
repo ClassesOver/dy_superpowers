@@ -7,13 +7,11 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
-
-from dy_superpowers_mcp import TraceStore, WorkspaceMemory, redact, validate_plan
-from dy_superpowers_mcp import telemetry, trace as trace_module
-from dy_superpowers_mcp.trace import REDACTED
-from dy_superpowers_mcp.research import write_record
 import server
+from dy_superpowers_mcp import TraceStore, WorkspaceMemory, redact, telemetry, validate_plan
+from dy_superpowers_mcp import trace as trace_module
+from dy_superpowers_mcp.research import write_record
+from dy_superpowers_mcp.trace import REDACTED
 from server import handle
 
 

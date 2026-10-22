@@ -1,12 +1,9 @@
 """dy_odoo_module_list_installed 翻页与参数校验的边界测试。"""
-import sys
 from pathlib import Path
 
+import server
 
 PLUGIN_ROOT = Path(__file__).parents[2]
-sys.path.insert(0, str(PLUGIN_ROOT / "mcp-server/src"))
-
-import server
 
 
 def disable_telemetry(monkeypatch, codex_home: Path):

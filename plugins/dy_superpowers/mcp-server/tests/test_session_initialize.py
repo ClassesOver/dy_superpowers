@@ -1,12 +1,9 @@
 import json
-import sys
 from pathlib import Path
 
+import server
 
 PLUGIN_ROOT = Path(__file__).parents[2]
-sys.path.insert(0, str(PLUGIN_ROOT / "mcp-server/src"))
-
-import server
 
 
 def disable_telemetry(monkeypatch, codex_home: Path):

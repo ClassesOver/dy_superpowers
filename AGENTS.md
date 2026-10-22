@@ -18,12 +18,15 @@
 
 - 使用中文编写新增文档、skill 和用户可见文本。
 - 新功能先写 pytest 测试；不要新增 `unittest` 测试。`plugins/dy_superpowers/mcp-server/tests/test_runtime.py` 是迁移前的既有测试，除非专门安排测试迁移，不要复制其风格到新测试。
-- MCP 测试：`PYTHONPATH=... python3 -m pytest -q plugins/dy_superpowers/mcp-server/tests`。
-- 市场布局测试：`python3 -m pytest -q tests`。
-- 完成前运行 `git diff --check` 和插件 validator。
+- MCP 测试：`uv run --frozen --project plugins/dy_superpowers/mcp-server --extra test python -m pytest -q plugins/dy_superpowers/mcp-server/tests`。
+- 市场布局测试：`uv run --frozen --project plugins/dy_superpowers/mcp-server --extra test python -m pytest -q tests`。
+- 静态检查：`uvx ruff check plugins/dy_superpowers/mcp-server`（配置在插件 `pyproject.toml`）。
+- 修改依赖后运行 `uv lock --project plugins/dy_superpowers/mcp-server` 并提交 `uv.lock`；运行时依赖保持最小，测试专用依赖放入 `test` extra。
+- 新增 MCP 工具只在 `server.py` 的 `REGISTRY` 中声明一次；版本号以 `dy_superpowers_mcp.__version__` 为准，并与 `plugin.json`、`pyproject.toml` 保持一致。
+- 完成前运行 `git diff --check` 和插件 validator；CI（`.github/workflows/ci.yml`）会执行上述检查。
 
 ## 安全边界
 
-- Odoo 工具默认只读，不新增任意 RPC、SQL 或写操作。
+- Odoo 工具默认只读，通过 JSON-RPC 访问（XML-RPC 已弃用），不新增任意 RPC、SQL 或写操作；客户端只读方法白名单为 `search_read`、`fields_get`。
 - 记忆只属于当前工作区 `.dy_superpowers/`；调研写入必须有用户确认。
 - trace 不得包含密码、令牌、员工个人信息、业务正文或记忆正文。

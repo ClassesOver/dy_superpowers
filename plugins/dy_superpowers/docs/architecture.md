@@ -10,4 +10,4 @@ MCP 服务端提供工作区记忆、调研记录、计划校验、Odoo 12 只�
 
 Codex `SessionStart` 通过插件声明的 MCP hook 调用 `dy_session_initialize`，返回工作区记忆索引，不读取或注入记忆正文。Agent 按需使用 `dy_memory_read` 读取完整项目记忆，巡检 skill 按检查键读取调研记录。hook 失败只影响恢复提示，不改变记忆写入确认和 Odoo 只读边界。
 
-本地操作追踪默认启用，写入 Codex 用户数据目录下按工作区散列隔离的 JSONL 文件。OpenTelemetry OTLP 导出默认启用，默认指向本机 Jaeger `http://127.0.0.1:33049/v1/traces`；标准环境变量可覆盖 collector。`OTEL_SDK_DISABLED=true` 可关闭外部导出，不影响本地追踪和插件工具。Basic Memory 作为现有 MCP 内部的可选搜索后端接入，细节见 [memory.md](memory.md)。Odoo 当前仅开放受限 XML-RPC 只读查询；配置写入、SQL 和代码生成不属于当前运行时能力。
+本地操作追踪默认启用，写入 Codex 用户数据目录下按工作区散列隔离的 JSONL 文件。OpenTelemetry OTLP 导出默认启用，默认指向本机 Jaeger `http://127.0.0.1:33049/v1/traces`；标准环境变量可覆盖 collector。`OTEL_SDK_DISABLED=true` 可关闭外部导出，不影响本地追踪和插件工具。Basic Memory 作为现有 MCP 内部的可选搜索后端接入，细节见 [memory.md](memory.md)。Odoo 当前仅开放受限 JSON-RPC 只读查询（客户端内置只读方法白名单，默认 15 秒超时）；配置写入、SQL 和代码生成不属于当前运行时能力。

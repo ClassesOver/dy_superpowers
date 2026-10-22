@@ -1,5 +1,6 @@
 """HRP/Odoo 项目的本地模块知识索引。"""
 from __future__ import annotations
+
 from typing import Any
 
 MODULES: dict[str, dict[str, Any]] = {

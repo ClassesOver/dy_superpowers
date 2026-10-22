@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    env:
+      PROJECT: plugins/dy_superpowers/mcp-server
+      OTEL_SDK_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: 校验锁文件
+        run: uv lock --check --project "$PROJECT"
+      - name: 静态检查
+        run: uvx ruff check "$PROJECT"
+      - name: MCP 测试
+        run: uv run --frozen --project "$PROJECT" --extra test python -m pytest -q "$PROJECT/tests"
+      - name: 市场布局测试
+        run: uv run --frozen --project "$PROJECT" --extra test python -m pytest -q tests
+      - name: 空白字符检查
+        run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD

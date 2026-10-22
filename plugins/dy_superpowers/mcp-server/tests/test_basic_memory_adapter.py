@@ -1,13 +1,9 @@
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
-
-from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 import server
+from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 
 
 def test_adapter_builds_workspace_scoped_environment_and_search_command(tmp_path, monkeypatch):

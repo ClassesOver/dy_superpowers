@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -9,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from .memory import MEMORY_FILES, WorkspaceMemory
-
 
 BASIC_MEMORY_VERSION = "0.23.2"
 BASIC_MEMORY_PROJECT = "dy-superpowers"
@@ -41,7 +41,7 @@ class BasicMemoryAdapter:
         self._validate_paths()
         try:
             self._ensure_project()
-            self._run(["reindex", "--search", "--project", BASIC_MEMORY_PROJECT])
+            self._refresh_index()
             output = self._run(
                 [
                     "tool",
@@ -68,6 +68,29 @@ class BasicMemoryAdapter:
             }
         except (FileNotFoundError, OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
             return self._local_fallback(query.strip())
+
+    def _memory_fingerprint(self) -> str:
+        # CLI 递归索引整个记忆目录，指纹覆盖其中所有 Markdown 的路径、大小和修改时间。
+        digest = hashlib.sha256()
+        if self.memory_root.is_dir():
+            for path in sorted(self.memory_root.rglob("*.md")):
+                stat = path.stat()
+                digest.update(f"{path.relative_to(self.memory_root)}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode())
+        return digest.hexdigest()
+
+    def _refresh_index(self) -> None:
+        """记忆文件未变化时复用索引；变化或状态缺失时重新索引，避免返回过期结果。"""
+        state_file = self.config_dir / "index-state.json"
+        fingerprint = self._memory_fingerprint()
+        try:
+            if json.loads(state_file.read_text(encoding="utf-8")).get("fingerprint") == fingerprint:
+                return
+        except (OSError, ValueError, AttributeError):
+            pass
+        self._run(["reindex", "--search", "--project", BASIC_MEMORY_PROJECT])
+        # 指纹取自重新索引之前，期间若有写入，下次搜索仍会重新索引。
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps({"fingerprint": fingerprint}), encoding="utf-8")
 
     def _environment(self) -> dict[str, str]:
         environment = os.environ.copy()

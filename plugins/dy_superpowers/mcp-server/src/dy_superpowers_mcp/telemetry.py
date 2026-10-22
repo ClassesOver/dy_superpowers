@@ -6,10 +6,11 @@ import atexit
 import hashlib
 import os
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
+from . import __version__
 from .trace import otel_event_attributes
 
 _provider = None
@@ -46,7 +47,7 @@ def initialize_telemetry() -> bool:
         return False
 
     try:
-        _provider = TracerProvider(resource=Resource.create({"service.name": "dy_superpowers", "service.version": "0.1.0"}))
+        _provider = TracerProvider(resource=Resource.create({"service.name": "dy_superpowers", "service.version": __version__}))
         _provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_traces_endpoint())))
         trace.set_tracer_provider(_provider)
         _tracer = trace.get_tracer("dy_superpowers")

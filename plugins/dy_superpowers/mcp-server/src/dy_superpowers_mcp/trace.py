@@ -6,7 +6,8 @@ import hashlib
 import json
 import os
 import re
-from datetime import datetime, timezone
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -84,7 +85,7 @@ class TraceStore:
             raise ValueError("trace_id must contain 1-128 letters, digits, underscores, or hyphens")
         self.directory.mkdir(parents=True, exist_ok=True)
         safe_event = sanitize_trace_event(event)
-        record = redact({**safe_event, "trace_id": trace_id, "timestamp": datetime.now(timezone.utc).isoformat()})
+        record = redact({**safe_event, "trace_id": trace_id, "timestamp": datetime.now(UTC).isoformat()})
         path = self.directory / f"{trace_id}.jsonl"
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=True, sort_keys=True) + "\n")
@@ -98,3 +99,18 @@ class TraceStore:
             return []
         with path.open(encoding="utf-8") as handle:
             return [json.loads(line) for line in handle if line.strip()]
+
+    def prune(self, max_age_days: float) -> int:
+        """删除当前工作区超过保留期的 trace 文件，返回删除数量；max_age_days <= 0 表示不清理。"""
+        if max_age_days <= 0 or not self.directory.is_dir():
+            return 0
+        cutoff = time.time() - max_age_days * 86400
+        removed = 0
+        for path in self.directory.glob("*.jsonl"):
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed += 1
+            except OSError:
+                continue
+        return removed

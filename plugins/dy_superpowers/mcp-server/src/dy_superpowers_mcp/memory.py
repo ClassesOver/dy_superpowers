@@ -1,5 +1,11 @@
 """Workspace-scoped project memory for dy_superpowers."""
 
+from __future__ import annotations
+
+import os
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 MEMORY_FILES = {
@@ -12,6 +18,40 @@ MEMORY_FILES = {
 }
 
 WRITABLE_MEMORY_FILES = MEMORY_FILES - {"module-research.md"}
+
+
+@contextmanager
+def file_lock(path: Path) -> Iterator[None]:
+    """Serialize read-modify-write updates across threads and processes."""
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.touch(exist_ok=True)
+    handle = lock_path.open("r+", encoding="utf-8")
+    try:
+        try:
+            import fcntl
+        except ImportError:  # pragma: no cover - supported deployment is Linux/macOS
+            yield
+        else:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
+
+
+def atomic_write(path: Path, content: str) -> None:
+    """Write through a temporary file so readers never see a partial file."""
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+        temporary = Path(handle.name)
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 class WorkspaceMemory:
@@ -45,5 +85,6 @@ class WorkspaceMemory:
             raise ValueError("module-research.md must be updated through the research record tools")
         directory, path = self._paths(name)
         directory.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        with file_lock(path):
+            atomic_write(path, content)
         return path

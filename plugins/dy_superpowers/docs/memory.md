@@ -17,7 +17,7 @@ Codex `SessionStart` 在启动、恢复、清空、压缩和 fork 时调用 `dy_
 
 不得跨工作区读取、复制或合并这些文件。密码、令牌、员工个人信息和生产业务明细不得写入记忆。trace 仅保存记忆工具的操作状态和文件名，不记录记忆正文。
 
-Basic Memory `0.23.2` 是可选的本地 Markdown 索引后端。它由现有 `dy-superpowers-odoo` MCP 进程按需调用 CLI，不注册第二个 MCP Server，也不改变 Codex 的插件入口。每个工作区使用项目名 `dy-superpowers`，项目路径固定为当前工作区 `.dy_superpowers/`；Basic Memory 配置和数据库放在工作区隐藏兄弟目录 `.dy_superpowers-basic-memory/`，避免被自身索引。可用时 `dy_memory_search` 返回 Basic Memory 结果；命令缺失、超时、返回非法 JSON 或索引失败时回退本地 Markdown 关键词搜索，插件功能不被外部依赖阻断。
+Basic Memory `0.23.2` 是可选的本地 Markdown 索引后端。它由现有 `dy-superpowers-odoo` MCP 进程按需调用 CLI，不注册第二个 MCP Server，也不改变 Codex 的插件入口。每个工作区使用项目名 `dy-superpowers`，项目路径固定为当前工作区 `.dy_superpowers/`；Basic Memory 配置和数据库放在工作区隐藏兄弟目录 `.dy_superpowers-basic-memory/`，避免被自身索引。索引仅在记忆 Markdown 的路径、大小或修改时间变化时重建，指纹保存在 `.dy_superpowers-basic-memory/index-state.json`。可用时 `dy_memory_search` 返回 Basic Memory 结果；命令缺失、超时、返回非法 JSON 或索引失败时回退本地 Markdown 关键词搜索，插件功能不被外部依赖阻断。
 
 安装可选 CLI：
 

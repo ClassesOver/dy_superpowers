@@ -3,14 +3,32 @@ name = "dy-superpowers-mcp"
 version = "0.1.0"
 description = "dy_superpowers Codex 插件的工作区级 MCP 运行时"
 requires-python = ">=3.11"
+# 运行时只依赖 OpenTelemetry；MCP 协议由 src/server.py 直接实现，Odoo 通过标准库 JSON-RPC 访问。
 dependencies = [
-    "mcp[cli]>=1.0.0",
     "opentelemetry-sdk>=1.44,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.44,<2",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8"]
+# 官方 MCP 客户端仅用于 stdio 协议兼容性测试。
+test = ["pytest>=8", "mcp>=2.3,<3"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 160
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "BLE"]
+ignore = ["E501", "E731"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dy_superpowers_mcp", "server"]
+
+[tool.ruff.lint.per-file-ignores]
+# 遥测失败不能阻断插件本地功能，这里刻意吞掉所有异常并只输出类型名。
+"src/dy_superpowers_mcp/telemetry.py" = ["BLE001"]

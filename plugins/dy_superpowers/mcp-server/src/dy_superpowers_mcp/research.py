@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from .memory import WorkspaceMemory, atomic_write, file_lock
 
 _BLOCK = re.compile(r"^<!-- dy-research-record:start -->\n.*?^<!-- dy-research-record:data (\{[^\n]*\}) -->\n^<!-- dy-research-record:end -->$", re.MULTILINE | re.DOTALL)
 _REQUIRED = ("module", "check_order", "research_id", "config_item", "conclusion", "scope", "confirmed_by", "confirmed_at")
@@ -33,39 +32,6 @@ def _load(path: Path) -> list[dict[str, Any]]:
         if isinstance(value, dict):
             records.append(value)
     return records
-
-
-@contextmanager
-def _record_lock(path: Path):
-    """Serialize read-modify-write updates across threads and processes."""
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    lock_path.touch(exist_ok=True)
-    handle = lock_path.open("r+", encoding="utf-8")
-    try:
-        try:
-            import fcntl
-        except ImportError:  # pragma: no cover - supported deployment is Linux
-            yield
-        else:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    finally:
-        handle.close()
-
-
-def _atomic_write(path: Path, content: str) -> None:
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-        handle.write(content)
-        handle.flush()
-        os.fsync(handle.fileno())
-        temporary = Path(handle.name)
-    try:
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def write_record(workspace: str | Path, data: dict[str, Any]) -> dict[str, Any]:
@@ -94,12 +60,10 @@ def write_record(workspace: str | Path, data: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("调研记录不得包含密码、令牌或敏感个人信息")
     if any(re.search(r"(?<!\d)(?:1[3-9]\d{9}|\d{17}[\dXx])(?!\d)", str(data.get(name, ""))) for name in ("conclusion", "scope", "evidence_ref")):
         raise ValueError("调研记录不得包含敏感个人信息")
-    from .memory import WorkspaceMemory
-
     memory = WorkspaceMemory(workspace)
     directory, path = memory._paths("module-research.md")
     directory.mkdir(parents=True, exist_ok=True)
-    with _record_lock(path):
+    with file_lock(path):
         records = _load(path)
         current_key = _key(data)
         prior = next((item for item in reversed(records) if _key(item) == current_key), None)
@@ -109,7 +73,7 @@ def write_record(workspace: str | Path, data: dict[str, Any]) -> dict[str, Any]:
             old["status"] = "superseded"
             history.append(old)
         record = {key: data[key] for key in _REQUIRED}
-        record.update({"evidence_ref": data.get("evidence_ref", ""), "status": "confirmed", "history": history, "updated_at": datetime.now(timezone.utc).isoformat()})
+        record.update({"evidence_ref": data.get("evidence_ref", ""), "status": "confirmed", "history": history, "updated_at": datetime.now(UTC).isoformat()})
         existing = memory.read("module-research.md") or "# 模块调研结论\n"
         def remove_current(match):
             try:
@@ -118,14 +82,12 @@ def write_record(workspace: str | Path, data: dict[str, Any]) -> dict[str, Any]:
                 return match.group(0)
             return "" if _key(value) == current_key else match.group(0)
         existing = _BLOCK.sub(remove_current, existing)
-        visible = [f"<!-- dy-research-record:start -->", f"## {record['module']} / {record['config_item']}（{record['check_order']} + {record['research_id']}）", f"- 调研结论：{record['conclusion']}", f"- 适用范围：{record['scope']}", f"- 验证依据：{record['evidence_ref'] or '待补充'}", f"- 确认人/日期：{record['confirmed_by']} / {record['confirmed_at']}", f"- 状态：{record['status']}", "<!-- dy-research-record:data " + json.dumps(record, ensure_ascii=False, separators=(",", ":")) + " -->", "<!-- dy-research-record:end -->"]
-        _atomic_write(path, existing.rstrip() + "\n\n" + "\n".join(visible) + "\n")
+        visible = ["<!-- dy-research-record:start -->", f"## {record['module']} / {record['config_item']}（{record['check_order']} + {record['research_id']}）", f"- 调研结论：{record['conclusion']}", f"- 适用范围：{record['scope']}", f"- 验证依据：{record['evidence_ref'] or '待补充'}", f"- 确认人/日期：{record['confirmed_by']} / {record['confirmed_at']}", f"- 状态：{record['status']}", "<!-- dy-research-record:data " + json.dumps(record, ensure_ascii=False, separators=(",", ":")) + " -->", "<!-- dy-research-record:end -->"]
+        atomic_write(path, existing.rstrip() + "\n\n" + "\n".join(visible) + "\n")
         return {"stored": True, "check_key": current_key, "revision_count": len(history)}
 
 
 def read_record(workspace: str | Path, module: str, check_order: str, research_id: str) -> dict[str, Any] | None:
     target = f"{module}:{check_order}:{research_id}"
-    from .memory import WorkspaceMemory
-
     _, path = WorkspaceMemory(workspace)._paths("module-research.md")
     return next((item for item in reversed(_load(path)) if _key(item) == target), None)
