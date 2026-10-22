@@ -188,7 +188,7 @@ def test_odoo_read_rejects_non_read_method(workspace):
 def test_odoo_read_requires_connection_environment(workspace):
     result = call_tool(
         "dy_odoo_read",
-        {"trace_id": "odoo-2", "model": "res.partner", "method": "search_read", "args": [[]], "kwargs": {"limit": 1}},
+        {"trace_id": "odoo-2", "model": "res.partner", "method": "search_read", "args": [[]], "kwargs": {"fields": ["name"], "limit": 1}},
         workspace,
     )
     assert "error" in result

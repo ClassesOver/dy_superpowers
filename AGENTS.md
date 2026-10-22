@@ -27,6 +27,6 @@
 
 ## 安全边界
 
-- Odoo 工具默认只读，通过 JSON-RPC 访问（XML-RPC 已弃用），不新增任意 RPC、SQL 或写操作；客户端只读方法白名单为 `search_read`、`fields_get`。
+- Odoo 工具默认只读，通过 JSON-RPC 访问（XML-RPC 已弃用），不新增任意 RPC、SQL 或写操作；客户端只读方法白名单为 `search_read`、`fields_get`；记录查询必须显式列出字段，不要放宽 `odoo_jsonrpc.py` 中的敏感字段拦截。
 - 记忆只属于当前工作区 `.dy_superpowers/`；调研写入必须有用户确认。
 - trace 不得包含密码、令牌、员工个人信息、业务正文或记忆正文。

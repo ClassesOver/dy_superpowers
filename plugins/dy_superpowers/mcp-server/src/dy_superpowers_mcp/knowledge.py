@@ -1,18 +1,17 @@
-"""HRP/Odoo 项目的本地模块知识索引。"""
+"""HRP/Odoo 项目的本地模块知识索引；知识内容维护在 data/modules.json。"""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
-MODULES: dict[str, dict[str, Any]] = {
-    "account": {"name": "财务会计", "aliases": ["财务", "会计", "总账", "发票"], "models": ["account.move", "account.move.line", "account.journal", "account.account"], "workflow": "草稿 → 已过账 → 已支付/已核销", "depends": ["base"]},
-    "hr_expense": {"name": "费用", "aliases": ["费用", "报销", "差旅"], "models": ["hr.expense", "hr.expense.sheet"], "workflow": "草稿 → 提交 → 审批 → 已支付", "depends": ["hr", "account"]},
-    "hr": {"name": "人力资源", "aliases": ["人事", "员工", "HR"], "models": ["hr.employee", "hr.department", "hr.job"], "workflow": "员工主数据维护", "depends": ["base"]},
-    "purchase": {"name": "采购", "aliases": ["采购", "供应商", "采购订单"], "models": ["purchase.order", "purchase.order.line"], "workflow": "询价单 → 采购订单 → 收货 → 开票", "depends": ["account"]},
-}
+MODULES: dict[str, dict[str, Any]] = json.loads((Path(__file__).parent / "data" / "modules.json").read_text(encoding="utf-8"))
+
 
 def module_info(module: str) -> dict[str, Any]:
     info = MODULES.get(module)
     return {"found": False, "module": module, "available": sorted(MODULES)} if info is None else {"found": True, "module": module, **info}
+
 
 def search(query: str) -> dict[str, Any]:
     query = query.strip().lower()

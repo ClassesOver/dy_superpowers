@@ -34,7 +34,7 @@ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:33049/v1/traces \
 
 当前通过受限的 Odoo 12 JSON-RPC（Odoo 内置 `/jsonrpc` 端点）只读工具连接真实 Odoo，不执行远程写操作、SQL 或附加模块代码生成。已加入模块多轮调研技能 `module-research`，以及两个 Odoo 12 HRP 交付巡检技能：`expense-inspection` 和 `general-ledger-inspection`；后续技能继续通过 `skills/<name>/SKILL.md` 加入，确定性的 Odoo 能力通过 MCP 工具加入。
 
-Odoo 请求默认超时 15 秒，可用 `DY_ODOO_TIMEOUT`（秒，1–600 以内）覆盖；`ODOO_URL` 只接受 http/https 地址。Odoo 只读工具包括 `dy_odoo_record_search`、`dy_odoo_record_read`、`dy_odoo_model_fields`、`dy_odoo_module_list_installed` 和 `dy_odoo_module_info`。`dy_knowledge_module_info` 与 `dy_knowledge_search` 只提供本地模块解释，不替代实时账套事实或项目调研结论。
+Odoo 请求默认超时 15 秒，可用 `DY_ODOO_TIMEOUT`（秒，1–600 以内）覆盖；`ODOO_URL` 只接受 http/https 地址。`search_read` 与记录读取必须显式列出 `fields`；凭据、证件号、银行账户、生日、私人信息字段，以及人员相关模型（员工、用户、联系人、应聘者）上的通讯和住址字段，无论出现在返回字段还是 domain 条件中都会被拒绝。Odoo 只读工具包括 `dy_odoo_record_search`、`dy_odoo_record_read`、`dy_odoo_model_fields`、`dy_odoo_module_list_installed` 和 `dy_odoo_module_info`。`dy_knowledge_module_info` 与 `dy_knowledge_search` 的知识内容维护在 `mcp-server/src/dy_superpowers_mcp/data/modules.json`，只提供本地模块解释，不替代实时账套事实或项目调研结论。
 
 Hook 边界见 [docs/hooks.md](docs/hooks.md)。
 

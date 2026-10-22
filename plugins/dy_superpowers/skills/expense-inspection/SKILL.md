@@ -20,7 +20,7 @@ description: 在巡检 Odoo 12 HRP 费用模块交付、配置、权限、费用
 
 ## Odoo 证据工具
 
-真实 Odoo 状态需用同一 `trace_id` 的只读工具核验：先用 `dy_odoo_module_list_installed` / `dy_odoo_module_info` 确认模块（模块列表每页最多 100 条，返回满页时必须继续用 offset 翻页，直到取全量后才能下“未安装”结论），再用 `dy_odoo_model_fields` 确认字段，最后用 `dy_odoo_record_search` 定位配置或业务样例，并用 `dy_odoo_record_read` 读取最小必要字段。结果需回链到“检查顺序 + 调研子项编号”，只有证据足以支撑对应验收标准时才可判通过；空结果、权限不足、连接失败或字段含义不明均记为 `未知/未检查/待确认`。
+真实 Odoo 状态需用同一 `trace_id` 的只读工具核验：先用 `dy_odoo_module_list_installed` / `dy_odoo_module_info` 确认模块（模块列表每页最多 100 条，返回满页时必须继续用 offset 翻页，直到取全量后才能下“未安装”结论），再用 `dy_odoo_model_fields` 确认字段，最后用 `dy_odoo_record_search` 定位配置或业务样例，并用 `dy_odoo_record_read` 读取最小必要字段。结果需回链到“检查顺序 + 调研子项编号”，只有证据足以支撑对应验收标准时才可判通过；空结果、权限不足、连接失败或字段含义不明均记为 `未知/未检查/待确认`。 调用 `dy_odoo_record_search` / `dy_odoo_record_read` 时必须显式列出 `fields`；工具拒绝的敏感字段（如证件号、银行账户、员工通讯信息）不得绕道读取，相关子项记为 `未检查` 并说明原因。
 
 `dy_knowledge_module_info` 和 `dy_knowledge_search` 只用于解释模块、模型和常见流程，不是项目事实来源，也不能覆盖实时 Odoo 返回或用户已确认的调研结论。业务记录正文不写入 trace、记忆或矩阵；trace 仅保留工具、模型、操作、数量、状态及证据引用。
 

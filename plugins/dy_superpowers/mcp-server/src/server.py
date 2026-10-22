@@ -28,6 +28,7 @@ from dy_superpowers_mcp.odoo_jsonrpc import (
     OdooReadClient,
     OdooRPCError,
     OdooSettings,
+    check_field_access,
     validate_model,
     validate_module,
     validate_read_arguments,
@@ -253,13 +254,12 @@ def odoo_search_read(call: ToolCall) -> ToolResult:
 
 
 def odoo_record_read(call: ToolCall) -> ToolResult:
-    ids, fields = call.arguments.get("ids"), call.arguments.get("fields", [])
+    ids, fields = call.arguments.get("ids"), call.arguments.get("fields")
     if not isinstance(ids, list) or not ids or len(ids) > 100 or not all(isinstance(item, int) and not isinstance(item, bool) and item > 0 for item in ids):
         raise invalid("ids 必须是 1 到 100 个正整数")
-    if not isinstance(fields, list) or not all(isinstance(item, str) and item for item in fields):
-        raise invalid("fields 必须是字符串列表")
     with odoo_errors():
         model = validate_model(call.arguments.get("model"))
+        check_field_access(model, fields, [])
         result = _odoo_client().read_records(model, ids, fields)
     return result, _odoo_event("record_read", model, result)
 
@@ -339,17 +339,17 @@ REGISTRY: dict[str, Tool] = {
         memory_write,
     ),
     "dy_odoo_read": Tool(
-        "连接 Odoo 12 并执行受限的 search_read 只读查询。",
+        "连接 Odoo 12 并执行受限的 search_read 只读查询；kwargs.fields 必须显式列出字段，敏感字段会被拒绝。",
         _schema(["model"], **SEARCH_READ_PROPERTIES),
         odoo_search_read,
     ),
     "dy_odoo_record_search": Tool(
-        "按 Odoo Forge 的记录搜索命名执行受限的 search_read 只读查询。",
+        "按 Odoo Forge 的记录搜索命名执行受限的 search_read 只读查询；kwargs.fields 必须显式列出字段，敏感字段会被拒绝。",
         _schema(["model"], **SEARCH_READ_PROPERTIES),
         odoo_search_read,
     ),
     "dy_odoo_record_read": Tool(
-        "读取指定 Odoo 记录的受限只读数据，最多 100 条。",
+        "读取指定 Odoo 记录的受限只读数据，最多 100 条；必须显式列出最小必要字段，敏感字段会被拒绝。",
         _schema(["model", "ids"], model=STRING, ids={"type": "array"}, fields={"type": "array"}),
         odoo_record_read,
     ),

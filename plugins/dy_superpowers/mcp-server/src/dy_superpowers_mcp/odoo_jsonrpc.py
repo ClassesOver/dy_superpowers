@@ -18,6 +18,11 @@ MAX_TIMEOUT_SECONDS = 600
 READ_METHODS = frozenset({"search_read", "fields_get"})
 _MODEL_NAME = re.compile(r"^[a-z0-9_.]{1,128}$")
 _MODULE_NAME = re.compile(r"^[a-z0-9_]{1,128}$")
+# 任何模型上都禁止读取或筛选的字段：凭据、证件号、银行账户、生日和私人信息。
+_SENSITIVE_FIELD = re.compile(r"password|passwd|token|secret|api_key|totp|signature|identification_id|passport_id|ssnid|sinid|bank_account|acc_number|birthday|place_of_birth|^private_")
+# 人员相关模型上的通讯与住址字段；经关联字段跳转到其他模型时同样拦截。
+_PERSON_MODELS = frozenset({"hr.employee", "hr.employee.public", "hr.applicant", "res.users", "res.partner"})
+_CONTACT_FIELD = re.compile(r"(^|_)(email|phone|mobile|street2?|zip|city)(_|$)")
 
 # (endpoint, JSON-RPC 请求体, 超时秒数) -> 解码后的 JSON-RPC 响应
 Transport = Callable[[str, dict[str, Any], float], Any]
@@ -83,6 +88,29 @@ def validate_model(model: object) -> str:
     if not isinstance(model, str) or _MODEL_NAME.fullmatch(model) is None:
         raise OdooConfigurationError("model 必须是合法的 Odoo 模型名")
     return model
+
+
+def _sensitive_segments(model: str, path: str) -> list[str]:
+    segments = path.split(".")
+    blocked = [segment for segment in segments if _SENSITIVE_FIELD.search(segment)]
+    for index, segment in enumerate(segments):
+        if (index > 0 or model in _PERSON_MODELS) and _CONTACT_FIELD.search(segment):
+            blocked.append(segment)
+    return blocked
+
+
+def check_field_access(model: str, fields: object, domain: list[Any]) -> list[str]:
+    """要求显式列出字段，并拦截返回字段和 domain 条件中的敏感字段。"""
+    if not isinstance(fields, list) or not fields or not all(isinstance(field, str) and field for field in fields):
+        raise OdooConfigurationError("fields 必须显式列出需要的字段（只读取最小必要字段）")
+    paths = list(fields)
+    for leaf in domain:
+        if isinstance(leaf, list) and len(leaf) == 3 and isinstance(leaf[0], str):
+            paths.append(leaf[0])
+    blocked = sorted({segment for path in paths for segment in _sensitive_segments(model, path)})
+    if blocked:
+        raise OdooConfigurationError("禁止读取或筛选敏感字段: " + ", ".join(blocked))
+    return fields
 
 
 def validate_module(module: object) -> str:
@@ -170,9 +198,7 @@ def validate_read_arguments(arguments: dict[str, Any]) -> tuple[str, list[Any], 
     kwargs = arguments.get("kwargs", {})
     if not isinstance(kwargs, dict):
         raise OdooConfigurationError("kwargs 必须是对象")
-    fields = kwargs.get("fields", [])
-    if not isinstance(fields, list) or not all(isinstance(field, str) and field for field in fields):
-        raise OdooConfigurationError("kwargs.fields 必须是字符串列表")
+    fields = check_field_access(model, kwargs.get("fields"), domain)
     limit = kwargs.get("limit", 100)
     offset = kwargs.get("offset", 0)
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1 or limit > 100:

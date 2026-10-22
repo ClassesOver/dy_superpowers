@@ -29,7 +29,7 @@ description: 在需要巡检 Odoo 12 HRP 总账交付、科目、账簿、凭证
 
 ## Odoo 证据工具
 
-核对真实账套时，用同一 `trace_id` 建立最小只读证据链：先以 `dy_odoo_module_list_installed` / `dy_odoo_module_info` 验证模块状态（模块列表每页最多 100 条，返回满页时必须继续用 offset 翻页，直到取全量后才能下“未安装”结论），再以 `dy_odoo_model_fields` 验证字段元数据；用 `dy_odoo_record_search` 按公司、账套、状态和期间筛选记录，必要时用 `dy_odoo_record_read` 读取指定记录的最小字段集。每条结果回链到 `检查顺序 + 调研子项编号` 和对应验收标准。空结果不等于配置错误；权限不足、连接失败或公司范围不清楚时记为 `未知/未检查/待确认`。
+核对真实账套时，用同一 `trace_id` 建立最小只读证据链：先以 `dy_odoo_module_list_installed` / `dy_odoo_module_info` 验证模块状态（模块列表每页最多 100 条，返回满页时必须继续用 offset 翻页，直到取全量后才能下“未安装”结论），再以 `dy_odoo_model_fields` 验证字段元数据；用 `dy_odoo_record_search` 按公司、账套、状态和期间筛选记录，必要时用 `dy_odoo_record_read` 读取指定记录的最小字段集。每条结果回链到 `检查顺序 + 调研子项编号` 和对应验收标准。空结果不等于配置错误；权限不足、连接失败或公司范围不清楚时记为 `未知/未检查/待确认`。 调用 `dy_odoo_record_search` / `dy_odoo_record_read` 时必须显式列出 `fields`；工具拒绝的敏感字段（如证件号、银行账户、员工通讯信息）不得绕道读取，相关子项记为 `未检查` 并说明原因。
 
 `dy_knowledge_module_info`、`dy_knowledge_search` 仅提供解释和检索线索，不是账套事实来源。不得将业务记录正文、凭证明细、员工信息、密码或令牌写入 trace、项目记忆或矩阵；trace 只记录工具、模型、操作、数量、状态和证据引用。
 
