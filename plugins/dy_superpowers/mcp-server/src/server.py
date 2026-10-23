@@ -143,12 +143,17 @@ def _handle_inspection_report_save(name: str, arguments: dict, workspace: Path, 
             'validated_at': result['validated_at']}
 
 def _handle_inspection_report_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    module = arguments.get('module')
+    report_id = arguments.get('report_id')
+    if (not isinstance(module, str) or not module.strip()
+            or not isinstance(report_id, str) or not report_id.strip()):
+        raise ToolRequestError(-32602, 'module 和 report_id 必须是非空文本')
     try:
-        content = read_report(workspace, arguments.get('module', ''), arguments.get('report_id', ''))
+        content = read_report(workspace, module, report_id)
     except ValueError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'inspection.report.read', 'operation': 'read', 'tool': name, 'status': 'ok',
-             'module': arguments['module'], 'report_id': arguments['report_id'],
+             'module': module, 'report_id': report_id,
              'content_bytes': len(content.encode('utf-8')), 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
@@ -688,8 +693,15 @@ def run_mcp(workspace: Path) -> None:
         return types.CallToolResult(content=[types.TextContent(type="text", text=_mcp_result(result)["content"][0]["text"])])
 
     server = Server("dy_superpowers", version="0.1.0", on_list_tools=list_tools, on_call_tool=call_tool)
-    # SDK 的自动遥测可能包含请求正文；仅保留本插件的白名单 span。
-    server.middleware.clear()
+    # SDK 的自动遥测可能包含请求正文；插件自身不启用外部遥测，只保留本地 JSONL trace。
+    try:
+        from mcp.server._otel import OpenTelemetryMiddleware
+        server.middleware = [item for item in server.middleware if not isinstance(item, OpenTelemetryMiddleware)]
+    except ImportError:
+        # SDK 内部模块路径变化时，按模块名兜底识别遥测中间件。
+        server.middleware = [item for item in server.middleware
+                             if "otel" not in type(item).__module__.lower()
+                             and "telemetry" not in type(item).__module__.lower()]
 
     async def run():
         async with stdio_server() as (reader, writer):

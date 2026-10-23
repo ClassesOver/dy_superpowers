@@ -2,12 +2,14 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 
 PLUGIN_ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(PLUGIN_ROOT / "mcp-server/src"))
 
 import server
-from dy_superpowers_mcp.research import read_record, write_record
+from dy_superpowers_mcp.research import ResearchIntegrityError, read_record, write_record
 
 
 def disable_telemetry(monkeypatch, codex_home: Path):
@@ -43,7 +45,6 @@ def test_memory_read_unsupported_name_returns_invalid_params(tmp_path, monkeypat
         workspace,
     )
     assert result is None
-    assert error["code"] == -32602
     assert error["code"] == -32602
 
 
@@ -103,3 +104,21 @@ def test_write_record_preserves_corrupted_data_marker_and_still_writes(tmp_path)
     assert record["conclusion"] == "费用模块本期上线"
     text = (memory_dir / "modules" / "test-expense" / "research.md").read_text(encoding="utf-8")
     assert "{bad json}" in text
+
+
+def test_read_record_with_scope_and_scope_id_reports_integrity_error_on_corrupted_block(tmp_path):
+    workspace = tmp_path / "project"
+    module_dir = workspace / ".dy_superpowers" / "modules" / "test-expense"
+    module_dir.mkdir(parents=True)
+    # 标题可识别但数据不可解码的损坏块：双参读取必须抛完整性错误，而不是崩溃或误报缺失。
+    corrupted = "\n".join([
+        "<!-- dy-research-record:start -->",
+        "## test-expense / 应用安装（EXP-1-001 + 01）",
+        "- 调研结论：损坏记录",
+        "<!-- dy-research-record:data {bad json} -->",
+        "<!-- dy-research-record:end -->",
+    ])
+    (module_dir / "research.md").write_text("# 模块调研结论\n\n" + corrupted + "\n", encoding="utf-8")
+
+    with pytest.raises(ResearchIntegrityError):
+        read_record(workspace, "test-expense", "EXP-1-001", "01", scope="公司A/本期", scope_id="scope-1")

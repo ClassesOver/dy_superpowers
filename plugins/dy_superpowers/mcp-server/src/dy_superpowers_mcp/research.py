@@ -350,13 +350,17 @@ def read_record(workspace: str | Path, module: str, check_order: str, research_i
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     candidates = list(_matching(text, module, check_order, research_id)) if scope is not None and scope_id is not None else None
     matches = ([(match, value) for match, value in candidates
-                if value.get("scope") == scope and _scope_id(value) == scope_id]
+                if value is not None and value.get("scope") == scope and _scope_id(value) == scope_id]
                if candidates is not None else
                list(_matching(text, module, check_order, research_id, scope, scope_id)))
-    if candidates is not None and not matches and any(
-        value.get("scope") == scope or _scope_id(value) == scope_id for _, value in candidates
-    ):
-        raise ValueError("scope 与 scope_id 不匹配")
+    if candidates is not None and not matches:
+        corrupted = [match for match, value in candidates if value is None]
+        if corrupted:
+            # 损坏块与单参路径同样抛完整性错误，提示修复而不是误报缺失。
+            _validate_block(corrupted[0].group(0), None)
+        if any(value is not None and (value.get("scope") == scope or _scope_id(value) == scope_id)
+               for _, value in candidates):
+            raise ValueError("scope 与 scope_id 不匹配")
     if len(matches) > 1:
         raise ValueError("该检查键有多个适用范围，请通过 scope 或 scope_id 明确选择")
     if not matches:
