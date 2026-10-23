@@ -3,16 +3,15 @@
 ## 目录边界
 
 - `plugins/dy_superpowers/` 是 Codex 插件包，包含 `.codex-plugin/plugin.json`、`.mcp.json`、skills、MCP 服务、参考资料和插件测试。
-- `telemetry/` 只包含 OpenObserve 和 OpenTelemetry Collector 遥测服务的 Docker Compose 配置，不属于插件包，不承载业务逻辑。
 - `.agents/plugins/marketplace.json` 是本地市场 catalog，插件 source 必须指向 `./plugins/dy_superpowers`。
-- 根仓库只保留一个 `.git`；不要在插件或遥测子目录创建嵌套 Git 仓库。
+- 根仓库只保留一个 `.git`；不要在插件子目录创建嵌套 Git 仓库。
 
 ## 插件格式
 
 - 修改 `.codex-plugin/plugin.json` 后运行 `bash scripts/validate-plugin.sh`；入口检查配置与路径引用、hook 契约、官方 Codex CLI 隔离市场安装和 MCP 协议冒烟。
 - `plugin.json` 的 `name` 必须与插件目录和 marketplace 条目一致。
-- MCP 必须通过 `plugin.json` 的 `mcpServers` 和插件内 `.mcp.json` 注册；不要把 MCP 配置移到遥测目录。
-- 遥测不可达不能阻断插件本地功能；保留本地 JSONL trace。
+- MCP 必须通过 `plugin.json` 的 `mcpServers` 和插件内 `.mcp.json` 注册。
+- 插件不使用外部遥测；本地 JSONL trace 是唯一持久化追踪通道。
 
 ## 开发与验证
 

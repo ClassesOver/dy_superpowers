@@ -1,6 +1,6 @@
 # 运行架构
 
-插件由 Codex 插件清单（manifest）、技能入口、插件内 MCP 服务端、版本化参考资料和当前工作区记忆组成。MCP 服务集成在插件目录内，由 `.codex-plugin/plugin.json` 引用 `.mcp.json` 启动。遥测 collector 位于市场仓库外层 `telemetry/`，与插件包和 MCP 进程隔离。
+插件由 Codex 插件清单（manifest）、技能入口、插件内 MCP 服务端、版本化参考资料和当前工作区记忆组成。MCP 服务集成在插件目录内，由 `.codex-plugin/plugin.json` 引用 `.mcp.json` 启动。插件不使用外部遥测服务。
 
 一个工作区只对应一个项目。`.dy_superpowers/` 保存该项目的 `preferences.md`、`profile.md`、`delivery-register.md`、`decisions.md`、`skill-candidates.md`，以及按 `modules/<module>/research.md` 隔离的模块调研记录和按 `reports/<module>/<YYYY-MM-DD>/<UTC时间戳-唯一后缀>.md` 保存的巡检报告。报告时间戳和唯一后缀由保存工具生成，避免模型猜编号和同日覆盖。这些文件不修改既有项目 Markdown。
 
@@ -10,4 +10,4 @@ MCP 服务端提供工作区记忆、调研记录、计划校验、Odoo 12 只�
 
 Codex `SessionStart` 通过插件声明的 MCP hook 调用 `dy_session_initialize`，返回工作区记忆索引，不读取或注入记忆正文。Agent 按需使用 `dy_memory_read` 读取完整项目记忆，巡检 skill 按检查键读取调研记录。hook 失败只影响恢复提示，不改变记忆写入确认和 Odoo 只读边界。
 
-本地操作追踪默认启用，写入 Codex 用户数据目录下按工作区散列隔离的 JSONL 文件。每条 trace 都带稳定 `dy.workspace_id`；OpenObserve 可按此属性筛选项目。记忆正文、调研记录内容和 Odoo 搜索 domain 按项目要求进入 trace；凭据和常见个人字段值脱敏，Odoo 返回行不进入 trace。OTLP 导出默认指向本机 Collector `http://127.0.0.1:33049/v1/traces`；标准环境变量可覆盖 collector，额外目标须加入 `DY_OTLP_ALLOWED_ORIGINS` 精确允许列表，详见 [运行边界](runtime-boundaries.md)。`OTEL_SDK_DISABLED=true` 可关闭外部导出，不影响本地追踪和插件工具。Basic Memory `0.23.2` 作为必需依赖随 `uv.lock` 安装，在现有 MCP 内部提供搜索后端，细节见 [memory.md](memory.md)。Odoo 当前仅开放受限 JSON-RPC 只读查询；配置写入、SQL 和代码生成不属于当前运行时能力。
+本地操作追踪是唯一持久化追踪通道，写入 Codex 用户数据目录下按工作区散列隔离的 JSONL 文件。每条 trace 都带稳定 `workspace_id`，不记录工作区路径或目录名。记忆正文、调研记录内容和 Odoo 搜索 domain 按项目要求进入 trace；凭据和常见个人字段值脱敏，Odoo 返回行不进入 trace。Basic Memory `0.23.2` 作为必需依赖随 `uv.lock` 安装，在现有 MCP 内部提供搜索后端，细节见 [memory.md](memory.md)。Odoo 当前仅开放受限 JSON-RPC 只读查询；配置写入、SQL 和代码生成不属于当前运行时能力。

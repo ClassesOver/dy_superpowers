@@ -46,7 +46,7 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
     rpc_thread.start()
     origin = f'http://127.0.0.1:{rpc.server_address[1]}'
     env = {**os.environ, 'ODOO_URL': origin, 'DY_ODOO_ALLOWED_ORIGINS': origin,
-           'ODOO_DB': 'db', 'ODOO_USERNAME': 'u', 'ODOO_PASSWORD': 'p', 'OTEL_SDK_DISABLED': 'true', 'CODEX_HOME': str(tmp_path / 'codex')}
+           'ODOO_DB': 'db', 'ODOO_USERNAME': 'u', 'ODOO_PASSWORD': 'p', 'CODEX_HOME': str(tmp_path / 'codex')}
     params = StdioServerParameters(
         command=config['command'],
         args=[arg.replace('${PLUGIN_ROOT}', str(plugin)) for arg in config['args']],
@@ -148,33 +148,26 @@ def test_stdio_odoo_read_succeeds_over_jsonrpc_and_records_redacted_trace(tmp_pa
     workspace = tmp_path / 'project'
     workspace.mkdir()
     rpc_calls = []
-    otlp_payloads = []
 
     class OdooHandler(BaseHTTPRequestHandler):
         def do_POST(self):
             request_body = self.rfile.read(int(self.headers['Content-Length']))
-            if self.path == '/v1/traces':
-                otlp_payloads.append(request_body)
-                response = b''
-                content_type = 'application/x-protobuf'
+            request = json.loads(request_body)
+            params = request['params']
+            if self.path == '/jsonrpc' and params['service'] == 'common' and params['method'] == 'login':
+                rpc_calls.append(request)
+                result = 17
+            elif self.path == '/jsonrpc' and params['service'] == 'object' and params['method'] == 'execute_kw':
+                rpc_calls.append(request)
+                result = [{'name': 'dy_fin_acc', 'state': 'installed'}]
             else:
-                request = json.loads(request_body)
-                params = request['params']
-                if self.path == '/jsonrpc' and params['service'] == 'common' and params['method'] == 'login':
-                    rpc_calls.append(request)
-                    result = 17
-                elif self.path == '/jsonrpc' and params['service'] == 'object' and params['method'] == 'execute_kw':
-                    rpc_calls.append(request)
-                    result = [{'name': 'dy_fin_acc', 'state': 'installed'}]
-                else:
-                    self.send_error(404)
-                    return
-                response = json.dumps({
-                    'jsonrpc': '2.0', 'id': request['id'], 'result': result,
-                }).encode()
-                content_type = 'application/json'
+                self.send_error(404)
+                return
+            response = json.dumps({
+                'jsonrpc': '2.0', 'id': request['id'], 'result': result,
+            }).encode()
             self.send_response(200)
-            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(response)))
             self.end_headers()
             self.wfile.write(response)
@@ -194,10 +187,6 @@ def test_stdio_odoo_read_succeeds_over_jsonrpc_and_records_redacted_trace(tmp_pa
         'ODOO_DB': 'test-db',
         'ODOO_USERNAME': 'consultant',
         'ODOO_PASSWORD': ODOO_TEST_PLACEHOLDER,
-        'DY_OTLP_ALLOWED_ORIGINS': origin,
-        'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT': f'{origin}/v1/traces',
-        'OTEL_BSP_SCHEDULE_DELAY': '100',
-        'OTEL_BSP_EXPORT_TIMEOUT': '1000',
         'CODEX_HOME': str(codex_home),
     }
     env.pop('VIRTUAL_ENV', None)
@@ -271,16 +260,3 @@ def test_stdio_odoo_read_succeeds_over_jsonrpc_and_records_redacted_trace(tmp_pa
     search_call = rpc_calls[2]['params']['args']
     assert search_call[3:5] == ['res.partner', 'search_read']
     assert search_call[5] == [[['state', '=', 'posted']]]
-    assert otlp_payloads
-    otlp_data = b''.join(otlp_payloads)
-    assert b'dy_odoo_module_list_installed' in otlp_data
-    assert b'odoo.module.list.installed' in otlp_data
-    assert b'dy.workflow_id' in otlp_data
-    assert b'dy.span_role' in otlp_data
-    assert b'module_list_installed' in otlp_data
-    assert b'dy.workspace_id' in otlp_data
-    assert hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()[:16].encode() in otlp_data
-    assert b'dy.domain_term_count' in otlp_data
-    assert b'posted' in otlp_data
-    assert '可追踪的工作区记忆内容'.encode() in otlp_data
-    assert ODOO_TEST_PLACEHOLDER.encode() not in otlp_data

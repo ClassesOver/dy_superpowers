@@ -2,11 +2,7 @@
   "mcpServers": {
     "dy-superpowers-odoo": {
       "command": "uv",
-      "args": ["run", "--frozen", "--project", "${PLUGIN_ROOT}/mcp-server", "python", "${PLUGIN_ROOT}/mcp-server/src/server.py"],
-      "env": {
-        "DY_SUPERPOWERS_OTLP_TRACES_ENDPOINT": "http://127.0.0.1:33049/v1/traces",
-        "DY_SUPERPOWERS_TELEMETRY_SCOPE": "plugin"
-      }
+      "args": ["run", "--frozen", "--project", "${PLUGIN_ROOT}/mcp-server", "python", "${PLUGIN_ROOT}/mcp-server/src/server.py"]
     }
   }
 }

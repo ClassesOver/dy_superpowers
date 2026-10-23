@@ -1,4 +1,4 @@
-"""遥测隔离、调研修复及追踪保留期的回归验证。"""
+"""调研修复、追踪保留期与本地追踪健壮性的回归验证。"""
 
 import hashlib
 import json
@@ -15,48 +15,7 @@ from dy_superpowers_mcp.memory import WorkspaceMemory
 from dy_superpowers_mcp.research import read_record, write_record
 
 
-@pytest.mark.parametrize('failure', ['create', 'enter', 'attributes', 'exit'])
-def test_telemetry_failure_does_not_block_business(tmp_path, monkeypatch, capsys, failure):
-    class Span:
-        def set_attributes(self, attributes):
-            if failure == 'attributes':
-                raise RuntimeError('遥测正文不得进入诊断')
-        def add_event(self, *args):
-            pass
-
-    class Manager:
-        def __enter__(self):
-            if failure == 'enter':
-                raise RuntimeError('遥测正文不得进入诊断')
-            return Span()
-        def __exit__(self, *args):
-            if failure == 'exit':
-                raise RuntimeError('遥测正文不得进入诊断')
-
-    class Tracer:
-        def start_as_current_span(self, *args, **kwargs):
-            if failure == 'create':
-                raise RuntimeError('遥测正文不得进入诊断')
-            return Manager()
-
-    monkeypatch.setattr(telemetry, '_tracer', Tracer())
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: True)
-    monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    WorkspaceMemory(tmp_path).write('profile.md', '业务正常读取', confirmed=True)
-    result, error = server.execute_tool('dy_memory_read', {'trace_id': 'recovery', 'name': 'profile.md'}, tmp_path)
-    assert error is None
-    assert result == '业务正常读取'
-    assert trace.TraceStore(tmp_path).read('recovery')[-1]['status'] == 'ok'
-    assert '遥测正文不得进入诊断' not in capsys.readouterr().err
-
-
-def test_telemetry_does_not_suppress_business_exception(tmp_path, monkeypatch):
-    class Manager:
-        def __enter__(self):
-            return type('Span', (), {'set_attributes': lambda *args: None})()
-        def __exit__(self, *args):
-            return True
-    monkeypatch.setattr(telemetry, '_tracer', type('Tracer', (), {'start_as_current_span': lambda *args, **kwargs: Manager()})())
+def test_tool_span_does_not_suppress_business_exception(tmp_path):
     with pytest.raises(ValueError, match='业务失败'):
         with telemetry.tool_span('recovery', tmp_path, 'dy_memory_read'):
             raise ValueError('业务失败')
@@ -183,7 +142,6 @@ def test_corrupt_legacy_trace_does_not_block_new_trace(tmp_path, capsys):
 def test_damaged_trace_file_does_not_block_unrelated_tools(tmp_path, monkeypatch, capsys, filename, content):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
     monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
-    monkeypatch.setattr(telemetry, '_tracer', None)
     store = trace.TraceStore(tmp_path)
     store.directory.mkdir(parents=True)
     damaged = store.directory / filename

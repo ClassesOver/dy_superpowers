@@ -20,17 +20,12 @@ from server import handle
 
 @pytest.fixture(autouse=True)
 def isolated_telemetry(monkeypatch):
-    old_state = telemetry._initialized, telemetry._provider, telemetry._tracer
-    telemetry._initialized = False
-    telemetry._provider = None
-    telemetry._tracer = None
-    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
-    for name in ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"):
+    for name in ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT",
+                 "DY_SUPERPOWERS_OTLP_TRACES_ENDPOINT"):
         monkeypatch.delenv(name, raising=False)
     for name in ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_PASSWORD"):
         monkeypatch.delenv(name, raising=False)
     yield
-    telemetry._initialized, telemetry._provider, telemetry._tracer = old_state
 
 
 @pytest.fixture
@@ -280,29 +275,6 @@ def test_trace_keeps_inspection_metadata(workspace):
     assert record["evidence_ref"] == "odoo://x"
 
 
-def test_otel_event_attributes_are_allowlisted_and_sanitized():
-    exported = trace_module.otel_event_attributes({
-        "event": "inspection.result", "tool": "dy_trace_event", "status": "ok",
-        "skill": "expense-inspection", "check_order": "1", "result": "通过",
-        "duration_ms": 12.5, "memory_file": "profile.md", "evidence_ref": "odoo://employee/Alice",
-        "workspace_id": "a1b2c3d4e5f60718", "content_bytes": 128, "result_count": 2,
-        "backend": "basic-memory", "query": "private search", "domain": [["state", "=", "posted"]],
-        "memory_content": "traceable memory body",
-        "research_content": {"conclusion": "traceable research body"},
-        "project_id": "private-project", "password": "secret-value", "business_record": "confidential",
-    })
-    assert exported == {
-        "dy.event": "inspection.result", "dy.tool": "dy_trace_event", "dy.status": "ok",
-        "dy.skill": "expense-inspection", "dy.check_order": "1", "dy.result": "通过",
-        "dy.duration_ms": 12.5, "dy.memory_file": "profile.md",
-        "dy.workspace_id": "a1b2c3d4e5f60718", "dy.content_bytes": 128,
-        "dy.result_count": 2, "dy.backend": "basic-memory",
-        "dy.domain": '[["state","=","posted"]]',
-        "dy.query": "private search", "dy.memory_content": "traceable memory body",
-        "dy.research_content": '{"conclusion":"traceable research body"}',
-    }
-
-
 def test_traceable_memory_content_still_redacts_credentials():
     event = trace_module.sanitize_trace_event({
         "event": "memory.write", "memory_content": "confirmed_by: Employee Name\nproject token=private-value",
@@ -315,33 +287,7 @@ def test_traceable_memory_content_still_redacts_credentials():
     assert json.loads(research["research_content"]) == {"confirmed_by": REDACTED}
 
 
-def test_otel_export_endpoint_uses_default_and_standard_overrides(monkeypatch):
-    monkeypatch.delenv("DY_SUPERPOWERS_OTLP_TRACES_ENDPOINT", raising=False)
-    assert telemetry.otlp_traces_endpoint() == "http://127.0.0.1:33049/v1/traces"
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "https://specific.example/traces")
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://collector.example")
-    assert telemetry.otlp_traces_endpoint() == "https://specific.example/traces"
-    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-    assert telemetry.otlp_traces_endpoint() == "https://collector.example/v1/traces"
-
-
-def test_plugin_endpoint_is_used_when_standard_endpoints_are_unset(monkeypatch):
-    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", raising=False)
-    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
-    monkeypatch.setenv("DY_SUPERPOWERS_OTLP_TRACES_ENDPOINT", "https://plugin-collector.example/v1/traces")
-    assert telemetry.otlp_traces_endpoint() == "https://plugin-collector.example/v1/traces"
-
-
-@pytest.mark.parametrize("value, expected", [(None, 1000), ("50", 100), ("9000", 5000), ("bad", 1000)])
-def test_plugin_export_timeout_is_bounded(monkeypatch, value, expected):
-    if value is None:
-        monkeypatch.delenv("DY_SUPERPOWERS_OTLP_EXPORT_TIMEOUT_MS", raising=False)
-    else:
-        monkeypatch.setenv("DY_SUPERPOWERS_OTLP_EXPORT_TIMEOUT_MS", value)
-    assert telemetry.otlp_export_timeout_millis() == expected
-
-
-def test_otel_can_be_disabled_without_disabling_local_runtime(workspace):
+def test_external_telemetry_is_inert_and_local_trace_works(workspace):
     assert telemetry.initialize_telemetry() is False
     with telemetry.tool_span("trace-1", workspace, "dy_trace_event") as span:
         assert span is None

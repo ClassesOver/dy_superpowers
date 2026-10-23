@@ -16,7 +16,7 @@ Codex `SessionStart` 在启动、恢复、清空、压缩和 fork 时调用 `dy_
 
 模块调研通过 `dy_research_record_write` 按“模块 + 检查顺序 + 子项编号 + 适用范围”保存；每次确认修订都保留历史版本，旧版本标记为 `superseded`。`dy_module_memory_read` 返回 `records` 列表，可按检查键和 `scope` 查询；读取单个结论时从 `records[0]` 取值。同一检查键存在多个范围时，必须指定 `scope_id` 或 `scope`，不能默认采用最后写入的公司结论；后续沿用返回的稳定 `scope_id`。只有状态为 `confirmed` 的记录可驱动巡检。通用 `dy_memory_write` 仅允许更新其他项目记忆文件，避免整文件覆盖调研历史。调研 trace 包含本次读写的完整记录，较长内容会按 trace 正文限制截断。
 
-不得跨工作区读取、复制或合并这些文件。密码、令牌、员工个人信息和生产业务明细不得写入记忆。记忆正文会进入本地 trace 和启用的 OTLP collector；发送到远端 collector 前，应确认其访问权限和保留策略。记录中匹配到凭据和常见个人字段时会脱敏，但这不是完整的数据分类器。
+不得跨工作区读取、复制或合并这些文件。密码、令牌、员工个人信息和生产业务明细不得写入记忆。记忆正文会进入本地 JSONL trace；插件不使用外部遥测，trace 不会发送到任何远端服务。记录中匹配到凭据和常见个人字段时会脱敏，但这不是完整的数据分类器。
 
 Basic Memory `0.23.2` 是插件必需的本地 Markdown 索引后端，运行环境要求 Python 3.12 及以上。它由现有 `dy-superpowers-odoo` MCP 进程按需调用 CLI，不注册第二个 MCP Server，也不改变 Codex 的插件入口。每个工作区使用项目名 `dy-superpowers`，项目路径固定为当前工作区 `.dy_superpowers/`；Basic Memory 配置和数据库放在工作区隐藏兄弟目录 `.dy_superpowers-basic-memory/`，避免被自身索引。可用时 `dy_memory_search` 返回 Basic Memory 结果；命令缺失、超时、返回非法 JSON 或索引失败时回退本地 Markdown 关键词搜索，插件功能不被运行故障阻断，并以 `available=false` 明确标识降级；降级不是可省略依赖的安装方式。
 

@@ -44,16 +44,6 @@ SECRET_VALUE_PATTERN = re.compile(
 TRACE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_.:/#-]{1,256}$")
 TRACE_CONTEXT_FIELDS = {"skill", "module", "check_order", "research_id", "scope_id", "revision", "environment"}
 TRACE_RESULTS = {"通过", "部分通过", "不通过", "不适用", "待确认", "未检查", "未知", "ok", "error"}
-OTEL_EVENT_FIELDS = {
-    "event", "operation", "tool", "status", "workspace_id", "duration_ms", "error_type", "error_code",
-    "skill", "check_order", "result", "memory_file",
-    "model", "module", "count", "result_count", "content_bytes", "backend", "has_more",
-    "field_count", "domain_term_count", "limit", "offset", "domain", "domain_truncated",
-    "found", "history_count", "requested_count", "revision_count", "research_id",
-    "memory_content", "research_content", "query", "content_truncated",
-    "workflow_id", "call_id", "category", "check_key", "scope_id", "revision", "research_status",
-    "valid", "error_count", "expected_count", "source_ref", "report_id",
-}
 
 MAX_TRACE_DOMAIN_CHARS = 2048
 MAX_TRACE_CONTENT_BYTES = 65536
@@ -173,12 +163,6 @@ def _sanitize_domain(value: Any, model: Any = None) -> str | None:
     except (TypeError, ValueError, RecursionError):
         return None
     return serialized if len(serialized) <= MAX_TRACE_DOMAIN_CHARS else None
-
-
-def otel_event_attributes(event: dict[str, Any]) -> dict[str, str | int | float | bool]:
-    safe_event = sanitize_trace_event(event)
-    return {f"dy.{key}": value for key, value in safe_event.items()
-            if key in OTEL_EVENT_FIELDS and isinstance(value, (str, int, float, bool))}
 
 
 class TraceStore:

@@ -218,18 +218,9 @@ def test_general_ledger_uses_its_own_original_check_numbers(tmp_path, report):
 
 def test_multi_check_matrix_keeps_scope_revision_and_pending_gate_separate(tmp_path, monkeypatch):
     """同一工作流内的多项检查应保留各自调研版本和范围，未确认项阻止整体通过。"""
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-    from dy_superpowers_mcp import telemetry
     from dy_superpowers_mcp.trace import TraceStore
 
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    monkeypatch.setattr(telemetry, '_tracer', provider.get_tracer('matrix-test'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: True)
 
     matrix = Path(__file__).parents[2] / 'skills/expense-inspection/references/inspection-matrix.md'
     matrix_revision = hashlib.sha256(matrix.read_bytes()).hexdigest()
@@ -319,29 +310,6 @@ def test_multi_check_matrix_keeps_scope_revision_and_pending_gate_separate(tmp_p
     assert {event['revision'] for event in second_events if event.get('revision')} == {second['revision']}
     validation_event = next(event for event in trace_events if event['event'] == 'inspection.validate')
     assert validation_event['result'] == '待确认' and validation_event['valid'] is True
-
-    roots = [span for span in exporter.get_finished_spans() if span.parent is None]
-    assert len(roots) == 5
-    by_key = {}
-    for span in roots:
-        if span.attributes.get('dy.check_key'):
-            by_key.setdefault(span.attributes['dy.check_key'], []).append(span)
-    assert set(by_key) == {'expense:1:01', 'expense:2:02'}
-    for check_key, expected_scope, expected_revision in (
-        ('expense:1:01', first_record['scope_id'], first['revision']),
-        ('expense:2:02', second_record['scope_id'], second['revision']),
-    ):
-        check_spans = by_key[check_key]
-        assert len(check_spans) == 2
-        assert {span.attributes['dy.scope_id'] for span in check_spans} == {expected_scope}
-        assert {span.attributes['dy.revision'] for span in check_spans} == {expected_revision}
-    gate_span, = [span for span in roots if span.name == 'dy_inspection_validate']
-    assert gate_span.attributes['dy.valid'] is True
-    assert gate_span.attributes['dy.result'] == '待确认'
-    assert gate_span.attributes['dy.expected_count'] == 2
-    assert gate_span.attributes['dy.status'] == 'ok'  # 工具调用成功不代表业务 gate 通过。
-    assert len({span.attributes['dy.workflow_id'] for span in roots}) == 1
-    provider.shutdown()
 
 
 def test_supplemental_research_revision_requires_reinspection(tmp_path, report, monkeypatch):

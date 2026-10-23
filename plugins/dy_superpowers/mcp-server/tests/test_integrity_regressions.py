@@ -15,7 +15,7 @@ from dy_superpowers_mcp.memory import WorkspaceMemory, module_memory_path
 from dy_superpowers_mcp.knowledge import module_info
 from dy_superpowers_mcp.odoo_jsonrpc import OdooReadClient, OdooSettings
 from dy_superpowers_mcp.research import read_record, write_record, _legacy_visible
-from dy_superpowers_mcp.trace import TraceStore, otel_event_attributes, sanitize_trace_event
+from dy_superpowers_mcp.trace import TraceStore, sanitize_trace_event
 
 
 def research_data(**updates):
@@ -123,9 +123,6 @@ def test_trace_preserves_operation_metadata_without_body():
     event = {"model": "account.move", "module": "account", "count": 3,
              "research_id": "01", "content": "业务正文"}
     assert sanitize_trace_event(event) == {key: value for key, value in event.items() if key != "content"}
-    assert otel_event_attributes(event) == {
-        "dy.model": "account.move", "dy.module": "account", "dy.count": 3, "dy.research_id": "01",
-    }
 
 
 def test_manual_visible_edit_is_rejected_before_research_use(tmp_path):

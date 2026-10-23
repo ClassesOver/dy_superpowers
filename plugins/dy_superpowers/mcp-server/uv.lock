@@ -831,8 +831,6 @@ dependencies = [
     { name = "basic-memory" },
     { name = "jsonschema" },
     { name = "mcp", extra = ["cli"] },
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-    { name = "opentelemetry-sdk" },
     { name = "requests" },
 ]
 
@@ -847,8 +845,6 @@ requires-dist = [
     { name = "basic-memory", specifier = "==0.23.2" },
     { name = "jsonschema", specifier = ">=4.20,<5" },
     { name = "mcp", extras = ["cli"], specifier = ">=2,<3" },
-    { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.44,<2" },
-    { name = "opentelemetry-sdk", specifier = ">=1.44,<2" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pyyaml", marker = "extra == 'test'", specifier = ">=6,<7" },
     { name = "requests", specifier = ">=2.32,<3" },

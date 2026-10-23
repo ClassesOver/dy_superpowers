@@ -8,7 +8,6 @@ sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
 from dy_superpowers_mcp.odoo_jsonrpc import OdooSettings
 from dy_superpowers_mcp.memory import module_memory_path
-from dy_superpowers_mcp import telemetry
 from dy_superpowers_mcp.trace import TraceStore
 from dy_superpowers_mcp.research import read_record
 
@@ -51,14 +50,6 @@ def test_explicit_internal_odoo_origin_is_supported(monkeypatch):
     assert OdooSettings('http://10.0.0.1:8069/odoo', 'db', 'u', 'p').url.endswith('/odoo')
     with pytest.raises(ValueError):
         OdooSettings('http://10.0.0.1:8068', 'db', 'u', 'p')
-
-
-def test_invalid_otlp_configuration_does_not_initialize_exporter(monkeypatch):
-    monkeypatch.setenv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', 'http://169.254.169.254/latest')
-    monkeypatch.delenv('OTEL_SDK_DISABLED', raising=False)
-    monkeypatch.setattr(telemetry, '_initialized', False)
-    monkeypatch.setattr(telemetry, '_tracer', None)
-    assert telemetry.initialize_telemetry() is False
 
 
 def test_trace_storage_has_workspace_wide_quota(tmp_path):
@@ -210,7 +201,6 @@ def test_odoo_connection_reused_and_credentials_invalidate_cache(tmp_path, monke
 
     server._clear_odoo_client()
     monkeypatch.setattr(server, 'OdooReadClient', Client)
-    monkeypatch.setenv('OTEL_SDK_DISABLED', 'true')
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
     try:
         assert server.execute_tool('dy_odoo_record_search', {'trace_id': 'reuse', 'model': 'account.move'}, tmp_path)[1] is None
@@ -265,35 +255,6 @@ def test_new_research_has_one_body_and_detects_edits(tmp_path):
     path.write_text(text.replace('唯一确认结论', '意外编辑'))
     with pytest.raises(ValueError, match='不一致'):
         read_record(tmp_path, 'account', '1', '01')
-
-
-def test_authorized_otlp_has_no_redirects_or_environment_proxy(monkeypatch):
-    import requests
-    from opentelemetry import trace
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    monkeypatch.setattr(telemetry, '_initialized', False)
-    monkeypatch.setattr(telemetry, '_tracer', None)
-    monkeypatch.setattr(telemetry, '_provider', None)
-    monkeypatch.delenv('OTEL_SDK_DISABLED', raising=False)
-    monkeypatch.setenv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', 'https://collector.example/v1/traces')
-    monkeypatch.setenv('DY_OTLP_ALLOWED_ORIGINS', 'https://collector.example')
-    monkeypatch.setattr(trace, 'set_tracer_provider', lambda *_: pytest.fail('不得注册全局 provider'))
-    captured = []
-    def initialize(self, *args, **kwargs):
-        captured.append(kwargs)
-    monkeypatch.setattr(OTLPSpanExporter, '__init__', initialize)
-    monkeypatch.setattr(OTLPSpanExporter, 'shutdown', lambda self: None)
-    monkeypatch.setattr(OTLPSpanExporter, 'export', lambda self, spans: None)
-    monkeypatch.setattr(requests.Session, 'request', lambda self, *args, **kwargs: kwargs)
-    try:
-        assert telemetry.initialize_telemetry() is True
-        assert captured[0]['session'].trust_env is False
-        assert captured[0]['timeout'] == 1.0
-        assert captured[0]['session'].post('https://collector.example')['allow_redirects'] is False
-    finally:
-        telemetry.shutdown_telemetry()
-        telemetry._initialized = False
-        telemetry._provider = telemetry._tracer = None
 
 
 @pytest.mark.parametrize('damage', ['json', 'scope'])
