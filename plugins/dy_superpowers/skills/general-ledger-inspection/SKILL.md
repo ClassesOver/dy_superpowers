@@ -35,6 +35,29 @@ description: 在需要巡检 Odoo 12 HRP 总账交付、科目、账簿、凭证
 
 每个子项调用记忆、调研或 Odoo 工具时，附带可选 `trace_context`：`skill=general-ledger-inspection`、`module=general-ledger`、矩阵原始 `check_order` 和 `research_id`；已读取确认记录时再附带原样返回的 `scope_id`、`revision`。仅传已知标识，不编造范围或版本；跨轮任务沿用 `trace_id`，详见[运行边界](../../docs/runtime-boundaries.md#链路与业务标签)。
 
+## 源码对照
+
+巡检矩阵用业务叫法，账套中是技术模块名。完整对照见 [odoo12-source-index.md](../../references/odoo12-source-index.md)，总账域核心映射：
+
+| 矩阵业务叫法 | 技术模块 | 关键配置模型 |
+| --- | --- | --- |
+| 财务会计-基础 | `dy_fin_mdm` | `dy.fin.account.structure`（科目结构）、`dy.fin.account.period` / `dy.fin.account.period.open.and.done`（期间与开关）、`dy.fin.account.analytic.plan*`（辅助核算）、`dy.fin.cash.flow.mapping`（现金流映射）、`dy.account.permissions.settings`（科目权限） |
+| 财务会计-凭证管理 | `dy_fin_acc` | `account.move`（扩展）、`dy.fin.acc.account.periodicity.voucher`（期末结转模板）、`dy.fin.acc.account.move.discrete.number`（凭证编号） |
+| 预算会计 | `dy_fin_gaap` | `account.mapping`（财务/预算科目映射）、`budget.account.move`（预算凭证）、`budget.move.paralleled.wizard`（平行记账）、`budget.statement.of.income.and.expenditure`（收支表） |
+| 财务会计平台-基础（凭证生成平台，矩阵未直接命名） | `dy_fin_pf` | `dy.fin.pf.account.class.define`（凭证分类）、`dy.fin.pf.account.move.generation.rule`（生成规则）、`dy.fin.pf.influence.factor.setting`（影响因素） |
+
+`dy_fin_pf` 是各业务凭证生成规则的共同入口（费用制证等平台模块都复用它的生成规则模型）；巡检矩阵未直接涉及时按本期适用范围裁剪，仅在需要核对凭证生成规则时使用。
+
+常用只读查询示例（domain 仅为形状参考，须按已确认调研结论裁剪公司、账套与期间，字段先用 `dy_odoo_model_fields` 核对）：
+
+- 会计期间与开关账：查 `dy.fin.account.period`（期间定义）与 `dy.fin.account.period.open.and.done`（开关状态），按 `company_id` 和期间过滤，核对开关账顺序。
+- 科目与辅助核算：查 `account.account`（科目）配合 `dy.fin.account.structure` / `dy.fin.account.structure.line`（结构），辅助核算查 `dy.fin.account.analytic.plan` 及其实例。
+- 财务/预算科目映射：查 `account.mapping`，核对映射方向、公司和生效范围；平行记账证据查 `budget.account.move` 与对应 `account.move` 的关联。
+- 凭证状态与平衡：查 `account.move`，domain 如 `[["company_id","=",<公司>],["state","!=","draft"],["date",">=","<期间起>"],["date","<=","<期间止>"]]`，字段取 `journal_id/date/ref/amount/narration` 之外的最小集；借贷平衡用 `account.move.line` 的借贷合计勾稽。
+- 期末结转：查 `dy.fin.acc.account.periodicity.voucher`（结转模板与顺序），执行证据按模板引用回查生成的 `account.move`。
+
+源码版本与账套实际版本可能不同：以 `dy_odoo_module_info` 返回的 `latest_version` 为账套事实，源码索引只提供模型与依赖线索。定制 addon 可能增删字段，查询前先 `dy_odoo_model_fields`。
+
 ## 执行流程
 
 1. **建立项目上下文**：读取当前工作区 `.dy_superpowers/`、交付资料、授权来源和已有项目记忆；确认公司/账套、会计制度、财务/预算会计范围、期间、岗位、报表和上线批次。所有读取和工具调用带同一 `trace_id`。

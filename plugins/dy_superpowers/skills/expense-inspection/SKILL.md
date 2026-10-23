@@ -25,6 +25,27 @@ description: 在巡检 Odoo 12 HRP 费用模块交付、配置、权限、费用
 
 `dy_knowledge_module_info` 和 `dy_knowledge_search` 只用于解释模块、模型和常见流程，不是项目事实来源，也不能覆盖实时 Odoo 返回或用户已确认的调研结论。业务记录正文不写入 trace、记忆或矩阵；trace 仅保留工具、模型、操作、数量、状态及证据引用。
 
+## 源码对照
+
+巡检矩阵用业务叫法（如“费用管理”“会计平台-费用”“预算会计平台-基础”“预算控制&费用报销集成”），账套中是技术模块名。完整对照见 [odoo12-source-index.md](../../references/odoo12-source-index.md)，费用域核心映射：
+
+| 矩阵业务叫法 | 技术模块 | 关键配置模型 |
+| --- | --- | --- |
+| 费用管理（Dy Expense Management） | `dy_expense` | `dy.expense.document.type`、`dy.expense.item`、`dy.expense.city.season`、`dy.expense.permission.configuration` |
+| 会计平台-费用 | `dy_fin_expense_pf` | `dy.fin.expense.pf`（生成规则复用 `dy_fin_pf` 的 `dy.fin.pf.account.move.generation.rule`） |
+| 预算会计平台-基础（仅公立医院） | `dy_fin_budget_pf` | 无新模型，扩展预算凭证通道 |
+| 预算控制&费用报销集成 | `dy_budget_control_expense` | `dy.budget.control.rule.expense.item.line` |
+| 专项经费管理&费用管理集成 | `dy_hrfm` | `dy.hrfm.funds.application`、`dy.hrfm.expense.execute.rule` |
+
+常用只读查询示例（domain 仅为形状参考，须按已确认调研结论裁剪公司与范围，字段先用 `dy_odoo_model_fields` 核对）：
+
+- 单据类型与编号：`dy_odoo_record_search` 查 `dy.expense.document.type`，domain 如 `[["company_id","=",<公司>]]`，字段 `name/code/active`；编号规则查 `dy.expense.document.type.sequence`。
+- 城市淡旺季：查 `dy.expense.city.season`，检查 `low_season_ids/peak_season_ids/active` 与生效期间。
+- 单据权限（代填代提、可见范围）：查 `dy.expense.permission.configuration` 及其 `line_ids`（部门/员工/提交/查询权限）。
+- 费用单据状态样例：查 `dy.expense.requisition`（申请）、`dy.expense.payment.requisition`（借款）、`dy.expense.repayment.requisition`（还款），按 `state/company_id` 过滤，只取最小字段；公司隔离按 `company_id` 分组核对。
+
+源码版本与账套实际版本可能不同：以 `dy_odoo_module_info` 返回的 `latest_version` 为账套事实，源码索引只提供模型与依赖线索。定制 addon 可能增删字段，查询前先 `dy_odoo_model_fields`。
+
 ## 执行流程
 
 1. **建立项目上下文**：读取当前工作区项目资料、授权来源和工作区记忆；确认项目、公司/院区、业务范围、上线日期、环境和 Odoo 版本。只复用有来源且仍有效的已确认结论。
