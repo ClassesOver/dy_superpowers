@@ -29,17 +29,18 @@ EVENT_FIELDS = {
     "duration_ms", "error_type", "error_code", "project_id", "target_id", "plan_version", "source_ref", "memory_file",
     "skill", "check_order", "research_id", "result", "evidence_ref",
     "model", "module", "count", "result_count", "content_bytes", "backend", "has_more",
-    "field_count", "domain_term_count", "limit", "offset", "domain", "domain_truncated",
+    "field_count", "domain_term_count", "limit", "offset", "domain", "domain_truncated", "active_test",
     "found", "history_count", "requested_count", "revision_count",
     "memory_content", "research_content", "query", "content_truncated",
     "workflow_id", "call_id", "otel_trace_id", "otel_span_id", "category",
     "check_key", "scope_id", "revision", "research_status", "trace_context", "valid", "error_count", "expected_count", "report_id",
 }
 SECRET_VALUE_PATTERN = re.compile(
-    r"(?i)((?:password|passwd|token|secret|api[_-]?key|credential|confirmed[_ -]?by|"
+    r"(?i)(?P<prefix>(?P<key_quote>[\"']?)(?:password|passwd|token|secret|api[_-]?key|credential|confirmed[_ -]?by|"
     r"employee[_ -]?(?:name|id)|(?:work_)?email|(?:work_)?phone|mobile|vat|ssn|passport|"
-    r"identification(?:_id)?|birthday|salary|wage|bank_account)\s*[:=]\s*)([^\r\n,;]+)|"
-    r"(Bearer\s+)([A-Za-z0-9._~+/=-]+)"
+    r"identification(?:_id)?|birthday|salary|wage|bank_account)(?P=key_quote)\s*[:=]\s*)"
+    r"(?P<value>\"(?:\\[\s\S]|[^\"\\])*\"|'(?:''|\\[\s\S]|[^'\\])*'|[^\r\n,;]+)|"
+    r"(?P<bearer>Bearer\s+)([A-Za-z0-9._~+/=-]+)"
 )
 TRACE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_.:/#-]{1,256}$")
 TRACE_CONTEXT_FIELDS = {"skill", "module", "check_order", "research_id", "scope_id", "revision", "environment"}
@@ -66,7 +67,29 @@ def redact(value: Any) -> Any:
     if isinstance(value, list):
         return [redact(item) for item in value]
     if isinstance(value, str):
-        return SECRET_VALUE_PATTERN.sub(lambda match: f"{match.group(1) or match.group(3)}{REDACTED}", value)
+        # 正文可混合 Markdown 与 JSON；先按结构处理完整片段，避免逗号截断敏感对象/数组。
+        decoder = json.JSONDecoder()
+        parts, end = [], 0
+        for start in re.finditer(r"[\[{]", value):
+            if start.start() < end:
+                continue
+            try:
+                parsed, length = decoder.raw_decode(value[start.start():])
+            except (ValueError, RecursionError):
+                continue
+            safe = redact(parsed)
+            parts.append(value[end:start.start()])
+            end = start.start() + length
+            parts.append(json.dumps(safe, ensure_ascii=False) if safe != parsed else value[start.start():end])
+        parts.append(value[end:])
+        value = "".join(parts)
+        def replace(match: re.Match) -> str:
+            if match.group("bearer"):
+                return match.group("bearer") + REDACTED
+            matched = match.group("value")
+            quote = matched[0] if matched[0] in "\"'" and matched[-1] == matched[0] else ""
+            return match.group("prefix") + quote + REDACTED + quote
+        return SECRET_VALUE_PATTERN.sub(replace, value)
     return value
 
 

@@ -191,6 +191,58 @@ def test_staged_manifest_rejects_research_changes(tmp_path):
     assert any("-topic-" in slug for slug in pages)
 
 
+@pytest.mark.parametrize("change", ["add", "modify", "delete", "reformat"])
+def test_staged_manifest_rejects_sources_changes_until_rebuilt(tmp_path, change):
+    workspace = _workspace(tmp_path)
+    sources_path = workspace / ".dy_superpowers/sources.json"
+    sources = [{"project_id": load_project(workspace)["project_id"],
+                "name": "费用调研.xlsx", "url": "https://example.com/expense.xlsx"}]
+    if change != "add":
+        sources_path.write_text(json.dumps(sources, ensure_ascii=False), encoding="utf-8")
+    stage_wiki(workspace)
+    load_staged(workspace)
+
+    if change == "delete":
+        sources_path.unlink()
+    else:
+        if change == "modify":
+            sources[0]["name"] = "更新调研.xlsx"
+        sources_path.write_text(json.dumps(sources, ensure_ascii=False, indent=2), encoding="utf-8")
+    with pytest.raises(ValueError, match="原始资料.*重新构建"):
+        load_staged(workspace)
+
+    stage_wiki(workspace)
+    manifest, pages = load_staged(workspace)
+    overview = pages[manifest["overview_slug"]]
+    if change == "delete":
+        assert "尚未登记原始文件链接" in overview
+    else:
+        assert "https://example.com/expense.xlsx" in overview
+        assert ("更新调研" if change == "modify" else "费用调研") in overview
+
+
+def test_staged_manifest_distinguishes_missing_and_empty_sources(tmp_path):
+    workspace = _workspace(tmp_path)
+    stage_wiki(workspace)
+    (workspace / ".dy_superpowers/sources.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="原始资料.*重新构建"):
+        load_staged(workspace)
+    stage_wiki(workspace)
+    load_staged(workspace)
+
+
+def test_staged_manifest_without_sources_fingerprint_requires_rebuild(tmp_path):
+    workspace = _workspace(tmp_path)
+    manifest = stage_wiki(workspace)
+    manifest.pop("sources_sha256", None)
+    manifest_path = workspace / ".dy_superpowers/wiki/manifest.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="原始资料.*重新构建"):
+        load_staged(workspace)
+    stage_wiki(workspace)
+    load_staged(workspace)
+
+
 def test_safe_path_rejects_escape_and_symlink(tmp_path):
     with pytest.raises(ValueError):
         safe_path(tmp_path, "..", "..", "secret")

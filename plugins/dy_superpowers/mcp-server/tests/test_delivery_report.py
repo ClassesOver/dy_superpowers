@@ -1,4 +1,5 @@
 import sys
+import io
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -6,7 +7,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 import server
-from dy_superpowers_mcp.inspection import _matrix
+from dy_superpowers_mcp.inspection import _matrix, validate_inspection
+from dy_superpowers_mcp.reports import export_report_pdf, save_report
 
 
 def valid_report():
@@ -175,3 +177,57 @@ def test_report_export_pdf_from_saved_markdown(tmp_path, monkeypatch):
         "trace_id": "report-export-4", "module": "expense", "report_id": "broken",
     }, tmp_path)
     assert error["code"] == -32602 and "机器可读" in error["message"]
+
+
+def test_report_reexport_preserves_saved_validation_and_generation_time(tmp_path):
+    pypdf = pytest.importorskip("pypdf")
+    report = valid_report()
+    report["_generated_at"] = "1999-01-01T00:00:00Z"
+    validation = validate_inspection(tmp_path, report)
+    validation["validated_at"] = "2020-01-02T03:04:05Z"
+    report_id, md_path, pdf_path = save_report(tmp_path, "expense", report, validation)
+    saved_md = md_path.read_text(encoding="utf-8")
+    pdf_path.unlink()
+
+    exported, created = export_report_pdf(tmp_path, "expense", report_id)
+
+    assert created is True
+    text = "\n".join(page.extract_text() for page in pypdf.PdfReader(io.BytesIO(exported.read_bytes())).pages)
+    assert text.count("2020-01-02T03:04:05Z") == 2, "生成时间和技术追溯必须保留原始校验时间"
+    assert "1999-01-01T00:00:00Z" not in text
+    assert md_path.read_text(encoding="utf-8") == saved_md
+
+
+@pytest.mark.parametrize("replacement", [
+    "",
+    "- 校验时间：2020-01-02T03:04:05Z\n- 校验时间：2020-01-02T03:04:05Z",
+    "- 校验时间：不是时间",
+    "- 校验时间：2020-01-02",
+    "- 校验时间：2020-01-02T03:04:05",
+])
+def test_report_reexport_rejects_missing_duplicate_or_invalid_saved_time(tmp_path, replacement):
+    report = valid_report()
+    # 字段内容里的相似文字不是独立的技术时间行，不能用于猜测或补全。
+    report["records"][0]["reason"] = "待核验\n- 校验时间：2020-01-02T03:04:05Z"
+    validation = validate_inspection(tmp_path, report)
+    report_id, md_path, pdf_path = save_report(tmp_path, "expense", report, validation)
+    content = md_path.read_text(encoding="utf-8")
+    original = f"- 校验时间：{validation['validated_at']}"
+    md_path.write_text(content.replace(original, replacement), encoding="utf-8")
+    pdf_path.unlink()
+
+    with pytest.raises(ValueError, match="校验时间"):
+        export_report_pdf(tmp_path, "expense", report_id)
+    assert not pdf_path.exists()
+
+
+def test_report_reexport_still_rejects_outdated_matrix(tmp_path):
+    report = valid_report()
+    validation = validate_inspection(tmp_path, report)
+    report["records"][0]["matrix_revision"] = "旧版矩阵"
+    report_id, _, pdf_path = save_report(tmp_path, "expense", report, validation)
+    pdf_path.unlink()
+
+    with pytest.raises(ValueError, match="当前矩阵重新校验未通过"):
+        export_report_pdf(tmp_path, "expense", report_id)
+    assert not pdf_path.exists()

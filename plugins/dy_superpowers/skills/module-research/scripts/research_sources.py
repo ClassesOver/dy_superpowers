@@ -309,9 +309,11 @@ def parse_qa_json(path: Path) -> dict:
             issues.append({"code": "qa_attachments_invalid", "index": index})
             attachments = []
         evidence, refs = _attachments(attachments, issues, path.parent)
-        rows.append(_row("", question[:80], answer,
+        row = _row("", question[:80], answer,
                          {"question": question, "kind": "qa", "index": index},
-                         _text(item.get("scope")), "；".join(evidence), detail_refs=refs))
+                         _text(item.get("scope")), "；".join(evidence), detail_refs=refs)
+        row["scope"] = _text(item.get("scope"))
+        rows.append(row)
     return {"rows": rows, "worksheets": [], "issues": issues}
 
 

@@ -23,7 +23,7 @@ def _load_script():
 ri = _load_script()
 
 # parse_plain 解析 .txt：标题行给检查顺序，正文行“01｜结论”给子项编号。
-V1 = ["# 1 应用安装", "01｜费用基础应用需要安装并启用。", "02｜OCR 模块按需启用，需确认服务可用。"]
+V1 = ["# 1 应用安装", "01｜费用基础应用需要安装并启用。", "02｜OCR 模块按需启用，服务已确认可用。"]
 V2 = ["# 1 应用安装", "01｜费用基础应用需要安装，并在验收前启用。",  # 01 结论变更
       "# 999 不存在的检查项", "01｜该行应被矩阵校验阻塞。"]  # 02 被移除；999 键不在矩阵
 
@@ -140,14 +140,46 @@ def test_scope_resolution_blocked_on_multi_scope_and_missing(tmp_path):
     assert result["blocked"] and "适用范围" in result["blocked"][0]["reasons"][-1]
     assert not result["new"] and not result["changed"]
 
-    # 给出与某一范围一致的应用条件 → 匹配该范围并分类，不新建重复记录
+    # 明确来源记录范围 → 匹配该范围并分类，不新建重复记录
     candidates = _candidates(_write_source(tmp_path / "v1b.txt", [
         "# 1 应用安装", "01｜医院A结论。"]))
-    candidates[0]["applicability"] = "示例医院/2026"
+    candidates[0]["scope"] = "示例医院/2026"
     result = ri.classify(workspace, "expense", candidates)
     expected = read_record(workspace, "expense", "1", "01", scope="示例医院/2026")
     assert result["unchanged"] and not result["new"] and not result["changed"]
     assert result["unchanged"][0]["scope_id"] == expected["scope_id"]
+
+
+def test_pending_source_template_is_blocked_instead_of_classified_as_new(tmp_path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    candidate = {
+        "check_order": "EXP-1-001", "research_id": "01", "config_item": "应用安装",
+        "conclusion": "基础应用本期必需【待确认】", "applicability": "适用于所有本期公司",
+        "contains_pending_questions": True,
+        "locator": {"sheet": "总账调研清单", "cell": "G4"},
+    }
+
+    result = ri.classify(workspace, "general-ledger", [candidate], default_scope="测试医院/2026")
+
+    assert not result["new"]
+    assert not result["changed"]
+    assert "来源仍含待确认内容，不能分类为可导入结论" in result["blocked"][0]["reasons"]
+
+
+def test_checklist_applicability_is_not_used_as_record_scope(tmp_path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    candidate = {
+        "check_order": "EXP-1-001", "research_id": "01", "config_item": "应用安装",
+        "conclusion": "基础应用本期必需。", "applicability": "适用于所有本期总账公司。",
+        "contains_pending_questions": False,
+        "locator": {"sheet": "总账调研清单", "cell": "G4"},
+    }
+
+    result = ri.classify(workspace, "general-ledger", [candidate], default_scope="测试院区/2026")
+
+    assert result["new"][0]["scope"] == "测试院区/2026"
 
 
 def test_cli_diff_and_record_output(tmp_path, capsys, monkeypatch):

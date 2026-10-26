@@ -7,6 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
+from dy_superpowers_mcp.memory import write_note
 import server
 
 
@@ -133,6 +134,20 @@ def test_adapter_falls_back_to_workspace_markdown_when_basic_memory_unavailable(
     assert result["backend"] == "local-fallback"
     assert result["available"] is False
     assert result["results"] == [{"name": "profile.md", "matches": ["项目使用 Odoo 12"]}]
+
+
+def test_fallback_search_includes_nested_notes_but_not_in_module_scope(tmp_path, monkeypatch):
+    write_note(tmp_path, "expense/policy", "费用政策", "住宿费降级搜索标记", [], confirmed=True)
+    adapter = BasicMemoryAdapter(tmp_path)
+
+    def unavailable(*args, **kwargs):
+        raise FileNotFoundError("basic-memory")
+
+    monkeypatch.setattr(adapter, "_run", unavailable)
+    result = adapter.search("住宿费降级搜索标记")
+    assert result["available"] is False
+    assert result["results"] == [{"name": "notes/expense/policy.md", "matches": ["住宿费降级搜索标记"]}]
+    assert adapter.search("住宿费降级搜索标记", module="expense")["results"] == []
 
 
 def test_module_scoped_fallback_search_does_not_mix_project_memory(tmp_path, monkeypatch):

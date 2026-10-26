@@ -3,7 +3,7 @@
 数据来源：鼎医 HRP Odoo 12 源码仓库（dy-expense、dy-finance、dy-acc-center、
 dy-budget、dy-hrfm、dy-base 等）的 __manifest__.py 与模型声明；
 技术名、模型名和依赖为源码事实，工作流描述为通用概括。源码索引详见插件
-references/odoo12-source-index.md。线上账套的实际安装状态、字段和定制必须通过
+references/hrp-source-index.md。线上账套的实际安装状态、字段和定制必须通过
 dy_odoo_* 工具核验；本索引只提供解释和检索线索。
 """
 from __future__ import annotations
@@ -20,6 +20,8 @@ MODULES: dict[str, dict[str, Any]] = {
             "dy.expense.item", "dy.expense.application.item", "dy.expense.city.season",
             "dy.expense.permission.configuration", "dy.expense.approval.task",
             "dy.expense.credit.score.config", "dy.expense.detail.report",
+            "dy.expense.report", "dy.expense.report.payment",
+            "dy.expense.policy", "dy.expense.policy.line",
         ],
         "workflow": "申请 → 借款/报销 → 审批 → 付款/核销；单据类型、编号和权限由 dy.expense.document.type 与 dy.expense.permission.configuration 配置",
         "model_notes": {
@@ -30,6 +32,46 @@ MODULES: dict[str, dict[str, Any]] = {
         },
         "depends": ["dy_fin_mdm"],
         "source_repo": "dy-expense",
+    },
+    "ocr_expense": {
+        "name": "OCR&费用管理集成",
+        "aliases": ["OCR", "发票识别", "费用OCR"],
+        "models": ["dy.ocr.expense.item.rule", "dy.expense.book", "dy.expense.report"],
+        "workflow": "源码含 OCR 费用规则、费用台账和报销单扩展；实际识别与审批流程须在目标账套核验",
+        "depends": ["ocr_base", "dy_mobile_base", "mobile_app_approval", "dy_expense", "mobile_app_fill", "mobile_expense"],
+        "source_repo": "dy-mobile-service",
+    },
+    "dy_bank_base": {
+        "name": "银医基础平台",
+        "aliases": ["银医", "银企", "银行接口", "银行付款"],
+        "models": ["dy.bank.payment.order", "dy.bank.payment.order.line"],
+        "workflow": "源码提供银医付款单模型；银行开通、支付能力和线上流程须在目标账套核验",
+        "depends": ["dy_base", "dy_fin_mdm"],
+        "source_repo": "dy-bank-payment",
+    },
+    "dy_bank_expense": {
+        "name": "银医平台&费用报销集成",
+        "aliases": ["银医", "银企费用", "费用银行付款"],
+        "models": ["dy.bank.payment.order", "dy.expense.report", "dy.expense.report.payment"],
+        "workflow": "源码扩展银医付款单、费用报销单与付款单；模块依赖不证明线上付款链路已启用",
+        "depends": ["dy_bank_base", "dy_expense"],
+        "source_repo": "dy-bank-payment",
+    },
+    "mobile_expense": {
+        "name": "移动端费用个性化",
+        "aliases": ["移动费用", "移动端费用", "移动报销"],
+        "models": ["dy.expense.report.mobile.iface", "dy.expense.payment.requisition.mobile.iface"],
+        "workflow": "源码含费用报销与借款申请移动接口；实际移动入口与审批配置须在目标账套核验",
+        "depends": ["dy_mobile_base", "mobile_app_fill", "mobile_app_approval", "dy_expense"],
+        "source_repo": "dy-mobile-service",
+    },
+    "dy_purchase": {
+        "name": "鼎医采购管理",
+        "aliases": ["鼎医采购", "HRP采购", "采购管理", "采购申请"],
+        "models": ["dy.purchase.requisition.order", "dy.purchase.requisition.order.line", "purchase.order"],
+        "workflow": "源码定义采购申请并扩展采购订单；实际采购流程须在目标账套核验",
+        "depends": ["dy_scm_mdm"],
+        "source_repo": "dy-scm",
     },
     "dy_fin_expense_pf": {
         "name": "费用财务会计平台（会计平台-费用）",
@@ -100,7 +142,7 @@ MODULES: dict[str, dict[str, Any]] = {
             "account.move.generate", "dy.fin.acc.account.move.summary",
             "dy.fin.acc.account.move.discrete.number",
         ],
-        "workflow": "凭证：草稿 → 审核签字 → 过账 → 反过账/作废；期末按周期凭证模板结转",
+        "workflow": "凭证：草稿 → 审核签字 → 过账 → 反过账/作废；期末结转通过结转项目、模板和执行记录生成财务或预算凭证，周期凭证模板用于经常性凭证",
         "depends": ["dy_fin_mdm"],
         "source_repo": "dy-finance",
     },
@@ -148,7 +190,7 @@ def module_info(module: str) -> dict[str, Any]:
     if info is None:
         return {"found": False, "module": module, "available": sorted(MODULES)}
     result = {"found": True, "module": module, "odoo_version": "12.0",
-              "limitations": "源码索引仅供解释；HRP 自定义字段、定制 addon、实际安装状态和版本必须通过 dy_odoo_* 工具在目标账套核验",
+              "limitations": "源码索引仅供解释；依赖为 manifest 源码声明，不证明线上安装状态或工作流；HRP 自定义字段、定制 addon、实际安装状态和版本必须通过 dy_odoo_* 工具在目标账套核验",
               **info}
     if "source_repo" not in info:
         result["source"] = "Odoo 12 标准模块概念摘要"

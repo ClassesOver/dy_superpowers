@@ -39,7 +39,8 @@ RECIPES = {
         {"order": "8", "model": "dy.budget.control.execution.rule",
          "domain": [["source_doc", "in", ["expense_report", "expense_payment", "expense_requisition"]]],
          "fields": ["id", "company_id", "source_doc", "date_from", "date_to", "is_active_flag"]},
-        {"order": "9", "model": "dy.hrfm.expense.execute.rule", "domain": [],
+        {"order": "9", "model": "dy.hrfm.expense.execute.rule",
+         "domain": [["source_doc", "in", ["expense_report", "expense_payment", "expense_requisition"]]],
          "fields": ["id", "company_id", "source_doc", "date_from", "date_to", "active_flag", "execute_node"]},
         {"order": "23", "model": "dy.expense.permission.configuration", "domain": [],
          "fields": ["id", "company_id", "effective_date", "expiration_date", "is_active"]},
@@ -50,22 +51,22 @@ RECIPES = {
     "general-ledger": [
         {"order": "EXP-1-002", "model": "res.company", "domain": [], "fields": ["id"], "expected": r"配置(\d+)个公司"},
         {"order": "EXP-2-005", "model": "dy.fin.account.structure", "domain": [],
-         "fields": ["id", "company_distribution_ids"], "expected": r"配置(\d+)套结构"},
+         "fields": ["id"], "expected": r"配置(\d+)套结构"},
         {"order": "EXP-2-006", "model": "dy.fin.account.type", "domain": [], "fields": ["id"], "expected": r"配置(\d+)种科目类型"},
         {"order": "EXP-2-010", "model": "dy.account.permissions.settings", "domain": [["active", "=", True]],
          "fields": ["id", "permission_user_ids", "permission_account_ids"], "expected": r"有(\d+)套启用"},
         {"order": "EXP-3-012", "model": "dy.fin.account.period", "domain": [],
          "fields": ["id", "company_id", "state", "date_from", "date_to"], "expected": r"(\d+)个期间记录"},
         {"order": "EXP-5-016", "model": "dy.fin.account.analytic.plan", "domain": [],
-         "fields": ["id", "plan_ids"], "expected": r"已建(\d+)套方案"},
+         "fields": ["id", "company_id", "plan_ids"], "expected": r"已建(\d+)套方案"},
         {"order": "EXP-6-019", "model": "account.journal", "domain": [["active", "=", True]],
-         "fields": ["id", "company_id"], "expected": r"(\d+)个有效分类账"},
+         "fields": ["id", "company_id", "account_structure_id", "journal_company_ids"], "expected": r"(\d+)个有效分类账"},
         {"order": "EXP-6-021", "model": "dy.fin.acc.account.periodicity.voucher", "domain": [],
          "fields": ["id", "company_id", "line_ids"], "expected": r"配置(\d+)个经常性凭证模板"},
         {"order": "EXP-8-024", "model": "dy.fin.acc.financial.report.item", "domain": [],
          "fields": ["id"], "expected": r"配置(\d+)条财务报表项目"},
         {"order": "EXP-8-027", "model": "dy.fin.account.cash.flow.statement.entry", "domain": [],
-         "fields": ["id"], "expected": r"配置(\d+)条现金流量表项"},
+         "fields": ["id", "account_structure_id"], "expected": r"配置(\d+)条现金流量表项"},
         {"order": "EXP-8-028", "model": "dy.fin.cash.flow.mapping", "domain": [],
          "fields": ["id", "company_id", "active"], "expected": r"配置(\d+)条现金流映射"},
         {"order": "EXP-9-029", "model": "account.mapping", "domain": [],
@@ -102,9 +103,22 @@ def temporal_counts(rows, fields, as_of):
         else:
             status = "within_date_range"
         counts[status] += 1
-        if status == "within_date_range" and row.get(flag):
+        if flag is not None and status == "within_date_range" and row.get(flag):
             counts["enabled_within_date_range"] += 1
     return dict(counts)
+
+
+def policy_line_effective_count(rows, as_of):
+    return sum((not row.get("effective_date") or row["effective_date"] <= as_of)
+               and (not row.get("expiry_date") or row["expiry_date"] >= as_of) for row in rows)
+
+
+def permission_validity(rows, as_of):
+    # is_active 是按服务器今天计算的状态，不是独立的启用开关。
+    return {"validity": temporal_counts(rows, ("effective_date", "expiration_date", None), as_of),
+            "current_date_state": {"is_active_true": sum(bool(row["is_active"]) for row in rows),
+                                   "is_active_false": sum(not row["is_active"] for row in rows)},
+            "note": "validity 按目标业务日期及起止日推算；current_date_state 是服务器今天的 is_active，不能用于历史或未来有效性判断"}
 
 
 def validate_manifest(manifest):
@@ -128,6 +142,10 @@ def source_company_scope(manifest):
     return ids if isinstance(ids, list) and ids and all(type(item) is int and item > 0 for item in ids) else []
 
 
+def structure_ids_for_companies(structure_lines):
+    return sorted({row["head_id"][0] for row in structure_lines if row.get("head_id")})
+
+
 def policy_name_from_source(matched):
     names = {match for row in matched for match in re.findall(r"[“\"]([^”\"]+)[”\"]政策头", row["conclusion"])}
     if len(names) != 1:
@@ -136,11 +154,31 @@ def policy_name_from_source(matched):
 
 
 SHARED_CONFIG_MODELS = {"dy.expense.city.season"}
+OWNER_COMPANY_MODELS = {"dy.fin.account.analytic.plan", "dy.fin.cash.flow.mapping", "account.mapping"}
 
 
 def scoped_domain(model, metadata, company_ids, structure_ids):
     if model == "res.company":
         return [["id", "in", company_ids]]
+    if model == "dy.expense.policy.line":
+        # 调用方必须按先前查得的政策头追加 expense_policy 范围。
+        return []
+    if model == "dy.fin.account.cash.flow.statement.entry":
+        if "account_structure_id" not in metadata:
+            raise ValueError("现金流量表项缺少已知范围字段 account_structure_id")
+        return ["|", ["account_structure_id", "=", False],
+                ["account_structure_id", "in", structure_ids]]
+    if model == "account.journal":
+        if not {"account_structure_id", "journal_company_ids"} <= metadata.keys():
+            raise ValueError("分类账缺少已知范围字段，不能用 company_id 替代适用范围")
+        return [["account_structure_id", "in", structure_ids],
+                "|", ["journal_company_ids", "=", False], ["journal_company_ids", "in", company_ids]]
+    if model == "dy.expense.document.type" and "company_ids" in metadata:
+        return ["|", ["company_ids", "=", False], ["company_ids", "in", company_ids]]
+    if model in OWNER_COMPANY_MODELS:
+        if "company_id" not in metadata:
+            raise ValueError("模型缺少已知范围字段 company_id，不能使用候选公司列表替代")
+        return [["company_id", "in", company_ids]]
     if "company_ids" in metadata:
         return [["company_ids", "in", company_ids]]
     if "company_id" in metadata:
@@ -149,7 +187,7 @@ def scoped_domain(model, metadata, company_ids, structure_ids):
         return [["company_distribution_ids", "in", company_ids]]
     if "account_structure_id" in metadata:
         return [["account_structure_id", "in", structure_ids]]
-    if model in SHARED_CONFIG_MODELS or model == "dy.expense.policy.line":
+    if model in SHARED_CONFIG_MODELS:
         return []
     raise ValueError("模型缺少已知范围字段，不能执行无界限记录查询")
 
@@ -214,11 +252,11 @@ async def source_workflow(workspace, manifest, connection, as_of, *, diagnostic_
             summary["diagnostic_visible_scope"] = diagnostic_visible_scope
             structure_ids = []
             if company_ids:
-                structures = await call("dy_odoo_record_search", model="dy.fin.account.structure",
-                                        args=[[["company_distribution_ids", "in", company_ids]]],
-                                        kwargs={"fields": ["id"], "limit": 100})
-                assert len(structures) < 100, "结构列表满页，范围不完整"
-                structure_ids = [row["id"] for row in structures]
+                structures = await call("dy_odoo_record_search", model="dy.fin.account.structure.line",
+                                        args=[[["company_id", "in", company_ids]]],
+                                        kwargs={"fields": ["head_id"], "limit": 100})
+                assert len(structures) < 100, "结构行列表满页，范围不完整"
+                structure_ids = structure_ids_for_companies(structures)
             policy_ids = None
             for recipe in RECIPES[module]:
                 matched = [row for key, row in plan["sources"].items() if key[0] == recipe["order"]]
@@ -297,7 +335,7 @@ async def source_workflow(workspace, manifest, connection, as_of, *, diagnostic_
                                                                      ("date_from", "date_to", "active_flag"), as_of)
                                                  for name in sorted({row["source_doc"] for row in rows if isinstance(row["source_doc"], str)})}
                     elif recipe["model"] == "dy.expense.permission.configuration":
-                        entry["validity"] = temporal_counts(rows, ("effective_date", "expiration_date", "is_active"), as_of)
+                        entry.update(permission_validity(rows, as_of))
                     elif recipe["model"] == "dy.fin.account.period":
                         entry["states"] = dict(Counter(row["state"] for row in rows))
                         if module == "expense":
@@ -305,6 +343,7 @@ async def source_workflow(workspace, manifest, connection, as_of, *, diagnostic_
                             entry["note"] = "as_of 仅筛选当前库中该业务日期的期间及规则；并非恢复来源核查日的历史数据库快照"
                     elif recipe["model"] == "dy.expense.policy.line":
                         entry["control_levels"] = dict(Counter(str(row["control_level"]) for row in rows))
+                        entry["effective_count"] = policy_line_effective_count(rows, as_of)
                     for item in report["records"]:
                         if item["check_order"] == recipe["order"]:
                             item["reason"] += f"；{recipe['model']} 已分页读取 {len(rows)} 条，尚未替代公司/制度/流程验收"
@@ -372,7 +411,8 @@ def test_source_company_scope_requires_explicit_positive_ids():
 
 def test_scoped_domain_never_uses_unknown_model_as_unbounded_query():
     assert scoped_domain("res.company", {"id": {}}, [7], []) == [["id", "in", [7]]]
-    assert scoped_domain("dy.expense.document.type", {"company_ids": {}}, [7], []) == [["company_ids", "in", [7]]]
+    assert scoped_domain("dy.expense.document.type", {"company_ids": {}}, [7], []) == [
+        "|", ["company_ids", "=", False], ["company_ids", "in", [7]]]
     assert scoped_domain("account.mapping", {"company_id": {}}, [7], []) == [["company_id", "in", [7]]]
     assert scoped_domain("dy.expense.city.season", {}, [7], []) == []
     with pytest.raises(ValueError, match="范围字段"):
@@ -412,6 +452,40 @@ def test_policy_detail_recipe_uses_real_parent_field():
     recipe = next(row for row in RECIPES["expense"] if row.get("policy_scope"))
     assert "expense_policy" in recipe["fields"]
     assert "expense_item_id" not in recipe["fields"]
+
+
+def test_policy_detail_count_uses_business_date():
+    rows = [
+        {"effective_date": "2025-01-01", "expiry_date": "2026-10-22"},
+        {"effective_date": "2026-10-23", "expiry_date": False},
+        {"effective_date": False, "expiry_date": "2026-10-21"},
+    ]
+    assert policy_line_effective_count(rows, "2026-10-22") == 1
+
+
+def test_source_queries_use_explicit_record_relations():
+    structure_recipe = next(row for row in RECIPES["general-ledger"]
+                            if row["model"] == "dy.fin.account.structure")
+    assert "company_distribution_ids" not in structure_recipe["fields"]
+    assert structure_ids_for_companies([{"head_id": [12, "财务账套"]}, {"head_id": [15, "预算账套"]},
+                                        {"head_id": False}]) == [12, 15]
+    assert scoped_domain("dy.fin.account.cash.flow.statement.entry",
+                         {"account_structure_id": {}}, [7], [12]) == [
+        "|", ["account_structure_id", "=", False], ["account_structure_id", "in", [12]]]
+    expense_rules = next(row for row in RECIPES["expense"]
+                         if row["model"] == "dy.hrfm.expense.execute.rule")
+    assert expense_rules["domain"] == [["source_doc", "in", [
+        "expense_report", "expense_payment", "expense_requisition"]]]
+
+
+def test_general_ledger_reference_distinguishes_finance_and_budget_carry_forward():
+    reference = Path(__file__).parents[2] / "skills/general-ledger-inspection/references/source-queries.md"
+    content = reference.read_text(encoding="utf-8")
+    assert "carry_forward_account_move_id" in content and "account.move" in content
+    assert "carry_forward_budget_move_id" in content and "budget.account.move" in content
+    assert "财务结转通过 `carry_forward_account_move_id` 回链生成的 `account.move`" in content
+    assert "预算结转通过 `carry_forward_budget_move_id` 回链生成的 `budget.account.move`" in content
+    assert "周期模板结转" not in content
 
 
 def test_temporal_rules_do_not_treat_enabled_expired_as_effective():

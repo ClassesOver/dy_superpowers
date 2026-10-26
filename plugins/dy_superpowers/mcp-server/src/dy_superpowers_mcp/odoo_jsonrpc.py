@@ -115,9 +115,15 @@ class OdooReadClient:
             kwargs,
         ])
 
-    def search_read(self, model: str, domain: list[Any], fields: list[str], limit: int, offset: int = 0) -> list[dict[str, Any]]:
+    def search_read(self, model: str, domain: list[Any], fields: list[str], limit: int, offset: int = 0,
+                    *, context: dict[str, bool] | None = None) -> list[dict[str, Any]]:
+        options = {"fields": fields, "limit": limit, "offset": offset}
+        if context is not None:
+            if not isinstance(context, dict) or set(context) - {"active_test"} or any(type(value) is not bool for value in context.values()):
+                raise OdooConfigurationError("context 仅支持布尔型 active_test")
+            options["context"] = context
         try:
-            result = self._execute_kw(model, "search_read", [domain], {"fields": fields, "limit": limit, "offset": offset})
+            result = self._execute_kw(model, "search_read", [domain], options)
         except OdooRPCError:
             raise
         except Exception as exc:
@@ -153,7 +159,7 @@ class OdooReadClient:
         return self.search_read("ir.module.module", domain, ["name", "shortdesc", "latest_version", "state", "dependencies_id"], 100, offset)
 
 
-def validate_read_arguments(arguments: dict[str, Any]) -> tuple[str, list[Any], list[str], int, int]:
+def validate_read_arguments(arguments: dict[str, Any]) -> tuple[str, list[Any], list[str], int, int, dict[str, bool]]:
     method = arguments.get("method", "search_read")
     if method != "search_read":
         raise OdooConfigurationError("仅支持 search_read 只读查询")
@@ -167,6 +173,11 @@ def validate_read_arguments(arguments: dict[str, Any]) -> tuple[str, list[Any], 
     kwargs = arguments.get("kwargs", {})
     if not isinstance(kwargs, dict):
         raise OdooConfigurationError("kwargs 必须是对象")
+    if set(kwargs) - {"fields", "limit", "offset", "context"}:
+        raise OdooConfigurationError("kwargs 仅支持 fields/limit/offset/context")
+    context = kwargs.get("context", {})
+    if not isinstance(context, dict) or set(context) - {"active_test"} or any(type(value) is not bool for value in context.values()):
+        raise OdooConfigurationError("context 仅支持布尔型 active_test")
     fields = kwargs.get("fields", [])
     if not isinstance(fields, list) or not all(isinstance(field, str) and field for field in fields):
         raise OdooConfigurationError("kwargs.fields 必须是字符串列表")
@@ -176,4 +187,4 @@ def validate_read_arguments(arguments: dict[str, Any]) -> tuple[str, list[Any], 
         raise OdooConfigurationError("kwargs.limit 必须是 1 到 100 的整数")
     if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
         raise OdooConfigurationError("kwargs.offset 必须是不小于 0 的整数")
-    return model, domain, fields, limit, offset
+    return model, domain, fields, limit, offset, context

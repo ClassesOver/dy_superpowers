@@ -33,6 +33,8 @@ def note_path(workspace: str | Path, slug: str) -> Path:
     if not notes.is_relative_to(workspace_path.resolve()):
         raise ValueError("wiki 记忆必须位于当前工作区")
     path = notes / f"{slug}.md"
+    if any(parent.is_symlink() for parent in path.parents if parent != notes):
+        raise ValueError("wiki 记忆父目录不允许使用符号链接")
     if path.is_symlink() or not path.resolve().is_relative_to(notes):
         raise ValueError("wiki 记忆文件必须位于记忆目录内")
     return path

@@ -47,6 +47,7 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
     origin = f'http://127.0.0.1:{rpc.server_address[1]}'
     env = {**os.environ, 'ODOO_URL': origin, 'DY_ODOO_ALLOWED_ORIGINS': origin,
            'ODOO_DB': 'db', 'ODOO_USERNAME': 'u', 'ODOO_PASSWORD': 'p', 'CODEX_HOME': str(tmp_path / 'codex')}
+    env.pop('VIRTUAL_ENV', None)
     params = StdioServerParameters(
         command=config['command'],
         args=[arg.replace('${PLUGIN_ROOT}', str(plugin)) for arg in config['args']],

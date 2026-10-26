@@ -13,6 +13,7 @@ from pathlib import Path
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _MODULE_NAMES = {"expense": "费用", "general-ledger": "总账"}
+_CHECK_PREFIXES = {"expense": "EXP", "general-ledger": "GL"}
 _STATUSES = ("通过", "部分通过", "不通过", "不适用", "待确认", "未检查", "未知")
 _MARKDOWN_SPECIAL = set(r"\`*_{}[]<>()#+-.!|")
 
@@ -59,6 +60,17 @@ def _category_index(module: str) -> dict[str, dict[str, str]]:
     return result
 
 
+def _check_label(module: str, record: dict) -> str:
+    """统一业务编号；原始键仍留在机器数据中以关联调研和 trace。"""
+    order = str(record.get("check_order", ""))
+    item = str(record.get("research_id", ""))
+    pattern = r"(\d+)" if module == "expense" else r"EXP-\d+-(\d+)"
+    match = re.fullmatch(pattern, order)
+    if module in _CHECK_PREFIXES and match and re.fullmatch(r"\d+", item):
+        return f"{_CHECK_PREFIXES[module]}-{int(match[1]):03d}-{int(item):02d}"
+    return f"{order} + {item}"
+
+
 def _render_report(module: str, report_id: str, report: dict, validation: dict) -> str:
     module_name = _MODULE_NAMES.get(module, module)
     records = [record for record in report.get("records", []) if isinstance(record, dict)]
@@ -69,7 +81,7 @@ def _render_report(module: str, report_id: str, report: dict, validation: dict) 
     for record in records:
         if record.get("result") in {"不通过", "部分通过", "待确认", "未检查", "未知"}:
             reason = record.get("reason", "").strip() or "未提供原因"
-            blockers.setdefault(reason, []).append(f"{record.get('check_order', '')} + {record.get('research_id', '')}")
+            blockers.setdefault(reason, []).append(_check_label(module, record))
 
     project = report.get("project_context", {})
     if not isinstance(project, dict):
@@ -125,7 +137,7 @@ def _render_report(module: str, report_id: str, report: dict, validation: dict) 
     for category, items in grouped.items():
         sections.extend([f"### {category}", "", "| 检查项 | 配置项 | 优先级 | 结果 | 说明/待办 |", "| --- | --- | --- | --- | --- |"])
         for record, metadata in items:
-            label = f"{record.get('check_order', '')} + {record.get('research_id', '')}"
+            label = _check_label(module, record)
             reason = record.get("reason", "") or "—"
             sections.append("| " + " | ".join(_cell(value) for value in (
                 label, metadata.get("item", "—"), metadata.get("priority", "—"), record.get("result", "未知"), reason,
@@ -133,7 +145,7 @@ def _render_report(module: str, report_id: str, report: dict, validation: dict) 
         sections.append("")
     sections.extend(["## 检查依据与证据", ""])
     for record in records:
-        label = f"{record.get('check_order', '')} + {record.get('research_id', '')}"
+        label = _check_label(module, record)
         sections.extend([
             f"### {_markdown_text(label)}｜{_markdown_text(record.get('result', '未知'))}", "",
             f"- 验收要求：{_markdown_text(record.get('acceptance_standard', '未提供'))}",
@@ -146,6 +158,7 @@ def _render_report(module: str, report_id: str, report: dict, validation: dict) 
     sections.extend(["## 技术追溯", "", f"- 报告编号：`{report_id}`", f"- 校验时间：{validation['validated_at']}",
                      f"- 矩阵版本：`{json.dumps(validation['matrix_revisions'], ensure_ascii=False, sort_keys=True)}`",
                      f"- 结构校验：{'通过' if validation.get('valid') else '失败'}；门禁：{validation['gate']}。",
+                     "- 业务编号使用 EXP（费用）或 GL（总账）前缀；原始检查键保留在下方 JSON，供调研和证据回链。",
                      "- 完整原始检查数据见下方 JSON；用于复核、迁移和自动处理。", "",
                      "## 完整检查数据（机器可读）", "", f"{fence}json",
                      machine_data, fence, ""])
@@ -253,16 +266,28 @@ def export_report_pdf(workspace: str | Path, module: str, report_id: str) -> tup
                if isinstance(item, dict) and isinstance(item.get("module"), str)}
     if modules != {module}:
         raise ValueError("报告数据与模块不匹配，无法重导出 PDF")
+    saved_times = re.findall(r"^- 校验时间：([^\r\n]*)\r?$", content, re.MULTILINE)
+    if len(saved_times) != 1:
+        raise ValueError("报告必须包含唯一的独立校验时间行，无法重导出 PDF")
+    saved_time = saved_times[0]
+    try:
+        parsed_time = datetime.fromisoformat(saved_time.replace("Z", "+00:00"))
+        if parsed_time.tzinfo is None:
+            raise ValueError("缺少时区")
+    except ValueError as exc:
+        raise ValueError("报告校验时间必须为带时区的 ISO 8601 时间，无法重导出 PDF") from exc
     from .inspection import validate_inspection
     from .report_pdf import render_report_pdf
 
     validation = validate_inspection(Path(workspace), report)
     if not validation.get("valid"):
         raise ValueError("报告数据按当前矩阵重新校验未通过（矩阵或调研状态已变化），不能重导出 PDF")
+    validation["validated_at"] = saved_time
     pdf_path = report_path(workspace, module, report_id).with_suffix(".pdf")
     if pdf_path.is_symlink():
         raise ValueError("巡检报告文件不允许使用符号链接")
     if pdf_path.is_file():
         return pdf_path, False
-    _write_new_bytes(pdf_path, render_report_pdf(module, report_id, report, validation))
+    _write_new_bytes(pdf_path, render_report_pdf(module, report_id, report, validation,
+                                              generated_at=saved_time))
     return pdf_path, True

@@ -373,14 +373,16 @@ def _handle_memory_write(name: str, arguments: dict, workspace: Path, store: Tra
 
 def _handle_odoo_record_search(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     try:
-        model, domain, fields, limit, offset = validate_read_arguments(arguments)
+        model, domain, fields, limit, offset, context = validate_read_arguments(arguments)
         query_event = {'event': 'odoo.query', 'operation': 'search_read', 'tool': name, 'status': 'running',
                        'model': model, 'domain': domain, 'domain_term_count': len(domain),
                        'field_count': len(fields), 'limit': limit, 'offset': offset,
+                       'active_test': context.get('active_test', True),
                        'trace_context': arguments.get('trace_context', {}), 'span_id': span_id}
         append_trace(store, arguments['trace_id'], query_event)
         record_otel_event(otel_span, query_event)
-        result = _odoo_client(workspace).search_read(model, domain, fields, limit, offset)
+        client = _odoo_client(workspace)
+        result = client.search_read(model, domain, fields, limit, offset, **({'context': context} if context else {}))
     except OdooConfigurationError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     except OdooRPCError as exc:
@@ -389,6 +391,7 @@ def _handle_odoo_record_search(name: str, arguments: dict, workspace: Path, stor
     event = {'event': 'odoo.read', 'operation': 'search_read', 'tool': name, 'status': 'ok', 'model': model,
              'count': len(result), 'result_count': len(result), 'field_count': len(fields),
              'domain_term_count': len(domain), 'limit': limit, 'offset': offset, 'domain': domain,
+             'active_test': context.get('active_test', True),
              'trace_context': arguments.get('trace_context', {}), 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
@@ -669,7 +672,12 @@ TOOL_REGISTRY = {
                         'model': {'type': 'string', 'pattern': '^[a-z0-9_][a-z0-9_.]{0,127}$'},
                         'method': {'type': 'string', 'enum': ['search_read']},
                         'args': {'type': 'array'},
-                        'kwargs': {'type': 'object'}}},
+                        'kwargs': {'type': 'object', 'additionalProperties': False,
+                                   'properties': {'fields': {'type': 'array', 'items': {'type': 'string'}},
+                                                  'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
+                                                  'offset': {'type': 'integer', 'minimum': 0},
+                                                  'context': {'type': 'object', 'additionalProperties': False,
+                                                              'properties': {'active_test': {'type': 'boolean'}}}}}}},
         _handle_odoo_record_search,
     ),
     'dy_odoo_record_read': (

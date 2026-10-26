@@ -32,6 +32,10 @@ def _strip_subitem(conclusion: str) -> str:
     return SUBITEM_PREFIX.sub("", conclusion or "", count=1).strip()
 
 MATRIX_MODULES = {"expense", "general-ledger"}
+SOURCE_HINTS = {
+    "multiple_conclusion_tables": "来源包含多个结论表，已按解析器规则择优解析；请核对覆盖范围",
+    "hidden_sheet": "来源包含隐藏工作表，解析器仍扫描其内容；请核对可见性与适用范围",
+}
 
 
 def _load_records(workspace: Path, module: str) -> list[dict]:
@@ -81,8 +85,8 @@ def _matrix_keys(module: str) -> set | None:
 
 
 def _resolve_scope(row: dict, current: list[dict], default_scope: str) -> tuple[str, str | None]:
-    """返回（范围文本，阻塞原因）。来源适用条件优先，其次当前唯一记录，最后默认范围。"""
-    scope = (row.get("applicability") or "").strip() or (default_scope or "").strip()
+    """返回（范围文本，阻塞原因）；规则适用条件不是项目实际范围。"""
+    scope = (row.get("scope") or "").strip() or (default_scope or "").strip()
     if scope:
         return scope, None
     if len(current) == 1:
@@ -94,7 +98,21 @@ def _resolve_scope(row: dict, current: list[dict], default_scope: str) -> tuple[
 
 def apply_mapping(candidates: list[dict], mapping: list) -> tuple[list[dict], list[dict]]:
     """按问题文本把 QA 候选映射到矩阵检查键；映射由助手生成、用户确认，映射外问题不猜。"""
-    by_question = {str(item.get("question", "")).strip(): item for item in mapping if isinstance(item, dict)}
+    by_question = {}
+    for item in mapping:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question", "")).strip()
+        if question in by_question:
+            raise ValueError("映射含重复问题，无法消除适用范围歧义；请区分来源问题后重新映射")
+        by_question[question] = item
+    seen = set()
+    for row in candidates:
+        locator = row.get("locator") if isinstance(row.get("locator"), dict) else {}
+        question = str(locator.get("question", "")).strip()
+        if question and question in by_question and question in seen:
+            raise ValueError("来源含重复问题，仅按问题文本映射存在歧义；请区分来源问题后重新映射")
+        seen.add(question)
     applied, unmatched = [], []
     for row in candidates:
         locator = row.get("locator") if isinstance(row.get("locator"), dict) else {}
@@ -105,10 +123,18 @@ def apply_mapping(candidates: list[dict], mapping: list) -> tuple[list[dict], li
         row = dict(row)
         row["check_order"] = str(matched.get("check_order", "")).strip()
         row["research_id"] = str(matched.get("research_id", "")).strip()
-        if matched.get("scope"):
-            row["applicability"] = str(matched["scope"]).strip()
+        if matched.get("scope") and not (row.get("scope") or "").strip():
+            row["scope"] = str(matched["scope"]).strip()
         applied.append(row)
     return applied, unmatched
+
+
+def _matches_source(current: dict, row: dict) -> bool:
+    """分类与回读登记使用同一组结论、状态、依据和配置项比较。"""
+    return (current["conclusion"] == _strip_subitem(row.get("conclusion") or "")
+            and current["status"] == "confirmed"
+            and current.get("evidence_ref", "") == (row.get("suggested_evidence") or "")
+            and current["config_item"] == (row.get("config_item") or ""))
 
 
 def classify(workspace: Path, module: str, candidates: list[dict], *, default_scope: str = "") -> dict:
@@ -120,6 +146,8 @@ def classify(workspace: Path, module: str, candidates: list[dict], *, default_sc
         research_id = (row.get("research_id") or "").strip()
         is_qa = isinstance(row.get("locator"), dict) and row["locator"].get("kind") == "qa"
         reasons = []
+        if row.get("contains_pending_questions"):
+            reasons.append("来源仍含待确认内容，不能分类为可导入结论")
         if not order:
             reasons.append("QA 未映射矩阵检查键，须生成映射并经用户确认" if is_qa else "缺少检查顺序")
         if not research_id:
@@ -148,9 +176,7 @@ def classify(workspace: Path, module: str, candidates: list[dict], *, default_sc
             result["new"].append(entry)
             continue
         entry["scope_id"] = matched["scope_id"]
-        if (matched["conclusion"] == conclusion and matched["status"] == "confirmed"
-                and matched.get("evidence_ref", "") == entry["evidence_ref"]
-                and matched["config_item"] == entry["config_item"]):
+        if _matches_source(matched, row):
             result["unchanged"].append(entry)
         else:
             entry["expected_revision"] = matched["revision"]
@@ -196,21 +222,25 @@ def record_import(workspace: Path, module: str, source_name: str, source_sha256:
         research_id = (row.get("research_id") or "").strip()
         current = grouped.get((order, research_id), [])
         scope, reason = _resolve_scope(row, current, default_scope)
-        conclusion = _strip_subitem(row.get("conclusion") or "")
         matched = (next((r for r in current if _scope_text(r["scope"]) == _scope_text(scope)), None)
                    if scope else None)
         if matched is None:
             problems.append({"check_order": order, "research_id": research_id,
                              "reason": reason or "未找到按检查键与适用范围匹配的当前记录"})
             continue
-        if (matched["conclusion"] != conclusion or matched["status"] != "confirmed"
-                or matched.get("evidence_ref", "") != (row.get("suggested_evidence") or "")
-                or matched["config_item"] != (row.get("config_item") or "")):
+        if not _matches_source(matched, row):
             problems.append({"check_order": order, "research_id": research_id,
                              "reason": "回读结论、依据或配置项与来源不一致，或状态不是 confirmed，导入未完成"})
             continue
         keys.append({"check_order": order, "research_id": research_id,
                      "scope": matched["scope"], "scope_id": matched["scope_id"]})
+    for removed in removed_in_source(workspace, module, source_name, candidates, default_scope=default_scope):
+        current = grouped.get((removed["check_order"], removed["research_id"]), [])
+        matched = next((row for row in current if
+                        (row["scope_id"] == removed["scope_id"] if removed.get("scope_id")
+                         else _scope_text(row["scope"]) == _scope_text(removed["scope"]))), None)
+        if matched is None or matched["status"] != "retired":
+            problems.append({**removed, "reason": "来源移除项尚未由业务确认停用为 retired，不能推进台账；不自动停用"})
     if problems:
         return {"recorded": False, "problems": problems}
     ledger = load_ledger(workspace, module)
@@ -222,7 +252,23 @@ def record_import(workspace: Path, module: str, source_name: str, source_sha256:
     return {"recorded": True, "keys": len(keys)}
 
 
-def _candidates_from(source: Path | None, candidates_file: Path | None, module: str) -> tuple[list[dict], str, str]:
+def _source_problems(data: dict) -> list[dict]:
+    """仅白名单中的结构提示不阻塞；公式缺缓存、丢失回答等解析问题必须处置。"""
+    issues, coverage = data.get("issues"), data.get("coverage")
+    if (not isinstance(issues, list) or any(not isinstance(item, dict) for item in issues)
+            or not isinstance(coverage, dict)
+            or type(coverage.get("source_subitems")) is not int
+            or coverage["source_subitems"] < 0):
+        raise ValueError("候选缺少有效 issues/coverage 完整性元数据，请重新解析来源")
+    problems = [{"issue": item, "reason": f"来源解析存在未解决问题：{item.get('code', 'unknown')}，请核实并重新解析"}
+                for item in issues if item.get("code") not in SOURCE_HINTS]
+    if coverage["source_subitems"] != len(data["records"]):
+        problems.append({"reason": "来源覆盖数与候选记录数不一致，请核实并重新解析"})
+    return problems
+
+
+def _candidates_from(source: Path | None, candidates_file: Path | None, module: str,
+                     *, metadata: dict | None = None) -> tuple[list[dict], str, str]:
     if candidates_file is not None:
         data = json.loads(candidates_file.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or not isinstance(data.get("records"), list):
@@ -234,9 +280,51 @@ def _candidates_from(source: Path | None, candidates_file: Path | None, module: 
             if any(re.search(r"//[^/?#]*@", value.translate(str.maketrans("", "", "\r\n\t")))
                    for value in values):
                 raise ValueError("候选包含凭据链接，请移除凭据并重新解析来源；不得复用旧候选")
-        return data["records"], data.get("source_file") or candidates_file.name, data.get("source_sha256", "")
+        data.setdefault("source_file", candidates_file.name)
+    else:
+        data = parse_source(source, module)
+    problems = _source_problems(data)
+    if metadata is not None:
+        metadata.update({"issues": data["issues"], "coverage": data["coverage"], "problems": problems})
+    elif problems:
+        raise ValueError("来源解析存在完整性缺口，请核实并重新解析；不得丢弃问题继续导入")
+    return data["records"], data.get("source_file") or candidates_file.name, data.get("source_sha256", "")
+
+
+def _candidate_integrity(source: Path | None, candidates_file: Path | None, module: str) -> str | None:
+    """登记时确认缓存仍是该来源的解析结果；映射只可补充空白检查键和范围。"""
+    if source is None:
+        if candidates_file is not None:
+            cached = json.loads(candidates_file.read_text(encoding="utf-8"))
+            # 空候选不包含任何可写入记忆的事实；允许记录解析提示的空基线，
+            # 但含有记录时必须提供原始来源，防止编辑候选绕过来源校验。
+            if isinstance(cached, dict) and cached.get("records") == []:
+                return None
+        return "登记台账必须同时提供原始来源 --source；缓存候选仅可用于预览"
     parsed = parse_source(source, module)
-    return parsed["records"], parsed["source_file"], parsed["source_sha256"]
+    if candidates_file is None:
+        return None
+    cached = json.loads(candidates_file.read_text(encoding="utf-8"))
+    if (not isinstance(cached, dict) or cached.get("schema") != parsed["schema"]
+            or cached.get("module") != module
+            or cached.get("source_file") != parsed["source_file"]
+            or cached.get("source_sha256") != parsed["source_sha256"]
+            or cached.get("issues") != parsed["issues"]
+            or cached.get("coverage") != parsed["coverage"]
+            or not isinstance(cached.get("records"), list)
+            or len(cached["records"]) != len(parsed["records"])):
+        return "缓存候选与原始来源元数据不一致，请重新解析"
+    mapped_fields = {"check_order", "research_id", "scope"}
+    for original, candidate in zip(parsed["records"], cached["records"]):
+        if not isinstance(candidate, dict):
+            return "缓存候选与原始来源内容不一致，请重新解析"
+        expected = dict(original)
+        for field in mapped_fields:
+            if not expected.get(field) and candidate.get(field):
+                expected[field] = candidate[field]
+        if candidate != expected:
+            return "缓存候选与原始来源内容不一致，请重新解析"
+    return None
 
 
 def main() -> None:
@@ -253,7 +341,9 @@ def main() -> None:
     module = validate_module(args.module)
     if not (args.source or args.candidates):
         parser.error("需要 --source 或 --candidates")
-    candidates, source_name, source_sha256 = _candidates_from(args.source, args.candidates, module)
+    metadata = {}
+    candidates, source_name, source_sha256 = _candidates_from(
+        args.source, args.candidates, module, metadata=metadata)
     mapping = []
     if args.map is not None:
         data = json.loads(args.map.read_text(encoding="utf-8"))
@@ -263,7 +353,12 @@ def main() -> None:
     candidates, unmatched = apply_mapping(candidates, mapping) if mapping else (candidates, [])
 
     if args.record:
-        if unmatched:
+        integrity_problem = _candidate_integrity(args.source, args.candidates, module)
+        if integrity_problem:
+            result = {"recorded": False, "problems": [{"reason": integrity_problem}]}
+        elif metadata["problems"]:
+            result = {"recorded": False, "problems": metadata["problems"]}
+        elif unmatched:
             result = {"recorded": False, "problems":
                       [{"question": (row.get("locator") or {}).get("question", ""),
                         "reason": "QA 未映射矩阵检查键，未写入，不能登记台账"}
@@ -275,6 +370,9 @@ def main() -> None:
         return
 
     buckets = classify(args.workspace, module, candidates, default_scope=args.scope)
+    for problem in metadata["problems"]:
+        buckets["blocked"].append({"check_order": "", "research_id": "",
+                                   "reasons": [problem["reason"]], **problem})
     for row in unmatched:
         buckets["blocked"].append(
             {"check_order": "", "research_id": "", "config_item": row.get("config_item") or "",
@@ -284,7 +382,8 @@ def main() -> None:
     previous = _latest_entry(load_ledger(args.workspace, module), source_name)
     delta = bool(buckets["new"] or buckets["changed"] or removed or buckets["blocked"])
     verdict = "delta" if delta else "no-op"
-    notes = []
+    notes = [SOURCE_HINTS[issue["code"]] for issue in metadata["issues"]
+             if issue.get("code") in SOURCE_HINTS]
     if unmatched:
         notes.append(f"{len(unmatched)} 个 QA 问题尚未映射矩阵检查键，全部阻塞，不得猜测检查键")
     if previous and previous.get("source_sha256") == source_sha256 and delta:

@@ -86,6 +86,11 @@ def _research_digest(workspace):
     return checksum("\0".join(parts))
 
 
+def _sources_digest(workspace):
+    path = safe_path(workspace, "sources.json")
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
 def owner_marker(project_id, page_id):
     return "<!-- dy-wiki-owner:" + json.dumps({"project_id": project_id, "page_id": page_id}, separators=(",", ":")) + " -->"
 
@@ -189,6 +194,7 @@ def stage_wiki(workspace):
             atomic_write(path, bundle["pages"][entry["slug"]])
         manifest = {key: value for key, value in bundle.items() if key != "pages"}
         manifest["research_sha256"] = _research_digest(workspace)
+        manifest["sources_sha256"] = _sources_digest(workspace)
         atomic_write(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     return manifest
 
@@ -204,6 +210,8 @@ def load_staged(workspace):
         raise ValueError("Wiki 清单与项目身份不一致，拒绝同步")
     if manifest.get("research_sha256") != _research_digest(workspace):
         raise ValueError("调研记录在 Wiki 构建后发生变化，请重新构建本项目页面")
+    if "sources_sha256" not in manifest or manifest["sources_sha256"] != _sources_digest(workspace):
+        raise ValueError("原始资料清单已变化或缺少构建指纹，请重新构建本项目页面")
     pages = {}
     for entry in manifest.get("entries", []):
         slug = entry.get("slug", "")

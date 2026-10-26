@@ -6,6 +6,7 @@
 
 - `module-research`：模块多轮调研与项目记忆；
 - `expense-inspection`：费用模块交付巡检；
-- `general-ledger-inspection`：总账模块交付巡检。
+- `general-ledger-inspection`：总账模块交付巡检；
+- `inspection-skill-creator`：创建或归一化领域巡检 skill，核对清单、源码配方与工具支持状态。
 
-后续业务技能继续按领域独立放置在 `skills/<name>/`，并将详细手册或规则放在对应的 `references/`。
+领域巡检共用 [执行流程](../references/inspection-workflow.md)，领域清单和源码配方保存在各自 `references/`。后续业务技能通过创建器生成；新增目录不自动获得正式巡检校验和报告能力。

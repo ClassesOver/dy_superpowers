@@ -1,5 +1,6 @@
 """wiki 记忆页（Basic Memory 兼容 md）读写工具回归。"""
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,8 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 import server
+from dy_superpowers_mcp.memory import note_path, read_note, write_note
+from dy_superpowers_mcp.trace import TraceStore, redact
 
 
 def run(tool, args, ws):
@@ -50,3 +53,43 @@ def test_notes_read_missing_lists_available_and_roundtrip(tmp_path, monkeypatch)
     content, _ = run("dy_notes_read", {"slug": "gl-scope"}, tmp_path)
     assert isinstance(content, str) and "总账范围" in content and content.startswith("---\n")
     assert missing  # noqa: B018 - 保持可读性
+
+
+@pytest.mark.parametrize('body', [
+    json.dumps({'password': 'synthetic,password;tail', 'email': 'synthetic@example.invalid',
+                'policy': '保留政策正文'}, ensure_ascii=False),
+    "\"password\": \"synthetic,password;tail\"\n'email': 'synthetic@example.invalid'\npolicy: 保留政策正文",
+    "'password': 'synthetic,it''s;tail'\n\"email\": \"synthetic@example.invalid\"\npolicy: 保留政策正文",
+    '"password": "synthetic,\\"quoted\\";tail"\npolicy: 保留政策正文',
+    json.dumps({'password': ['synthetic,tail', 'synthetic-other'],
+                'policy': '保留政策正文'}, ensure_ascii=False),
+    json.dumps({'password': {'first': 'synthetic,tail', 'second': 'synthetic-other'},
+                'policy': '保留政策正文'}, ensure_ascii=False),
+    r'{"\u0070assword": "synthetic,tail", "policy": "保留政策正文"}',
+])
+def test_notes_trace_redacts_quoted_keys_and_complete_quoted_values(tmp_path, monkeypatch, body):
+    monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
+    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
+    _, error = run('dy_notes_write', {'slug': 'policy', 'title': '政策', 'body': body,
+                                    'confirmed': True}, tmp_path)
+    assert error is None
+    _, error = run('dy_notes_read', {'slug': 'policy'}, tmp_path)
+    assert error is None
+    events = [event for event in TraceStore(tmp_path).read('notes-test')
+              if event['event'] in {'notes.write', 'notes.read'}]
+    assert len(events) == 2
+    for event in events:
+        content = event['memory_content']
+        assert 'synthetic' not in content and 'tail' not in content
+        assert '保留政策正文' in content and '[REDACTED]' in content
+        assert redact(content) == content
+    assert body in read_note(tmp_path, 'policy')
+
+
+def test_note_parent_symlinks_are_rejected_even_inside_notes(tmp_path):
+    write_note(tmp_path, 'policy', '政策', '正文', [], confirmed=True)
+    notes = tmp_path / '.dy_superpowers/notes'
+    (notes / 'alias').symlink_to(notes, target_is_directory=True)
+    with pytest.raises(ValueError, match='符号链接'):
+        note_path(tmp_path, 'alias/hidden')
+    assert not (notes / 'hidden.md').exists()

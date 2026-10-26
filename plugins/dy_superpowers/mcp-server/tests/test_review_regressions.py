@@ -29,7 +29,7 @@ def _candidate(**overrides):
 def _write(workspace, row, module="expense"):
     return write_record(workspace, {"module": module, "check_order": row["check_order"],
         "research_id": row["research_id"], "config_item": row["config_item"],
-        "conclusion": row["conclusion"], "scope": row["applicability"],
+        "conclusion": row["conclusion"], "scope": row.get("scope", row.get("applicability", "")),
         "evidence_ref": row["suggested_evidence"], "confirmed_by": "测试确认人",
         "confirmed_at": "2026-10-26", "confirmed": True})
 
@@ -112,8 +112,78 @@ def test_cached_safe_candidates_remain_usable(tmp_path):
     row = _candidate(suggested_evidence="https://example.com/public",
         detail_refs=[{"attachment": "https://example.com/public", "fetched": False}])
     candidates = tmp_path / "candidates.json"
-    candidates.write_text(json.dumps({"records": [row]}), encoding="utf-8")
+    candidates.write_text(json.dumps({"records": [row], "issues": [],
+        "coverage": {"source_subitems": 1}}), encoding="utf-8")
     assert ri._candidates_from(None, candidates, "expense")[0] == [row]
+
+
+def test_qa_source_scope_is_preserved_as_import_scope(tmp_path):
+    source = tmp_path / "qa.json"
+    source.write_text(json.dumps({"items": [{"question": "医院范围？", "answer": "需要安装。",
+        "scope": "医院A/2026"}]}), encoding="utf-8")
+    row = rs.parse_source(source, "expense")["records"][0]
+    mapped, unmatched = ri.apply_mapping([row], [{"question": "医院范围？", "check_order": "1",
+        "research_id": "01", "scope": "错误映射范围"}])
+    assert not unmatched
+    assert mapped[0]["scope"] == "医院A/2026"
+    assert ri.classify(tmp_path, "expense", mapped)["blocked"] == []
+    assert ri.classify(tmp_path, "expense", mapped)["new"][0]["scope"] == "医院A/2026"
+
+
+def test_record_import_requires_original_source_for_cached_candidates(tmp_path, monkeypatch, capsys):
+    row = _candidate(check_order="1", research_id="01", scope="医院A")
+    _write(tmp_path, row)
+    candidates = tmp_path / "edited.json"
+    candidates.write_text(json.dumps({"schema": "dy-research-source/v1", "module": "expense",
+        "source_file": "qa.json", "source_sha256": "original-hash", "records": [row],
+        "issues": [], "coverage": {"source_subitems": 1}}), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["research_incremental.py", str(tmp_path), "--module",
+        "expense", "--candidates", str(candidates), "--record"])
+    ri.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result["recorded"] is False
+    assert not ri.ledger_path(tmp_path, "expense").exists()
+
+
+def test_record_import_rejects_candidate_content_changed_since_source_parse(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "qa.json"
+    source.write_text(json.dumps({"items": [{"question": "安装？", "answer": "需要安装。",
+        "scope": "医院A"}]}), encoding="utf-8")
+    parsed = rs.parse_source(source, "expense")
+    row = parsed["records"][0] | {"check_order": "1", "research_id": "01",
+        "conclusion": "被修改的结论。"}
+    _write(tmp_path, row)
+    candidates = tmp_path / "candidates.json"
+    candidates.write_text(json.dumps(parsed | {"records": [row]}), encoding="utf-8")
+    mapping = tmp_path / "mapping.json"
+    mapping.write_text(json.dumps([{ "question": "安装？", "check_order": "1", "research_id": "01"}]),
+        encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["research_incremental.py", str(tmp_path), "--module",
+        "expense", "--source", str(source), "--candidates", str(candidates), "--map", str(mapping), "--record"])
+    ri.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result["recorded"] is False
+    assert not ri.ledger_path(tmp_path, "expense").exists()
+
+
+def test_record_import_accepts_unmodified_cached_candidates_with_source(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "qa.json"
+    source.write_text(json.dumps({"items": [{"question": "安装？", "answer": "需要安装。",
+        "scope": "医院A"}]}), encoding="utf-8")
+    parsed = rs.parse_source(source, "expense")
+    candidates = tmp_path / "candidates.json"
+    candidates.write_text(json.dumps(parsed), encoding="utf-8")
+    mapping = tmp_path / "mapping.json"
+    mapping.write_text(json.dumps([{"question": "安装？", "check_order": "1", "research_id": "01"}]),
+        encoding="utf-8")
+    row = parsed["records"][0] | {"check_order": "1", "research_id": "01"}
+    _write(tmp_path, row)
+    monkeypatch.setattr(sys, "argv", ["research_incremental.py", str(tmp_path), "--module",
+        "expense", "--source", str(source), "--candidates", str(candidates), "--map", str(mapping), "--record"])
+    ri.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result["recorded"] is True
+    assert ri.ledger_path(tmp_path, "expense").is_file()
 
 
 @pytest.mark.parametrize("suffix", [".json", ".txt"])
@@ -156,7 +226,7 @@ def test_unmapped_qa_does_not_append_success_ledger(tmp_path, monkeypatch, capsy
 
 
 def test_removed_source_records_compare_scopes(tmp_path):
-    rows = [_candidate(applicability=scope) for scope in ["医院A", "医院B"]]
+    rows = [_candidate(scope=scope) for scope in ["医院A", "医院B"]]
     for row in rows:
         _write(tmp_path, row)
     assert ri.record_import(tmp_path, "expense", "qa.json", "old", rows)["recorded"]

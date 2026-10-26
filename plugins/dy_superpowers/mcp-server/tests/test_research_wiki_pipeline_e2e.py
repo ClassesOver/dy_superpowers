@@ -1,9 +1,8 @@
-"""调研→项目身份→本地 Wiki 构建→GitLab 发布端到端（真实 stdio MCP + mock GitLab API）。
+"""QA 与附件→调研记忆→项目 Wiki 端到端（真实 stdio MCP + mock GitLab API）。
 
-链路：xlsx 解析（脚本函数直调）→ dy_research_record_write（确认门禁）
+链路：QA 解析与键映射（脚本函数直调）→ dy_research_record_write（确认门禁）
 → dy_notes_write（自由主题记忆，与发布清单分离）→ dy_project_configure（项目身份确认）
 → dy_wiki_build（本地清单）→ dy_wiki_sync（mock GitLab，含共享首页注册表）。
-真实 Excel 不入库：临时生成最小 xlsx 夹具。
 """
 import asyncio
 import importlib.util
@@ -18,13 +17,11 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-pytest.importorskip("openpyxl")
-from openpyxl import Workbook
-
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from dy_superpowers_mcp.project_wiki import load_staged
 
 PLUGIN = Path(__file__).parents[2]
 API = "https://gitlab.example.com/api/v4"
@@ -39,16 +36,17 @@ def _load_script(name: str):
     return module
 
 
-def _fixture_xlsx(path: Path) -> None:
-    book = Workbook()
-    sheet = book.active
-    sheet.title = "调研清单"
-    sheet.append(["检查编号", "配置项", "配置路径", "调研问题", "适用条件", "建议材料", "调研结果/本点结论"])
-    sheet.append(["DY-01", "应用安装", "设置>应用管理", "问：范围？", "费用必查", "交付范围表",
-                  "01｜费用模块基础应用：需要安装并启用。"])
-    sheet.append(["DY-01", "应用安装", "设置>应用管理", "问：OCR？", "按需", "联调样例",
-                  "02｜OCR相关模块：需要安装；需确认实际服务。"])
-    book.save(path)
+def _fixture_qa(path: Path) -> tuple[str, str]:
+    question = "本期费用基础应用是否需要启用？"
+    attachment = path.parent / "application-evidence.md"
+    attachment.write_text("# 应用核查依据\n本期费用基础及凭证应用需安装并启用。\n", encoding="utf-8")
+    path.write_text(json.dumps({"items": [{
+        "question": question,
+        "answer": "本期费用基础及凭证应用需安装并启用。",
+        "scope": "E2E 公司/2026",
+        "attachments": [attachment.name],
+    }]}, ensure_ascii=False), encoding="utf-8")
+    return question, str(attachment)
 
 
 def _gitlab_mock(monkeypatch, state):
@@ -103,14 +101,22 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
         monkeypatch.setenv(key, value)
     config = json.loads((PLUGIN / ".mcp.json").read_text())["mcpServers"]["dy-superpowers-odoo"]
 
-    # 1) 调研来源解析（脚本函数直调，不经子进程）
+    # 1) QA 与附件解析、检查键映射（脚本函数直调，不经子进程）
     research_sources = _load_script("research_sources")
-    source = tmp_path / "research-input.xlsx"
-    _fixture_xlsx(source)
+    source = tmp_path / "research-input.json"
+    question, attachment = _fixture_qa(source)
     manifest = research_sources.parse_source(source, "expense")
-    assert manifest["coverage"]["source_subitems"] == 2
-    assert manifest["records"][0]["research_id"] == "01"
-    assert manifest["records"][1]["contains_pending_questions"] is True
+    assert manifest["coverage"]["source_subitems"] == 1
+    assert manifest["records"][0]["locator"]["question"] == question
+    assert manifest["records"][0]["detail_refs"][0]["attachment"] == attachment
+    incremental = _load_script("research_incremental")
+    candidates, unmatched = incremental.apply_mapping(manifest["records"], [{
+        "question": question, "check_order": "1", "research_id": "01",
+        "scope": "E2E 公司/2026",
+    }])
+    assert not unmatched and candidates[0]["research_id"] == "01"
+    classified = incremental.classify(workspace, "expense", candidates)
+    assert len(classified["new"]) == 1 and not classified["blocked"]
 
     state = {"pages": {}, "methods": []}
 
@@ -135,16 +141,19 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
                 return response.content[0].text
 
             # 2) 检查键调研写入：未确认拒绝 → 确认后写入并回读
-            research = {"module": "expense", "check_order": "1", "research_id": "01",
-                        "config_item": "应用安装", "scope": "E2E 公司/2026",
-                        "conclusion": "费用基础应用需要安装并启用。",
-                        "confirmed_by": "E2E 顾问", "confirmed_at": "2026-10-24"}
+            candidate = classified["new"][0]
+            research = {"module": "expense", "check_order": candidate["check_order"],
+                        "research_id": candidate["research_id"], "config_item": "应用安装",
+                        "scope": candidate["scope"], "conclusion": candidate["conclusion"],
+                        "evidence_ref": f"{source.name}#Q1；附件：{attachment}",
+                        "confirmed_by": "E2E QA 答复人", "confirmed_at": "2026-10-24"}
             assert await call("dy_research_record_write", {**research, "confirmed": False}, expect_error=True) is None
             saved = json.loads(await call("dy_research_record_write", {**research, "confirmed": True}))
             record = json.loads(await call("dy_module_memory_read",
                                            {"module": "expense", "check_order": "1", "research_id": "01",
                                             "scope_id": saved["scope_id"]}))["records"][0]
             assert record["status"] == "confirmed" and record["revision"] == saved["revision"]
+            assert record["evidence_ref"] == research["evidence_ref"]
 
             # 3) 自由主题记忆走 notes，与发布清单分离
             note = {"slug": "expense-policy-note", "title": "费用政策口径",
@@ -169,6 +178,11 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
             overview_slug = built["overview_slug"]
             assert overview_slug == f"{PROJECT_CODE}-{project['project_id'].replace('-', '')[:8]}-overview"
             assert "expense-policy-note" not in overview_slug  # notes 不进入发布清单
+            wiki_pages = load_staged(workspace)[1]
+            topic_content = next(content for slug, content in wiki_pages.items() if "-topic-" in slug)
+            assert candidate["conclusion"] in topic_content
+            assert research["evidence_ref"] in re.sub(r"\\(.)", r"\1", topic_content)
+            assert research["confirmed_by"] in topic_content
 
             # 6) GitLab 发布：确认门禁 → 清单页 + 共享首页注册表 → 二次同步幂等。
             #    同进程调用以便注入 mock GitLab（跨进程 monkeypatch 无效）；协议层已由
