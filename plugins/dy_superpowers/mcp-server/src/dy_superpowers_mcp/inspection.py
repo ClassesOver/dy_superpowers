@@ -194,6 +194,22 @@ def validate_inspection(workspace: Path, report: object) -> dict:
                 error(f"{path}.research_revision", "对应调研记录损坏或范围不明确")
     if expected_keys - seen:
         error("records", "声明范围中有检查项未记录；应明确标为未检查或待确认")
+    coverage, inspected_total, matrix_total = {}, 0, 0
+    for scope, declared in scopes.items():
+        expected_pairs = {(key[1], key[2]) for key in expected_keys
+                          if (key[0], key[3], key[4]) == scope}
+        try:
+            _, standards = _matrix(scope[0])
+        except (ValueError, OSError):
+            continue
+        coverage["|".join(scope)] = {"inspected": len(expected_pairs), "excluded": len(declared) - len(expected_pairs),
+                                     "matrix": len(standards)}
+        inspected_total += len(expected_pairs)
+        matrix_total += len(standards)
+    limitations = "仅校验声明范围的记录结构、版本和引用对应关系，不验证证据真实性，不代表整个项目交付通过。"
+    if matrix_total and inspected_total < matrix_total:
+        limitations += (f"本轮为部分范围巡检：纳入 {inspected_total}/{matrix_total} 个矩阵子项，"
+                        "门禁仅代表纳入项，不代表整模块交付通过；整体验收仍需覆盖全部子项。")
     gate = "待确认"
     if not errors and outcomes:
         if "不通过" in outcomes:
@@ -204,4 +220,4 @@ def validate_inspection(workspace: Path, report: object) -> dict:
             gate = "通过"
     return {"valid": not errors, "gate": gate, "errors": errors, "matrix_revisions": matrices,
             "validated_at": datetime.now(timezone.utc).isoformat(), "execution_authorized": False,
-            "limitations": "仅校验声明范围的记录结构、版本和引用对应关系，不验证证据真实性，不代表整个项目交付通过。"}
+            "coverage": coverage, "limitations": limitations}

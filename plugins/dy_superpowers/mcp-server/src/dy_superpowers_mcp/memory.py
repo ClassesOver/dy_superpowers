@@ -1,6 +1,8 @@
 """Workspace-scoped project and module memory for dy_superpowers."""
 
+import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .storage import atomic_write, record_lock
@@ -15,6 +17,62 @@ MEMORY_FILES = {
 
 WRITABLE_MEMORY_FILES = MEMORY_FILES
 MODULE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+NOTE_SLUG = re.compile(r"^[a-z0-9][a-z0-9/-]{0,120}$")  # 允许 / 形成项目目录分层
+
+
+def note_path(workspace: str | Path, slug: str) -> Path:
+    """wiki 记忆页位于 .dy_superpowers/notes/，纳入 Basic Memory 索引范围。"""
+    workspace_path = Path(workspace).resolve()
+    if not isinstance(slug, str) or NOTE_SLUG.fullmatch(slug) is None:
+        raise ValueError("note 标识必须是小写字母、数字或连字符（最多 81 字符）")
+    raw_root = workspace_path / ".dy_superpowers"
+    raw_notes = raw_root / "notes"
+    if any(path.is_symlink() for path in (raw_root, raw_notes)):
+        raise ValueError("wiki 记忆目录不允许使用符号链接")
+    notes = raw_notes.resolve()
+    if not notes.is_relative_to(workspace_path.resolve()):
+        raise ValueError("wiki 记忆必须位于当前工作区")
+    path = notes / f"{slug}.md"
+    if path.is_symlink() or not path.resolve().is_relative_to(notes):
+        raise ValueError("wiki 记忆文件必须位于记忆目录内")
+    return path
+
+
+def write_note(workspace: str | Path, slug: str, title: str, body: str, tags: list[str],
+               *, confirmed: bool = False, source_refs: list[str] | None = None) -> Path:
+    if confirmed is not True:
+        raise PermissionError("wiki 记忆写入需要用户明确确认")
+    path = note_path(workspace, slug)
+    if not isinstance(title, str) or not title.strip() or len(title) > 120:
+        raise ValueError("note 标题必须是非空文本（≤120 字符）")
+    if not isinstance(body, str) or not body.strip():
+        raise ValueError("note 正文必须是非空文本")
+    tags = [str(tag).strip() for tag in (tags or []) if str(tag).strip()][:10]
+    source_refs = [str(ref).strip() for ref in (source_refs or []) if str(ref).strip()][:20]
+    # JSON 字符串与数组也是合法 YAML，避免用户文本改变 frontmatter 结构或值类型。
+    frontmatter = ["---", f"title: {json.dumps(title.replace(chr(10), ' '), ensure_ascii=False)}", "type: note",
+                   f"tags: {json.dumps(tags, ensure_ascii=False)}",
+                   f"confirmed_at: {json.dumps(datetime.now(timezone.utc).isoformat())}",
+                   f"source_refs: {json.dumps(source_refs, ensure_ascii=False)}", "---", ""]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with record_lock(path):
+        atomic_write(path, "\n".join(frontmatter) + body.rstrip() + "\n")
+    return path
+
+
+def read_note(workspace: str | Path, slug: str) -> str:
+    path = note_path(workspace, slug)
+    return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+
+def list_notes(workspace: str | Path) -> list[str]:
+    notes = Path(workspace).resolve() / ".dy_superpowers" / "notes"
+    if not notes.is_dir() or notes.is_symlink() or notes.parent.is_symlink():
+        return []
+    return sorted(p.relative_to(notes).with_suffix("").as_posix() for p in notes.rglob("*.md")
+                  if p.is_file() and not p.is_symlink()
+                  and not any(parent.is_symlink() for parent in p.parents if parent != notes)
+                  and NOTE_SLUG.fullmatch(p.relative_to(notes).with_suffix("").as_posix()))
 
 
 def validate_module(module: str) -> str:

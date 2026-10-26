@@ -11,7 +11,15 @@ description: 在 HRP 项目交付中需要通过多轮问答、清单或源文�
 
 ## 调研来源
 
-先确认模块、公司/院区、业务范围、上线阶段和期间等基础上下文，再读取对应模块清单及用户提供的源材料。费用模块读取 `../expense-inspection/references/inspection-matrix.md`，总账读取 `../general-ledger-inspection/references/inspection-matrix.md`；其他模块使用其对应清单。处理 Excel、其他 Office 文件、PDF 或图片时，遵循[源文件解析与完整性核对](references/source-intake.md)，并使用当前 Codex 环境可用的对应文件解析能力。
+先确认模块、公司/院区、业务范围、上线阶段和期间等基础上下文，再读取对应模块清单及用户提供的源材料。费用模块读取 `../expense-inspection/references/inspection-matrix.md`，总账读取 `../general-ledger-inspection/references/inspection-matrix.md`；其他模块使用其对应清单。处理 Excel、其他 Office 文件、PDF 或图片时，遵循[源文件解析与完整性核对](references/source-intake.md)，并使用当前 Codex 环境可用的对应文件解析能力。仓内提供统一解析入口 `scripts/research_sources.py <来源文件> --module <模块> --output <候选JSON>`（支持 xlsx/docx/pdf/markdown/txt；合并单元格展开、公式缓存核对、隐藏行列清点、无法解析区域列入 issues），产出候选结论 JSON 供映射与确认，不做业务确认。
+
+调研产出的自由主题结论（如"费用政策口径概览"、"两家医院范围差异"）在用户确认后通过 `dy_notes_write` 写为 wiki 记忆页（Basic Memory 兼容 md：frontmatter + `[[双链]]`，位于 `.dy_superpowers/notes/`，自动进入 `dy_memory_search` 索引）；按检查键的调研结论仍走 `dy_research_record_write`，两者不混用。
+
+把项目调研发布为面向业务人员的 Wiki 是三步受控流程，发布输入只有按检查键的调研记忆，自由主题 notes 不进入发布清单：
+
+1. `dy_project_configure(trace_id, name, code, confirmed=true)`：经用户确认绑定当前工作区唯一的正式项目名称与稳定代号（小写字母数字连字符）。项目名称不确定时，先从调研材料整理候选名称请用户选定，不能从账套名、文件名或范围文本猜测；未配置或旧配置未经确认时构建与同步都会拒绝。项目一旦绑定不能改名或换代号。
+2. `dy_wiki_build(trace_id, confirmed=true)`：按当前项目调研记忆在本地构建中文 Wiki 并生成发布清单（脚本入口 `scripts/build_research_wiki.py <工作区> --stage`）。页面固定为"知识库内项目首页 → 模块目录 → 业务主题"三级：项目首页含模块导航与已登记原始调研文件链接；模块目录按检查顺序列业务主题；主题页按子项展示结论、适用范围、来源和状态，不输出 YAML 元数据。"授权导入"的记录如实显示"来源记录，业务签认待核实"。构建后调研记录再发生变化时清单失效，须重新构建。原始调研文件登记在 `.dy_superpowers/sources.json`（名称 + 无凭据 HTTP(S) 链接，按项目绑定），按项目保存到 Git 仓库并在项目首页链接；巡检报告等交付物不入库。
+3. `dy_wiki_sync(trace_id, confirmed=true)`：把已构建清单发布到 GitLab Wiki（REST，只增改不删页）。需设置 `DY_WIKI_API_URL`、`DY_WIKI_TOKEN`（只放环境变量，绝不写入文件或记忆），目标项目三选一：`DY_WIKI_PROJECT_ID` 现有项目；或首次同步 `DY_WIKI_GROUP_ID`+`DY_WIKI_PROJECT_NAME` 自动搜索/创建并持久化到工作区 wiki-target.json。同步前逐页校验所有权标记和上次同步哈希，多项目共享同一知识库时自动维护共享首页的项目目录与阅读指引；远端页 slug 由标题派生（实测 GitLab 忽略请求中的 slug 字段），因此页面键使用"代号-项目标识-业务键"的稳定前缀。无所有权标记的页面、被远端手工修改的页面和旧版首页都会拒绝覆盖，须按迁移方案单独处理；同步状态绑定实例、目标项目与本地项目，更换须显式重新配置。同步是外发动作，必须经用户确认后执行；令牌不回显。
 
 清单字段按以下方式使用：
 

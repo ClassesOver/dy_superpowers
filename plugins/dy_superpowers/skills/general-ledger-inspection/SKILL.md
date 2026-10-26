@@ -41,22 +41,28 @@ description: 在需要巡检 Odoo 12 HRP 总账交付、科目、账簿、凭证
 
 | 矩阵业务叫法 | 技术模块 | 关键配置模型 |
 | --- | --- | --- |
-| 财务会计-基础 | `dy_fin_mdm` | `dy.fin.account.structure`（科目结构）、`dy.fin.account.period` / `dy.fin.account.period.open.and.done`（期间与开关）、`dy.fin.account.analytic.plan*`（辅助核算）、`dy.fin.cash.flow.mapping`（现金流映射）、`dy.account.permissions.settings`（科目权限） |
+| 财务会计-基础 | `dy_fin_mdm` | `dy.fin.account.structure`（科目结构）、`dy.fin.account.period`（期间状态）、`dy.fin.account.period.open.and.done`（仅临时操作向导）、`dy.fin.account.analytic.plan*`（辅助核算）、`dy.fin.cash.flow.mapping`（现金流映射）、`dy.account.permissions.settings`（科目权限） |
 | 财务会计-凭证管理 | `dy_fin_acc` | `account.move`（扩展）、`dy.fin.acc.account.periodicity.voucher`（期末结转模板）、`dy.fin.acc.account.move.discrete.number`（凭证编号） |
-| 预算会计 | `dy_fin_gaap` | `account.mapping`（财务/预算科目映射）、`budget.account.move`（预算凭证）、`budget.move.paralleled.wizard`（平行记账）、`budget.statement.of.income.and.expenditure`（收支表） |
+| 预算会计 | `dy_fin_gaap` | `account.mapping`（财务/预算科目映射）、`budget.account.move`（预算凭证）、`budget.move.paralleled.wizard`（平行记账临时向导，不作状态证据）、`budget.statement.of.income.and.expenditure`（收支表临时报表向导，仅可读字段元数据） |
 | 财务会计平台-基础（凭证生成平台，矩阵未直接命名） | `dy_fin_pf` | `dy.fin.pf.account.class.define`（凭证分类）、`dy.fin.pf.account.move.generation.rule`（生成规则）、`dy.fin.pf.influence.factor.setting`（影响因素） |
 
 `dy_fin_pf` 是各业务凭证生成规则的共同入口（费用制证等平台模块都复用它的生成规则模型）；巡检矩阵未直接涉及时按本期适用范围裁剪，仅在需要核对凭证生成规则时使用。
 
 常用只读查询示例（domain 仅为形状参考，须按已确认调研结论裁剪公司、账套与期间，字段先用 `dy_odoo_model_fields` 核对）：
 
-- 会计期间与开关账：查 `dy.fin.account.period`（期间定义）与 `dy.fin.account.period.open.and.done`（开关状态），按 `company_id` 和期间过滤，核对开关账顺序。
+- 会计期间与开关账：在持久模型 `dy.fin.account.period` 中按 `company_id/date_from/date_to/account_structure_id` 限定范围，读取 `state/state_show/cashier_period_state` 核对现态。`dy.fin.account.period.open.and.done` 是 `TransientModel` 操作向导，只有开/关选项，没有公司或期间状态字段；仅可读字段元数据了解接口，不能查向导行判断是否开账，更不能创建或调用向导执行方法。开关顺序及权限反例仍需已有日志、授权操作证据或人工验证，状态快照不足以判通过。
 - 科目与辅助核算：查 `account.account`（科目）配合 `dy.fin.account.structure` / `dy.fin.account.structure.line`（结构），辅助核算查 `dy.fin.account.analytic.plan` 及其实例。
-- 财务/预算科目映射：查 `account.mapping`，核对映射方向、公司和生效范围；平行记账证据查 `budget.account.move` 与对应 `account.move` 的关联。
-- 凭证状态与平衡：查 `account.move`，domain 如 `[["company_id","=",<公司>],["state","!=","draft"],["date",">=","<期间起>"],["date","<=","<期间止>"]]`，字段取 `journal_id/date/ref/amount/narration` 之外的最小集；借贷平衡用 `account.move.line` 的借贷合计勾稽。
+- 财务/预算科目映射：查 `account.mapping`，核对映射方向、公司和生效范围；平行记账的实际证据查 `budget.account.move` 与对应 `account.move` 的关联——`budget.move.paralleled.wizard` 和 `budget.statement.of.income.and.expenditure` 都是 `TransientModel` 向导，不能查向导行作为配置或结果证据，更不能调用其执行方法。
+- 凭证状态与平衡：查 `account.move`，domain 如 `[["company_id","=",<公司>],["state","!=","draft"],["date",">=","<期间起>"],["date","<=","<期间止>"]]`，确认字段后选取 `id/company_id/journal_id/date/state`，不读取 `ref/narration` 等业务正文。借贷平衡按选定凭证 ID 查询 `account.move.line` 的 `move_id/debit/credit`，逐页取全后按凭证勾稽，不能用第一页明细合计判整张凭证平衡。
 - 期末结转：查 `dy.fin.acc.account.periodicity.voucher`（结转模板与顺序），执行证据按模板引用回查生成的 `account.move`。
 
 源码版本与账套实际版本可能不同：以 `dy_odoo_module_info` 返回的 `latest_version` 为账套事实，源码索引只提供模型与依赖线索。定制 addon 可能增删字段，查询前先 `dy_odoo_model_fields`。
+
+## 来源调研对照与端到端验证
+
+用户提供已有调研结果（问答、Excel、Word、PDF 或接口结果）时，先读取[来源驱动巡检与端到端验证](../../references/inspection-source-validation.md)，对照来源原始 `EXP-*` 键、当前矩阵键及子项，并保留来源位置、范围、待确认项和验收标准差异。来源标准与当前矩阵不一致时，不改矩阵、不静默选一版；在报告中阻塞相关验收分支。
+
+真实端到端验证按该参考的 live 流程显式启用，只使用 Odoo JSON-RPC 只读工具。运行范围必须来自来源中经确认的公司和业务日期；来源没给时记录待确认，不以测试日期替代业务事实。测试成功只证明 MCP 链路及只读配方可运行；没有正式岗位、正反例、边界及业务签认时，门禁保持待确认。
 
 ## 执行流程
 
@@ -68,7 +74,7 @@ description: 在需要巡检 Odoo 12 HRP 总账交付、科目、账簿、凭证
 6. **逐行巡检**：按配置分类、配置项、路径、优先级、检查目的和检查要点定位实际配置；先用同一行 J 列结论确定范围，再逐条执行 K 列“验收标准（调研后）”。每个子项记录最小证据引用、操作主体、环境和时间；不得用管理员单一成功代替真实岗位验证。
 7. **执行勾稽验证**：对适用功能做正例、边界例和反例；至少覆盖凭证平衡、借贷方向、科目与辅助范围、公司隔离、期间控制、预算/财务关联、报表取数、现金流分类、结转顺序和重复执行控制。任何未实际验证的防重、权限或结果不得假定通过。
 8. **形成结论**：在巡检报告或项目台账中按子项使用 `通过/部分通过/不通过/不适用/待确认/未检查/未知`；L 列只填写由该检查父项所有子项聚合出的结果，并保留阻塞原因。不得将父项汇总状态复制成每个子项状态。区分配置缺陷、账务结果差异、制度决策、材料缺口和外部开发事项。
-9. **回链和记忆**：把问题、证据和验证结果关联到项目需求、交付物、验收条件和配置计划。只将用户确认后的项目事实写入当前工作区 `module-research.md`，通过 `dy_research_record_write` 保存；调用前明确展示拟写结论并取得确认，且不得写入密码、令牌、员工个人信息或生产业务明细。巡检模板和矩阵不得被写回项目事实。
+9. **回链和记忆**：把问题、证据和验证结果关联到项目需求、交付物、验收条件和配置计划。只将用户确认后的项目事实通过 `dy_research_record_write` 保存到当前工作区对应模块目录；调用前明确展示拟写结论并取得确认，且不得写入密码、令牌、员工个人信息或生产业务明细。巡检模板和矩阵不得被写回项目事实。
 
 巡检调用补充调研时必须传递原 `trace_id`、`检查顺序 + 子项编号`、阻塞原因、对应“验收标准（调研后）”及已知事实。调研完成后用 `dy_module_memory_read` 复核记忆并从 `records[0]` 读取记录，只恢复状态为 `confirmed` 的子项；其他子项继续列为 `待确认/未检查`，不能把已提出的问题或静态 Knowledge 结果当作验收证据。
 
@@ -86,9 +92,9 @@ description: 在需要巡检 Odoo 12 HRP 总账交付、科目、账簿、凭证
 
 按 [交付记录要求](../../docs/delivery-domain.md) 为每个子项和适用范围记录本次结果，保留调研 `revision` 与 `scope_id`、对应验收标准完整原文、矩阵文件 SHA-256、带时区的验证时间和最小证据引用。跨公司不得共用结论；调研工具报不一致或范围不明确时保持“待确认”，不得绕过校验。
 
-先按 [巡检校验合同](../../docs/inspection-validation.md) 声明本次完整检查范围，调用 `dy_inspection_validate`；遗漏项必须明确记录为未检查或待确认。`valid=false` 时修正记录，不能报告门禁通过；`valid=true` 只代表记录校验通过，还须检查 `gate`。验证时间必须晚于所用调研修订，不能仅替换版本号沿用旧验证。
+先按 [巡检校验合同](../../docs/inspection-validation.md) 声明本次完整检查范围，调用 `dy_inspection_validate`；按调研结果挑选检查项时，只把调研结论已覆盖且本轮可验证的子项放入 `expected_checks`，其余子项全部进 `excluded_checks` 并写分类理由（调研缺口/需操作验证/本轮未安排），不虚构占位记录；部分范围报告的门禁只代表纳入项（校验结果标注 N/M 覆盖度），不得表述为整模块通过，规则详见[来源驱动巡检与端到端验证](../../references/inspection-source-validation.md#按调研覆盖挑选检查项部分范围巡检)。全量模式下遗漏项必须明确记录为未检查或待确认。`valid=false` 时修正记录，不能报告门禁通过；`valid=true` 只代表记录校验通过，还须检查 `gate`。验证时间必须晚于所用调研修订，不能仅替换版本号沿用旧验证。
 
-向用户展示报告和校验限制并获保存确认后，调用 `dy_inspection_report_save`，提供完整报告和 `confirmed=true`，无需生成编号。工具会重新校验，并自动生成含 UTC 时间戳及唯一后缀的报告编号，按日期保存到 `.dy_superpowers/reports/general-ledger/<YYYY-MM-DD>/<report-id>.md`；响应会返回实际编号和路径。使用响应中的模块与报告编号调用 `dy_inspection_report_read` 复核保存内容。调研修订、范围或标准变化后，受影响项先转为待复查；未消除的阻塞不得汇总为通过。
+向用户展示报告和校验限制并获保存确认后，调用 `dy_inspection_report_save`，提供完整报告和 `confirmed=true`，无需生成编号。工具会重新校验，并自动生成含 UTC 时间戳及唯一后缀的报告编号，按日期把**固定结构交付物**保存到 `.dy_superpowers/reports/general-ledger/<YYYY-MM-DD>/`：业务 PDF（`<report-id>.pdf`，固定五节：一页结论/范围概览/检查结果汇总/阻塞事项与下一步/技术追溯，带页码页脚，不含机器可读 JSON）与原始 Markdown（`<report-id>.md`，含完整检查数据供复核和自动处理）。响应返回实际编号和两个交付物路径。使用响应中的模块与报告编号调用 `dy_inspection_report_read` 复核保存内容。历史 Markdown 报告缺 PDF 时，用 `dy_inspection_report_export_pdf` 重导出（数据按当前矩阵重新校验，已有 PDF 不覆盖）。调研修订、范围或标准变化后，受影响项先转为待复查；未消除的阻塞不得汇总为通过。
 
 ## 输出合同
 

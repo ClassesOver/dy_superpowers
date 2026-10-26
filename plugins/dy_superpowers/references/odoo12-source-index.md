@@ -142,7 +142,7 @@
 | 技术名 | 关键模型（巡检查询入口） |
 | --- | --- |
 | `dy_expense` | dy.expense.requisition / dy.expense.payment.requisition / dy.expense.repayment.requisition / dy.expense.document.type / dy.expense.item / dy.expense.city.season / dy.expense.permission.configuration |
-| `dy_fin_mdm` | dy.fin.account.structure / dy.fin.account.period / dy.fin.account.period.open.and.done / dy.fin.account.analytic.plan / dy.fin.account.cash.flow.mapping / dy.account.permissions.settings |
+| `dy_fin_mdm` | dy.fin.account.structure / dy.fin.account.period（持久期间状态）/ dy.fin.account.period.open.and.done（临时操作向导，不作状态证据）/ dy.fin.account.analytic.plan / dy.fin.cash.flow.mapping / dy.account.permissions.settings |
 | `dy_fin_acc` | account.move（扩展）/ dy.fin.acc.account.periodicity.voucher / account.move.generate / dy.fin.acc.account.move.summary |
 | `dy_fin_gaap` | account.mapping / budget.account.move / budget.statement.of.income.and.expenditure / budget.move.paralleled.wizard |
 | `dy_fin_pf` | dy.fin.pf.account.class.define / dy.fin.pf.account.move.generation.rule / dy.fin.pf.condition.source.mapping / dy.fin.pf.influence.factor.setting |
@@ -151,6 +151,7 @@
 | `dy_fin_budget_expense_pf` | （无新模型，扩展费用预算记账） |
 | `dy_budget_control_expense` | dy.budget.control.rule.expense.item.line / dy.budget.control.exp.app.line |
 | `dy_hrfm` | dy.hrfm.funds.application / dy.hrfm.budget.project / dy.hrfm.funds.account / dy.hrfm.expense.execute.rule |
+| `dy_hrfm_expense` | 科研管理与费用管理集成；依赖 dy_hrfm、dy_expense，不能只凭基础科研模块已安装判集成可用 |
 | `dy_budget_control` | 预算控制核心（预算方案、控制规则、占用/扣减记录） |
 | `dy_fin_ap` | 应付管理单据与付款 |
 

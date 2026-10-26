@@ -83,11 +83,19 @@ def _render_report(module: str, report_id: str, report: dict, validation: dict) 
     summary = evidence_summary.get("summary") if isinstance(evidence_summary, dict) else None
     if not isinstance(summary, str) or not summary.strip():
         summary = "按下方检查明细及证据判断；未确认事项不视为通过。"
+    coverage = validation.get("coverage") if isinstance(validation.get("coverage"), dict) else {}
+    inspected = sum(item.get("inspected", 0) for item in coverage.values())
+    matrix_size = sum(item.get("matrix", 0) for item in coverage.values())
+    partial_note = ""
+    if matrix_size and inspected < matrix_size:
+        partial_note = (f" 本轮为部分范围巡检（纳入 {inspected}/{matrix_size} 个矩阵子项），"
+                        "门禁仅代表纳入项，不代表整模块交付通过。")
     sections = [
         f"# {module_name}模块巡检报告", "",
         "## 一页结论", "",
         f"**交付结论：{validation['gate']}。** "
-        + ("当前仍有检查项待确认或未完成，暂不能作为交付通过依据。" if validation["gate"] == "待确认" else ""), "",
+        + ("当前仍有检查项待确认或未完成，暂不能作为交付通过依据。" if validation["gate"] == "待确认" else "")
+        + partial_note, "",
         f"- 巡检范围：{module_name}模块；{len(expected)} 项纳入检查，{len(excluded)} 项按范围排除。",
         f"- 项目范围：公司/组织 {_markdown_text(company_text)}；环境 {_markdown_text('、'.join(envs) or '未提供')}。",
         "- 检查结果：" + "；".join(f"{status} {count} 项" for status, count in counts.items() if count) + ("。" if any(counts.values()) else "暂无结果。"),
@@ -181,18 +189,41 @@ def report_path(workspace: str | Path, module: str, report_id: str) -> Path:
     return report_dir / f"{report_id}.md"
 
 
-def save_report(workspace: str | Path, module: str, report: dict, validation: dict) -> tuple[str, Path]:
+def _write_new_bytes(path: Path, data: bytes) -> None:
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary, path)
+    except FileExistsError as exc:
+        raise ValueError("报告编号已存在；历史报告不会被覆盖") from exc
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def save_report(workspace: str | Path, module: str, report: dict, validation: dict) -> tuple[str, Path, Path]:
+    """保存固定结构交付物：业务 PDF 与含机器可读数据的 Markdown 同目录同名。"""
     if validation.get("valid") is not True:
         raise ValueError("巡检报告校验未通过，不能保存")
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     report_id = f"{timestamp}-{secrets.token_hex(3)}"
     path = report_path(workspace, module, report_id)
+    pdf_path = path.with_suffix(".pdf")
     path.parent.mkdir(parents=True, exist_ok=True)
     content = _render_report(module, report_id, report, validation)
-    if path.is_symlink():
+    from .report_pdf import render_report_pdf
+
+    pdf_bytes = render_report_pdf(module, report_id, report, validation,
+                                  generated_at=validation.get("validated_at", ""))  # 先渲染，失败时不落盘任何交付物
+    if path.is_symlink() or pdf_path.is_symlink():
         raise ValueError("巡检报告文件不允许使用符号链接")
     _write_new_file(path, content)
-    return report_id, path
+    _write_new_bytes(pdf_path, pdf_bytes)
+    return report_id, path, pdf_path
 
 
 def read_report(workspace: str | Path, module: str, report_id: str) -> str:
@@ -202,3 +233,36 @@ def read_report(workspace: str | Path, module: str, report_id: str) -> str:
     if not path.is_file():
         raise ValueError("未找到指定巡检报告")
     return path.read_text(encoding="utf-8")
+
+
+def export_report_pdf(workspace: str | Path, module: str, report_id: str) -> tuple[Path, bool]:
+    """从已存 Markdown 报告的机器可读数据重导出业务 PDF；已有 PDF 不覆盖。"""
+    import json as _json
+
+    content = read_report(workspace, module, report_id)
+    blocks = re.findall(r"\n(`{3,})json\n(.*?)\n\1", content, re.DOTALL)
+    if not blocks:
+        raise ValueError("报告缺少机器可读 JSON 数据，无法重导出 PDF")
+    try:
+        report = _json.loads(blocks[-1][1])
+    except _json.JSONDecodeError as exc:
+        raise ValueError("报告机器可读数据损坏，无法重导出 PDF") from exc
+    if not isinstance(report, dict):
+        raise ValueError("报告机器可读数据损坏，无法重导出 PDF")
+    modules = {item.get("module") for item in report.get("expected_checks", [])
+               if isinstance(item, dict) and isinstance(item.get("module"), str)}
+    if modules != {module}:
+        raise ValueError("报告数据与模块不匹配，无法重导出 PDF")
+    from .inspection import validate_inspection
+    from .report_pdf import render_report_pdf
+
+    validation = validate_inspection(Path(workspace), report)
+    if not validation.get("valid"):
+        raise ValueError("报告数据按当前矩阵重新校验未通过（矩阵或调研状态已变化），不能重导出 PDF")
+    pdf_path = report_path(workspace, module, report_id).with_suffix(".pdf")
+    if pdf_path.is_symlink():
+        raise ValueError("巡检报告文件不允许使用符号链接")
+    if pdf_path.is_file():
+        return pdf_path, False
+    _write_new_bytes(pdf_path, render_report_pdf(module, report_id, report, validation))
+    return pdf_path, True

@@ -22,6 +22,12 @@ MODULES: dict[str, dict[str, Any]] = {
             "dy.expense.credit.score.config", "dy.expense.detail.report",
         ],
         "workflow": "申请 → 借款/报销 → 审批 → 付款/核销；单据类型、编号和权限由 dy.expense.document.type 与 dy.expense.permission.configuration 配置",
+        "model_notes": {
+            "dy.expense.document.type": "公司范围为 company_ids（Many2many），启用字段为 is_active；主表没有独立 code 字段，不要套用 company_id/active/code",
+            "dy.expense.document.type.sequence": "编号分配用 company_id/doc_type_id/doc_sequence_id 核对",
+            "dy.expense.city.season": "low_season_ids/peak_season_ids/active；本模型无独立公司和有效期字段，季节关联本身不能证明月份与政策覆盖",
+            "dy.expense.policy": "公司范围可同时有 company_id 与 company_ids；明细 dy.expense.policy.line 用 city_id/season_type/effective_date/start_date/end_date/expiry_date/control_level 等核对适用政策",
+        },
         "depends": ["dy_fin_mdm"],
         "source_repo": "dy-expense",
     },
@@ -44,8 +50,8 @@ MODULES: dict[str, dict[str, Any]] = {
     "dy_budget_control_expense": {
         "name": "预算控制&费用报销集成",
         "aliases": ["费用预算控制", "预算占用", "预算扣减"],
-        "models": ["dy.budget.control.rule.expense.item.line", "dy.budget.control.exp.app.line"],
-        "workflow": "费用申请/报销按预算控制规则占用、扣减和释放预算",
+        "models": ["dy.budget.control.execution.rule", "dy.budget.control.rule.expense.item.line", "dy.budget.control.exp.app.line"],
+        "workflow": "费用预算控制主规则在 dy_budget_control；费用集成提供费用项目控制行。须按 source_doc、company_id、date_from/date_to、is_active_flag、effective_node 及 expense_item_ids 组合核对",
         "depends": ["dy_budget_control", "dy_expense"],
         "source_repo": "dy-budget",
     },
@@ -60,6 +66,14 @@ MODULES: dict[str, dict[str, Any]] = {
         "depends": ["dy_base", "dy_base_data", "dy_fin_mdm"],
         "source_repo": "dy-hrfm",
     },
+    "dy_hrfm_expense": {
+        "name": "科研管理&费用管理集成",
+        "aliases": ["专项经费管理&费用管理集成", "科研费用集成", "经费费用衔接"],
+        "models": ["dy.hrfm.expense.execute.rule"],
+        "workflow": "集成模块扩展科研与费用衔接；执行规则模型由基础模块 dy_hrfm 定义，基础模块已安装不代表集成已安装",
+        "depends": ["dy_hrfm", "dy_expense"],
+        "source_repo": "dy-hrfm",
+    },
     # ---- 总账巡检域（源码仓库 dy-finance / dy-acc-center） ----
     "dy_fin_mdm": {
         "name": "总账主数据（财务会计-基础）",
@@ -71,6 +85,10 @@ MODULES: dict[str, dict[str, Any]] = {
             "dy.account.permissions.settings", "dy.account.permissions.account",
         ],
         "workflow": "科目结构/类型 → 会计期间模板与公司分配 → 期间开关 → 辅助核算与现金流映射",
+        "model_notes": {
+            "dy.fin.account.period": "持久模型；以 company_id/date_from/date_to/account_structure_id 限定范围，state/state_show/cashier_period_state 为状态线索",
+            "dy.fin.account.period.open.and.done": "TransientModel 操作向导，不是期间状态事实源；只读巡检不得创建向导或调用开关账方法",
+        },
         "depends": ["dy_base", "account_accountant", "dy_base_data"],
         "source_repo": "dy-finance",
     },

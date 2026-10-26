@@ -34,18 +34,26 @@ description: 在巡检 Odoo 12 HRP 费用模块交付、配置、权限、费用
 | 费用管理（Dy Expense Management） | `dy_expense` | `dy.expense.document.type`、`dy.expense.item`、`dy.expense.city.season`、`dy.expense.permission.configuration` |
 | 会计平台-费用 | `dy_fin_expense_pf` | `dy.fin.expense.pf`（生成规则复用 `dy_fin_pf` 的 `dy.fin.pf.account.move.generation.rule`） |
 | 预算会计平台-基础（仅公立医院） | `dy_fin_budget_pf` | 无新模型，扩展预算凭证通道 |
-| 预算控制&费用报销集成 | `dy_budget_control_expense` | `dy.budget.control.rule.expense.item.line` |
-| 专项经费管理&费用管理集成 | `dy_hrfm` | `dy.hrfm.funds.application`、`dy.hrfm.expense.execute.rule` |
+| 预算控制&费用报销集成 | `dy_budget_control_expense` | `dy.budget.control.rule.expense.item.line`、`dy.budget.control.exp.app.line`；预算控制主规则在依赖模块 `dy_budget_control` 的 `dy.budget.control.execution.rule` |
+| 专项经费管理&费用管理集成 | `dy_hrfm_expense`（依赖 `dy_hrfm`、`dy_expense`） | 扩展费用与经费衔接；经费执行规则在基础模块 `dy_hrfm` 的 `dy.hrfm.expense.execute.rule` |
 
 常用只读查询示例（domain 仅为形状参考，须按已确认调研结论裁剪公司与范围，字段先用 `dy_odoo_model_fields` 核对）：
 
-- 单据类型与编号：`dy_odoo_record_search` 查 `dy.expense.document.type`，domain 如 `[["company_id","=",<公司>]]`，字段 `name/code/active`；编号规则查 `dy.expense.document.type.sequence`。
-- 城市淡旺季：查 `dy.expense.city.season`，检查 `low_season_ids/peak_season_ids/active` 与生效期间。
-- 单据权限（代填代提、可见范围）：查 `dy.expense.permission.configuration` 及其 `line_ids`（部门/员工/提交/查询权限）。
+- 单据类型与编号：`dy.expense.document.type` 的公司范围是多对多 `company_ids`，启用字段是 `is_active`；不可套用 `company_id/active/code`。核对字段后，以 `[公司ID]` 替换实际范围，在 `dy_odoo_record_search` 中使用 `args=[[["company_ids","in",[公司ID]],["is_active","=",true]]]`，`kwargs={"fields":["id","name","company_ids","is_active","document_type"],"limit":100,"offset":0}`。编号规则查 `dy.expense.document.type.sequence` 的 `company_id/doc_type_id/doc_sequence_id`；不能用类型本身的空编号查询误判编号缺失。
+- 城市淡旺季：查 `dy.expense.city.season` 的 `name/code/low_season_ids/peak_season_ids/active`。本模型没有独立公司及生效日期字段；月份/日期定义须按 `dy_odoo_model_fields` 返回的关联模型继续只读核验，不把其他配置模型的字段套用到这里。
+- 单据权限（代填代提、可见范围）：查 `dy.expense.permission.configuration` 的 `company_id/document_type/is_active/effective_date/expiration_date/line_ids`，再读 `dy.expense.permission.configuration.line` 的部门、员工、提交及查询权限；按有效期和本期公司范围核对，不只看是否有记录。
 - 费用单据状态样例：查 `dy.expense.requisition`（申请）、`dy.expense.payment.requisition`（借款）、`dy.expense.repayment.requisition`（还款），按 `state/company_id` 过滤，只取最小字段；公司隔离按 `company_id` 分组核对。
+- 费用与总账期间：在 `dy.fin.account.period` 同时核对 `expense_period_status` 与总账 `state`，按公司、账套和确认的业务日期过滤。总账开放不代表费用开放；只读状态快照也不能证明关账检查、开关顺序或岗位权限已经验证。
+- 政策范围与明细：先按公司、费用项目和来源明确的政策名定位 `dy.expense.policy`，再以 `dy.expense.policy.line.expense_policy` 关联所选头 ID；分别统计全部明细和业务日期有效明细。核对城市、职称、淡旺季及 `control_level`；`warning` 与 `prohibit` 不能等同，数量相符也不能替代边界算例。
+- 预算规则：科室预算用 `dy.budget.control.execution.rule` 的 `is_active_flag/date_from/date_to/source_doc/effective_node`；专项预算用 `dy.hrfm.expense.execute.rule` 的 `active_flag/date_from/date_to/source_doc/execute_node/effective_node`。来源明确不启用、不续期的历史规则不要求补建；按申请/报销、节点和业务日期分别判断，不能用子行数量或单个启用开关代替主规则有效性。
 
 源码版本与账套实际版本可能不同：以 `dy_odoo_module_info` 返回的 `latest_version` 为账套事实，源码索引只提供模型与依赖线索。定制 addon 可能增删字段，查询前先 `dy_odoo_model_fields`。
 
+## 来源调研对照与端到端验证
+
+用户提供已有调研结果（问答、Excel、Word、PDF 或接口结果）时，先读取[来源驱动巡检与端到端验证](../../references/inspection-source-validation.md)，对照 `DY-xx` 来源键、矩阵键及子项，并保留来源位置、范围、待确认项和验收标准差异。来源标准与当前矩阵不一致时，不改矩阵、不静默选一版；在报告中阻塞相关验收分支。
+
+真实端到端验证按该参考的 live 流程显式启用，只使用 Odoo JSON-RPC 只读工具。运行范围必须来自来源中经确认的公司和业务日期；来源没给时记录待确认，不以测试日期替代业务事实。测试成功只证明 MCP 链路及只读配方可运行；没有正式岗位、正反例、边界及业务签认时，门禁保持待确认。
 ## 执行流程
 
 1. **建立项目上下文**：读取当前工作区项目资料、授权来源和工作区记忆；确认项目、公司/院区、业务范围、上线日期、环境和 Odoo 版本。只复用有来源且仍有效的已确认结论。
@@ -73,9 +81,9 @@ description: 在巡检 Odoo 12 HRP 费用模块交付、配置、权限、费用
 
 按 [交付记录要求](../../docs/delivery-domain.md) 为每个子项和适用范围记录本次结果，保留调研 `revision` 与 `scope_id`、对应验收标准完整原文、矩阵文件 SHA-256、带时区的验证时间和最小证据引用。跨公司不得共用结论；调研工具报不一致或范围不明确时保持“待确认”，不得绕过校验。
 
-先按[巡检校验合同](../../docs/inspection-validation.md)列出完整模块矩阵：纳入项放入 `expected_checks`，范围外子项放入 `excluded_checks` 并说明理由。每个范围内子项都须有一条当前结果记录。调用 `dy_inspection_validate`；`valid=false` 时修正记录，不能报告门禁通过；`valid=true` 只代表记录校验通过，还须检查 `gate`。验证时间须带时区、不得晚于当前时间并晚于所用调研修订；Odoo 证据须引用同一工作区 trace 中该模型的成功读取。
+先按[巡检校验合同](../../docs/inspection-validation.md)列出完整模块矩阵：纳入项放入 `expected_checks`，范围外子项放入 `excluded_checks` 并说明理由。按调研结果挑选检查项时，只把调研结论已覆盖且本轮可验证的子项放入 `expected_checks`，其余子项全部进 `excluded_checks` 并写分类理由（调研缺口/需操作验证/本轮未安排），不虚构占位记录；部分范围报告的门禁只代表纳入项（校验结果标注 N/M 覆盖度），不得表述为整模块通过，规则详见[来源驱动巡检与端到端验证](../../references/inspection-source-validation.md#按调研覆盖挑选检查项部分范围巡检)。每个范围内子项都须有一条当前结果记录。调用 `dy_inspection_validate`；`valid=false` 时修正记录，不能报告门禁通过；`valid=true` 只代表记录校验通过，还须检查 `gate`。验证时间须带时区、不得晚于当前时间并晚于所用调研修订；Odoo 证据须引用同一工作区 trace 中该模型的成功读取。
 
-向用户展示报告和校验限制并获保存确认后，调用 `dy_inspection_report_save`，提供完整报告和 `confirmed=true`，无需生成编号。工具会重新校验，并自动生成含 UTC 时间戳及唯一后缀的报告编号，按日期保存到 `.dy_superpowers/reports/expense/<YYYY-MM-DD>/<report-id>.md`；响应会返回实际编号和路径。使用响应中的模块与报告编号调用 `dy_inspection_report_read` 复核保存内容。调研修订、范围或标准变化后，受影响项先转为待复查；未消除的阻塞不得汇总为通过。
+向用户展示报告和校验限制并获保存确认后，调用 `dy_inspection_report_save`，提供完整报告和 `confirmed=true`，无需生成编号。工具会重新校验，并自动生成含 UTC 时间戳及唯一后缀的报告编号，按日期把**固定结构交付物**保存到 `.dy_superpowers/reports/expense/<YYYY-MM-DD>/`：业务 PDF（`<report-id>.pdf`，固定五节：一页结论/范围概览/检查结果汇总/阻塞事项与下一步/技术追溯，带页码页脚，不含机器可读 JSON）与原始 Markdown（`<report-id>.md`，含完整检查数据供复核和自动处理）。响应返回实际编号和两个交付物路径。使用响应中的模块与报告编号调用 `dy_inspection_report_read` 复核保存内容。历史 Markdown 报告缺 PDF 时，用 `dy_inspection_report_export_pdf` 重导出（数据按当前矩阵重新校验，已有 PDF 不覆盖）。调研修订、范围或标准变化后，受影响项先转为待复查；未消除的阻塞不得汇总为通过。
 
 ## 输出合同
 

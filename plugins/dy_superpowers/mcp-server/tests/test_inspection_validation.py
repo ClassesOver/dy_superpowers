@@ -347,3 +347,35 @@ def test_supplemental_research_revision_requires_reinspection(tmp_path, report, 
                              'reason': '已按补充确认范围重新核验'}]
     result = validate(tmp_path, refreshed)
     assert result['valid'] is True and result['gate'] == '通过'
+
+
+def test_partial_scope_reports_coverage_and_partial_limitation(tmp_path, report):
+    result = validate(tmp_path, report)
+    assert result['valid'] is True
+    scope = next(key for key in result['coverage'] if key.startswith('expense|'))
+    assert result['coverage'][scope] == {'inspected': 1, 'excluded': 90, 'matrix': 91}
+    assert '部分范围巡检' in result['limitations'] and '1/91' in result['limitations']
+
+
+def test_full_scope_coverage_has_no_partial_limitation(tmp_path, report):
+    from dy_superpowers_mcp.inspection import _matrix
+
+    revision, standards = _matrix('expense')
+    full = dict(report)
+    full['excluded_checks'] = []
+    full['expected_checks'] = [
+        {'module': 'expense', 'check_order': order, 'research_id': research_id,
+         'scope_id': report['expected_checks'][0]['scope_id'], 'environment': 'UAT'}
+        for order, research_id in sorted(standards)]
+    template = report['records'][0]
+    full['records'] = [
+        {**template, 'check_order': order, 'research_id': research_id, 'record_id': f'FULL-{index}',
+         'acceptance_standard': standards[order, research_id],
+         'result': '待确认', 'reason': '全量覆盖演示：待确认无需证据链',
+         'research_revision': '', 'evidence_refs': []}
+        for index, (order, research_id) in enumerate(sorted(standards))]
+    result = validate(tmp_path, full)
+    assert result['valid'] is True
+    assert '部分范围巡检' not in result['limitations']
+    scope = next(key for key in result['coverage'] if key.startswith('expense|'))
+    assert result['coverage'][scope]['inspected'] == result['coverage'][scope]['matrix'] == 91

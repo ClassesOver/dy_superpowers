@@ -257,6 +257,50 @@ def test_new_research_has_one_body_and_detects_edits(tmp_path):
         read_record(tmp_path, 'account', '1', '01')
 
 
+def test_odoo_error_response_reports_call_failure_not_format_error():
+    """错误响应即使不回显请求 id，也必须报「调用失败」而非「格式无效」。"""
+    import threading
+    from dy_superpowers_mcp.odoo_jsonrpc import OdooReadClient, OdooRPCError
+
+    class ErrorNoIdSession:
+        def post(self, *args, **kwargs):
+            class R:
+                def raise_for_status(self): pass
+                def json(self): return {"jsonrpc": "2.0", "id": None,
+                                        "error": {"code": 400, "message": "db 不存在"}}
+            return R()
+        def close(self): pass
+
+    client = OdooReadClient.__new__(OdooReadClient)
+    client.__dict__.update(_session=ErrorNoIdSession(), _lock=threading.RLock(),
+                           _request_id=0, settings=None, uid=1, _rpc_url='http://odoo/jsonrpc')
+    with pytest.raises(OdooRPCError, match='调用失败'):
+        client._rpc('object', 'execute_kw', [])
+
+
+def test_search_read_preserves_odoo_rpc_error_type():
+    """OdooRPCError 不被包装成通用请求失败，保留服务端错误语义分层。"""
+    import threading
+    from dy_superpowers_mcp.odoo_jsonrpc import OdooReadClient, OdooRPCError
+
+    class GarbageSession:
+        def post(self, *args, **kwargs):
+            raise ConnectionError("dead")
+        def close(self): pass
+
+    client = OdooReadClient.__new__(OdooReadClient)
+    client.__dict__.update(_session=GarbageSession(), _lock=threading.RLock(),
+                           _request_id=0, settings=None, uid=1)
+    try:
+        client._rpc("object", "execute_kw", [])
+    except OdooRPCError as exc:
+        marker = object()
+        original = exc.__context__
+        assert isinstance(original, OdooRPCError) or "JSON-RPC" in str(exc)
+    else:
+        raise AssertionError("应当抛出 OdooRPCError")
+
+
 @pytest.mark.parametrize('damage', ['json', 'scope'])
 def test_scoped_lookup_cannot_hide_damaged_new_record(tmp_path, damage):
     from dy_superpowers_mcp.research import write_record

@@ -91,14 +91,16 @@ class OdooReadClient:
                 )
                 response.raise_for_status()
                 payload = response.json()
+            except OdooRPCError:
+                raise
             except Exception as exc:
                 raise OdooRPCError("Odoo JSON-RPC 请求失败") from exc
-            if (not isinstance(payload, dict) or payload.get("jsonrpc") != "2.0"
-                    or payload.get("id") != request_id):
+            if not isinstance(payload, dict) or payload.get("jsonrpc") != "2.0":
                 raise OdooRPCError("Odoo JSON-RPC 返回格式无效")
             if "error" in payload:
+                # 错误响应优先判定：部分错误响应不回显请求 id，不能误报为格式无效。
                 raise OdooRPCError("Odoo JSON-RPC 调用失败")
-            if "result" not in payload:
+            if payload.get("id") != request_id or "result" not in payload:
                 raise OdooRPCError("Odoo JSON-RPC 返回格式无效")
             return payload["result"]
 
@@ -116,6 +118,8 @@ class OdooReadClient:
     def search_read(self, model: str, domain: list[Any], fields: list[str], limit: int, offset: int = 0) -> list[dict[str, Any]]:
         try:
             result = self._execute_kw(model, "search_read", [domain], {"fields": fields, "limit": limit, "offset": offset})
+        except OdooRPCError:
+            raise
         except Exception as exc:
             raise OdooRPCError("Odoo 只读请求失败") from exc
         if not isinstance(result, list):
@@ -128,6 +132,8 @@ class OdooReadClient:
     def fields_get(self, model: str) -> dict[str, Any]:
         try:
             result = self._execute_kw(model, "fields_get", [], {"attributes": ["string", "type", "required", "readonly", "relation", "store"]})
+        except OdooRPCError:
+            raise
         except Exception as exc:
             raise OdooRPCError("Odoo 字段元数据读取失败") from exc
         if not isinstance(result, dict):

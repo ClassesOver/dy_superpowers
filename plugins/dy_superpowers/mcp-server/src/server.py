@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import uuid
@@ -14,13 +15,15 @@ from contextlib import nullcontext
 sys.path.insert(0, str(Path(__file__).parent))
 
 from dy_superpowers_mcp import TraceStore, WorkspaceMemory
-from dy_superpowers_mcp.memory import WRITABLE_MEMORY_FILES, module_memory_files, module_memory_path, validate_module
+from dy_superpowers_mcp.memory import WRITABLE_MEMORY_FILES, list_notes, module_memory_files, module_memory_path, read_note, validate_module, write_note
 from dy_superpowers_mcp.trace import TRACE_CODE_PATTERN, TRACE_CONTEXT_FIELDS, TRACE_ID_PATTERN
 from dy_superpowers_mcp.telemetry import current_trace_context, initialize_telemetry, mark_otel_error, operation_span, record_otel_event, tool_span
 from dy_superpowers_mcp.odoo_jsonrpc import OdooConfigurationError, OdooReadClient, OdooRPCError, OdooSettings, validate_read_arguments
+from dy_superpowers_mcp.wiki_sync import sync_wiki
+from dy_superpowers_mcp.project_wiki import configure_project, stage_wiki
 from dy_superpowers_mcp.knowledge import module_info as knowledge_module_info, search as knowledge_search
 from dy_superpowers_mcp.research import read_module_records, read_record, write_record
-from dy_superpowers_mcp.reports import read_report, save_report
+from dy_superpowers_mcp.reports import export_report_pdf, read_report, save_report
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 from dy_superpowers_mcp.inspection import validate_inspection
 
@@ -35,6 +38,43 @@ MEMORY_READ_FILES = [
 MEMORY_WRITE_FILES = sorted(WRITABLE_MEMORY_FILES)
 SESSION_INDEX_FILES = tuple(MEMORY_READ_FILES)
 SESSION_SOURCES = {"startup", "resume", "clear", "compact", "fork"}
+
+# 安装即用：连接与令牌允许放在工作区 .env（已被 .gitignore 排除），服务启动时读取。
+# 只认白名单键、不覆盖已设置的环境变量、不回显任何值。
+ENV_FILE_KEYS = (
+    "ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_PASSWORD", "DY_ODOO_ALLOWED_ORIGINS",
+    "DY_WIKI_API_URL", "DY_WIKI_TOKEN", "DY_WIKI_PROJECT_ID", "DY_WIKI_GROUP_ID", "DY_WIKI_PROJECT_NAME",
+)
+
+
+def load_workspace_env(workspace: Path) -> list[str]:
+    """读取工作区 .env 中的白名单配置；返回加载的键名列表，值不进入日志或返回值。"""
+    env_file = Path(workspace) / ".env"
+    if not env_file.is_file() or env_file.is_symlink():
+        return []
+    try:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    loaded = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[len("export "):].strip()
+        if key not in ENV_FILE_KEYS or os.environ.get(key):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] in {"'", '"'} and value[-1] == value[0]:
+            value = value[1:-1]
+        if value:
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
+
 
 class ToolRequestError(Exception):
     def __init__(self, code: int, message: str) -> None:
@@ -130,7 +170,7 @@ def _handle_inspection_report_save(name: str, arguments: dict, workspace: Path, 
     if not result['valid']:
         raise ToolRequestError(-32602, '巡检报告校验失败: ' + json.dumps(result['errors'], ensure_ascii=False))
     try:
-        report_id, path = save_report(workspace, module, report, result)
+        report_id, path, pdf_path = save_report(workspace, module, report, result)
     except ValueError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'inspection.report.save', 'operation': 'save', 'tool': name, 'status': 'ok',
@@ -139,8 +179,8 @@ def _handle_inspection_report_save(name: str, arguments: dict, workspace: Path, 
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
     return {'saved': True, 'module': module, 'report_id': report_id,
-            'path': str(path.relative_to(workspace)), 'gate': result['gate'],
-            'validated_at': result['validated_at']}
+            'path': str(path.relative_to(workspace)), 'pdf_path': str(pdf_path.relative_to(workspace)),
+            'gate': result['gate'], 'validated_at': result['validated_at']}
 
 def _handle_inspection_report_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     module = arguments.get('module')
@@ -158,6 +198,100 @@ def _handle_inspection_report_read(name: str, arguments: dict, workspace: Path, 
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
     return content
+
+def _handle_inspection_report_export_pdf(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    module = arguments.get('module')
+    report_id = arguments.get('report_id')
+    if (not isinstance(module, str) or not module.strip()
+            or not isinstance(report_id, str) or not report_id.strip()):
+        raise ToolRequestError(-32602, 'module 和 report_id 必须是非空文本')
+    try:
+        pdf_path, created = export_report_pdf(workspace, module, report_id)
+    except ValueError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    event = {'event': 'inspection.report.export_pdf', 'operation': 'export', 'tool': name,
+             'status': 'ok', 'module': module, 'report_id': report_id,
+             'result': '已生成' if created else '已存在', 'span_id': span_id}
+    append_trace(store, arguments['trace_id'], event)
+    record_otel_event(otel_span, event)
+    return {'exported': True, 'module': module, 'report_id': report_id, 'created': created,
+            'pdf_path': str(pdf_path.relative_to(workspace))}
+
+def _handle_notes_write(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    if arguments.get('confirmed') is not True:
+        raise ToolRequestError(-32602, 'wiki 记忆写入需要用户明确确认')
+    try:
+        path = write_note(workspace, arguments.get('slug', ''), arguments.get('title', ''),
+                          arguments.get('body', ''), arguments.get('tags', []),
+                          confirmed=True, source_refs=arguments.get('source_refs', []))
+    except (ValueError, PermissionError, TypeError) as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    content = path.read_text(encoding='utf-8')
+    slug = path.relative_to(workspace / '.dy_superpowers' / 'notes').with_suffix('').as_posix()
+    event = {'event': 'notes.write', 'operation': 'write', 'tool': name, 'status': 'ok',
+             'memory_file': str(path.relative_to(workspace)), 'memory_content': content,
+             'content_bytes': len(content.encode('utf-8')),
+             'span_id': span_id}
+    append_trace(store, arguments['trace_id'], event)
+    record_otel_event(otel_span, event)
+    return {'written': True, 'slug': slug, 'path': str(path.relative_to(workspace))}
+
+
+def _handle_notes_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    try:
+        content = read_note(workspace, arguments.get('slug', ''))
+    except ValueError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    if not content:
+        return {'found': False, 'slug': arguments.get('slug', ''), 'notes': list_notes(workspace)}
+    event = {'event': 'notes.read', 'operation': 'read', 'tool': name, 'status': 'ok',
+             'memory_file': '.dy_superpowers/notes/' + arguments.get('slug', '') + '.md',
+             'memory_content': content, 'content_bytes': len(content.encode('utf-8')), 'span_id': span_id}
+    append_trace(store, arguments['trace_id'], event)
+    record_otel_event(otel_span, event)
+    return content
+
+
+def _handle_notes_list(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    return {'notes': list_notes(workspace)}
+
+
+def _handle_project_configure(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    try:
+        result = configure_project(workspace, arguments['name'], arguments['code'],
+                                   confirmed=arguments.get('confirmed', False))
+    except (ValueError, PermissionError) as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    return result
+
+
+def _handle_wiki_build(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    if arguments.get('confirmed') is not True:
+        raise ToolRequestError(-32602, '本地 Wiki 构建需用户确认；不会推送远端')
+    try:
+        manifest = stage_wiki(workspace)
+    except (ValueError, OSError) as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    return {'built': True, 'project': manifest['project'], 'pages': len(manifest['entries']),
+            'overview_slug': manifest['overview_slug'], 'published': False}
+
+
+def _handle_wiki_sync(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    if arguments.get('confirmed') is not True:
+        raise ToolRequestError(-32602, 'wiki 同步是外发动作，需要用户明确确认')
+    try:
+        result = sync_wiki(workspace, confirmed=True)
+    # WikiSyncError 是 ValueError 子类；OSError 覆盖清单页面文件缺失等本地读取失败。
+    except (ValueError, OSError, PermissionError) as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    event = {'event': 'wiki.sync', 'operation': 'sync', 'tool': name,
+             'status': 'ok' if result.get('synced') else 'noop',
+             'count': result.get('pages', 0), 'result': 'ok' if result.get('synced') else '未知',
+             'span_id': span_id}
+    append_trace(store, arguments['trace_id'], event)
+    record_otel_event(otel_span, event)
+    return result
+
 
 def _handle_trace_event(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     event = arguments.get('event')
@@ -401,6 +535,75 @@ TOOL_REGISTRY = {
                         'module': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9_-]{0,63}$'},
                         'report_id': {'type': 'string', 'pattern': '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'}}},
         _handle_inspection_report_read,
+    ),
+    'dy_inspection_report_export_pdf': (
+        '从已保存的 Markdown 巡检报告重导出业务 PDF；数据按当前矩阵重新校验，已有 PDF 不覆盖。',
+        {'type': 'object',
+         'required': ['trace_id', 'module', 'report_id'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
+                        'module': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9_-]{0,63}$'},
+                        'report_id': {'type': 'string', 'pattern': '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'}}},
+        _handle_inspection_report_export_pdf,
+    ),
+    'dy_notes_write': (
+        '用户确认后写入 wiki 记忆页（Basic Memory 兼容 md，含 frontmatter），位于工作区 .dy_superpowers/notes/。',
+        {'type': 'object',
+         'required': ['trace_id', 'slug', 'title', 'body', 'confirmed'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
+                        'slug': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9/-]{0,120}$'},
+                        'title': {'type': 'string', 'minLength': 1, 'maxLength': 120},
+                        'body': {'type': 'string', 'minLength': 1},
+                        'tags': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 10},
+                        'source_refs': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 20},
+                        'confirmed': {'type': 'boolean'}}},
+        _handle_notes_write,
+    ),
+    'dy_notes_read': (
+        '读取指定 wiki 记忆页；不存在时返回可用页面清单。',
+        {'type': 'object',
+         'required': ['trace_id', 'slug'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
+                        'slug': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9/-]{0,120}$'}}},
+        _handle_notes_read,
+    ),
+    'dy_notes_list': (
+        '列出当前工作区全部 wiki 记忆页标识。',
+        {'type': 'object',
+         'required': ['trace_id'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'}}},
+        _handle_notes_list,
+    ),
+    'dy_project_configure': (
+        '经用户确认后绑定当前工作区的唯一项目身份（正式项目名称与稳定代号）。'
+        '项目未配置或旧配置未经确认时，Wiki 构建与同步都会拒绝执行，不从账套名或文件名猜测。',
+        {'type': 'object',
+         'required': ['trace_id', 'name', 'code', 'confirmed'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
+                        'name': {'type': 'string', 'minLength': 1, 'maxLength': 100,
+                                 'description': '经用户确认的正式项目名称，单行文本'},
+                        'code': {'type': 'string', 'pattern': '^[a-z0-9]+(?:-[a-z0-9]+)*$', 'maxLength': 32,
+                                 'description': '稳定项目代号，小写字母数字连字符'},
+                        'confirmed': {'type': 'boolean'}}},
+        _handle_project_configure,
+    ),
+    'dy_wiki_build': (
+        '用户确认后按当前项目调研记忆在本地构建中文 Wiki（知识库内项目首页、模块目录、业务主题页）'
+        '并生成发布清单；不推送远端、不改动调研记录、不包含 YAML 元数据。',
+        {'type': 'object',
+         'required': ['trace_id', 'confirmed'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
+                        'confirmed': {'type': 'boolean'}}},
+        _handle_wiki_build,
+    ),
+    'dy_wiki_sync': (
+        '用户确认后把已构建的本项目 Wiki 清单发布到 GitLab Wiki：按页面所有权标记和上次同步哈希校验，'
+        '维护共享知识库首页的项目目录；不删除远端页面、不覆盖其他项目页面、不推交付物。'
+        '需 DY_WIKI_API_URL / DY_WIKI_TOKEN 及目标项目（DY_WIKI_PROJECT_ID 或 DY_WIKI_GROUP_ID+DY_WIKI_PROJECT_NAME）。',
+        {'type': 'object',
+         'required': ['trace_id', 'confirmed'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
+                        'confirmed': {'type': 'boolean'}}},
+        _handle_wiki_sync,
     ),
     'dy_trace_event': (
         '追加经过字段过滤和脱敏的插件运行追踪事件。',
@@ -692,7 +895,7 @@ def run_mcp(workspace: Path) -> None:
             raise MCPError(error["code"], error["message"])
         return types.CallToolResult(content=[types.TextContent(type="text", text=_mcp_result(result)["content"][0]["text"])])
 
-    server = Server("dy_superpowers", version="0.1.0", on_list_tools=list_tools, on_call_tool=call_tool)
+    server = Server("dy_superpowers", version="0.2.0", on_list_tools=list_tools, on_call_tool=call_tool)
     # SDK 的自动遥测可能包含请求正文；插件自身不启用外部遥测，只保留本地 JSONL trace。
     try:
         from mcp.server._otel import OpenTelemetryMiddleware
@@ -714,6 +917,7 @@ def run_mcp(workspace: Path) -> None:
 
 def main() -> None:
     workspace = resolve_workspace()
+    load_workspace_env(workspace)
     try:
         run_mcp(workspace)
     except ModuleNotFoundError as exc:

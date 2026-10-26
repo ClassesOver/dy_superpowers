@@ -2,6 +2,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 import server
 from dy_superpowers_mcp.inspection import _matrix
@@ -115,3 +117,61 @@ def test_report_text_cannot_inject_markdown_sections_or_close_machine_data_fence
     assert "\n# 错误声明" not in prose
     assert "````json\n" in machine_data
     assert machine_data.count("````") == 2
+
+
+def test_report_save_produces_markdown_and_fixed_structure_pdf(tmp_path, monkeypatch):
+    pypdf = pytest.importorskip("pypdf")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
+    result, error = server.execute_tool("dy_inspection_report_save", {
+        "trace_id": "report-pdf", "confirmed": True, "report": valid_report(),
+    }, tmp_path)
+    assert error is None
+    md_path = tmp_path / result["path"]
+    pdf_path = tmp_path / result["pdf_path"]
+    assert md_path.suffix == ".md" and pdf_path == md_path.with_suffix(".pdf")
+    assert md_path.is_file() and pdf_path.is_file()
+    raw = pdf_path.read_bytes()
+    assert raw[:5] == b"%PDF-"
+    import io
+
+    text = "\n".join(page.extract_text() for page in pypdf.PdfReader(io.BytesIO(raw)).pages)
+    headings = ["一、一页结论", "二、范围概览", "三、检查结果汇总", "四、阻塞事项与下一步", "五、技术追溯"]
+    positions = [text.find(heading) for heading in headings]
+    assert all(position >= 0 for position in positions), "固定章节缺失"
+    assert positions == sorted(positions), "固定章节顺序被打乱"
+    assert result["report_id"] in text and "交付结论" in text
+    assert "完整检查数据" not in text and '"expected_checks"' not in text, "机器可读数据不得进入业务 PDF"
+    assert "第 1 页" in text, "PDF 应带页码页脚"
+
+
+def test_report_export_pdf_from_saved_markdown(tmp_path, monkeypatch):
+    pytest.importorskip("pypdf")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
+    saved, _ = server.execute_tool("dy_inspection_report_save", {
+        "trace_id": "report-export", "confirmed": True, "report": valid_report(),
+    }, tmp_path)
+    assert _ is None
+    (tmp_path / saved["pdf_path"]).unlink()  # 删除保存时生成的 PDF，模拟旧版无 PDF 的历史报告
+
+    result, error = server.execute_tool("dy_inspection_report_export_pdf", {
+        "trace_id": "report-export-2", "module": "expense", "report_id": saved["report_id"],
+    }, tmp_path)
+    assert error is None
+    assert result["created"] is True
+    pdf_path = tmp_path / result["pdf_path"]
+    assert pdf_path.is_file() and pdf_path.read_bytes()[:5] == b"%PDF-"
+
+    again, error = server.execute_tool("dy_inspection_report_export_pdf", {
+        "trace_id": "report-export-3", "module": "expense", "report_id": saved["report_id"],
+    }, tmp_path)
+    assert error is None and again["created"] is False  # 已有 PDF 不覆盖
+
+    broken = tmp_path / ".dy_superpowers/reports/expense/broken.md"
+    broken.parent.mkdir(parents=True, exist_ok=True)
+    broken.write_text("# 无 JSON 块的报告\n", encoding="utf-8")
+    _, error = server.execute_tool("dy_inspection_report_export_pdf", {
+        "trace_id": "report-export-4", "module": "expense", "report_id": "broken",
+    }, tmp_path)
+    assert error["code"] == -32602 and "机器可读" in error["message"]
