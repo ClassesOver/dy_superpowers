@@ -1,7 +1,7 @@
 """QA 与附件→调研记忆→项目 Wiki 端到端（真实 stdio MCP + mock GitLab API）。
 
 链路：QA 解析与键映射（脚本函数直调）→ dy_research_record_write（确认门禁）
-→ dy_notes_write（自由主题记忆，与发布清单分离）→ dy_project_configure（项目身份确认）
+→ dy_notes_write（普通笔记隔离、确认主题进入 Wiki）→ dy_project_configure（项目身份确认）
 → dy_wiki_build（本地清单）→ dy_wiki_sync（mock GitLab，含共享首页注册表）。
 """
 import asyncio
@@ -155,13 +155,22 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
             assert record["status"] == "confirmed" and record["revision"] == saved["revision"]
             assert record["evidence_ref"] == research["evidence_ref"]
 
-            # 3) 自由主题记忆走 notes，与发布清单分离
+            # 3) 普通笔记保留在工作区；已确认的模块扩展主题进入 Wiki。
             note = {"slug": "expense-policy-note", "title": "费用政策口径",
                     "body": "住宿费禁止超标，见 [[project-research-index]]。", "tags": ["expense"]}
             await call("dy_notes_write", {**note, "confirmed": False}, expect_error=True)
             await call("dy_notes_write", {**note, "confirmed": True})
+            topic_note = {"slug": "expense/policy-topic", "title": "费用政策补充调研",
+                          "body": "补充调研：住宿费上限已确认，仍需按检查键验收。",
+                          "module": "expense", "research_topic": True}
+            await call("dy_notes_write", {**topic_note, "confirmed": False}, expect_error=True)
+            await call("dy_notes_write", {**topic_note, "confirmed": True})
             listing = json.loads(await call("dy_notes_list", {}))
-            assert listing["notes"] == ["expense-policy-note"]
+            assert listing["notes"] == ["expense-policy-note", "expense/policy-topic"]
+            note_original = await call("dy_notes_read", {"slug": topic_note["slug"]})
+            await call("dy_notes_write", {**topic_note, "confirmed": True}, expect_error=True)
+            await call("dy_notes_write", {**topic_note, "confirmed": True,
+                                          "expected_content": note_original})
 
             # 4) 项目身份：未配置时构建拒绝 → 确认后绑定唯一身份
             await call("dy_wiki_build", {"confirmed": True}, expect_error=True)
@@ -174,14 +183,20 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
             # 5) 本地构建：未确认拒绝 → 确认后生成项目首页/模块目录/主题页清单
             await call("dy_wiki_build", {"confirmed": False}, expect_error=True)
             built = json.loads(await call("dy_wiki_build", {"confirmed": True}))
-            assert built["built"] and built["pages"] == 3 and built["published"] is False
+            assert built["built"] and built["pages"] == 4 and built["published"] is False
             overview_slug = built["overview_slug"]
             assert overview_slug == f"{PROJECT_CODE}-{project['project_id'].replace('-', '')[:8]}-overview"
-            assert "expense-policy-note" not in overview_slug  # notes 不进入发布清单
             wiki_pages = load_staged(workspace)[1]
+            assert all(note["body"] not in page for page in wiki_pages.values())
+            note_slug = next(slug for slug, page in wiki_pages.items() if topic_note["body"] in page)
+            assert f'[{topic_note["title"]}]({note_slug})' in next(
+                page for slug, page in wiki_pages.items() if slug.endswith('-expense-index'))
+            assert 'confirmed_at:' not in wiki_pages[note_slug]
             topic_content = next(content for slug, content in wiki_pages.items() if "-topic-" in slug)
             assert candidate["conclusion"] in topic_content
-            assert research["evidence_ref"] in re.sub(r"\\(.)", r"\1", topic_content)
+            assert source.name in re.sub(r"\\(.)", r"\1", topic_content)
+            assert Path(attachment).name in re.sub(r"\\(.)", r"\1", topic_content)
+            assert str(tmp_path) not in re.sub(r"\\(.)", r"\1", topic_content)
             assert research["confirmed_by"] in topic_content
 
             # 6) GitLab 发布：确认门禁 → 清单页 + 共享首页注册表 → 二次同步幂等。
@@ -197,14 +212,14 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
             _, error = server_module.execute_tool("dy_wiki_sync", {"trace_id": "e2e-wiki", "confirmed": False}, workspace)
             assert error["code"] == -32602 and state["methods"] == []
             result, error = server_module.execute_tool("dy_wiki_sync", {"trace_id": "e2e-wiki", "confirmed": True}, workspace)
-            assert error is None and result["synced"] and result["pages"] == 3
-            assert result["created"] == 3 and result["deleted"] == 0 and result["home_maintained"]
+            assert error is None and result["synced"] and result["pages"] == 4
+            assert result["created"] == 4 and result["deleted"] == 0 and result["home_maintained"]
             assert set(state["pages"]) == {"home", overview_slug,
                                            f"{PROJECT_CODE}-{project['project_id'].replace('-', '')[:8]}-expense-index",
-                                           next(slug for slug in state["pages"] if "-topic-" in slug)}
+                                           next(slug for slug in state["pages"] if "-topic-" in slug), note_slug}
             assert PROJECT_NAME in state["pages"]["home"] and "阅读指引" in state["pages"]["home"]
             assert all("pat-e2e" not in url for _, url in state["methods"])  # 令牌只进头部
             assert all(method != "DELETE" for method, _ in state["methods"])
 
             again, error = server_module.execute_tool("dy_wiki_sync", {"trace_id": "e2e-wiki", "confirmed": True}, workspace)
-            assert error is None and again["unchanged"] == 3 and again["created"] == again["updated"] == 0
+            assert error is None and again["unchanged"] == 4 and again["created"] == again["updated"] == 0

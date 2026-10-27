@@ -84,6 +84,8 @@ def test_notes_trace_redacts_quoted_keys_and_complete_quoted_values(tmp_path, mo
         assert '保留政策正文' in content and '[REDACTED]' in content
         assert redact(content) == content
     assert body in read_note(tmp_path, 'policy')
+    write_note(tmp_path, 'policy', '政策更新', '普通笔记保持既有覆盖方式', [], confirmed=True)
+    assert '普通笔记保持既有覆盖方式' in read_note(tmp_path, 'policy')
 
 
 def test_note_parent_symlinks_are_rejected_even_inside_notes(tmp_path):
@@ -93,3 +95,35 @@ def test_note_parent_symlinks_are_rejected_even_inside_notes(tmp_path):
     with pytest.raises(ValueError, match='符号链接'):
         note_path(tmp_path, 'alias/hidden')
     assert not (notes / 'hidden.md').exists()
+
+
+def test_topic_note_metadata_and_compare_and_swap(tmp_path, monkeypatch):
+    monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
+    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
+    payload = {'slug': 'expense/policy', 'title': '费用政策', 'body': '初稿',
+               'module': 'expense', 'research_topic': True, 'confirmed': True}
+    _, error = run('dy_notes_write', payload, tmp_path)
+    assert error is None
+    original, error = run('dy_notes_read', {'slug': payload['slug']}, tmp_path)
+    assert error is None and isinstance(original, str)
+    metadata = yaml.safe_load(original.split('---', 2)[1])
+    assert metadata['module'] == 'expense' and metadata['research_topic'] is True
+    assert metadata['confirmed'] is True
+    for expected in (None, '过期原文'):
+        update = {**payload, 'body': '不能覆盖'}
+        if expected is not None:
+            update['expected_content'] = expected
+        _, error = run('dy_notes_write', update, tmp_path)
+        assert error['code'] == -32602
+        assert read_note(tmp_path, payload['slug']) == original
+    _, error = run('dy_notes_write', {**payload, 'body': '已合并', 'expected_content': original}, tmp_path)
+    assert error is None and '已合并' in read_note(tmp_path, payload['slug'])
+    _, error = run('dy_notes_write', {**payload, 'slug': 'new', 'expected_content': '不存在的原文'}, tmp_path)
+    assert error['code'] == -32602 and not note_path(tmp_path, 'new').exists()
+
+
+@pytest.mark.parametrize('module', [None, '', '费用管理', '../expense'])
+def test_topic_notes_require_module_slug(tmp_path, module):
+    with pytest.raises(ValueError, match='module'):
+        write_note(tmp_path, 'policy', '政策', '正文', [], confirmed=True,
+                   module=module, research_topic=True)

@@ -223,7 +223,9 @@ def _handle_notes_write(name: str, arguments: dict, workspace: Path, store: Trac
     try:
         path = write_note(workspace, arguments.get('slug', ''), arguments.get('title', ''),
                           arguments.get('body', ''), arguments.get('tags', []),
-                          confirmed=True, source_refs=arguments.get('source_refs', []))
+                          confirmed=True, source_refs=arguments.get('source_refs', []),
+                          module=arguments.get('module'), research_topic=arguments.get('research_topic', False),
+                          expected_content=arguments.get('expected_content'))
     except (ValueError, PermissionError, TypeError) as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     content = path.read_text(encoding='utf-8')
@@ -549,7 +551,7 @@ TOOL_REGISTRY = {
         _handle_inspection_report_export_pdf,
     ),
     'dy_notes_write': (
-        '用户确认后写入 wiki 记忆页（Basic Memory 兼容 md，含 frontmatter），位于工作区 .dy_superpowers/notes/。',
+        '用户确认后写入主题笔记；更新须先读取并传完整 expected_content。仅标记 research_topic 且绑定 module 的确认主题进入项目 Wiki，不驱动巡检。',
         {'type': 'object',
          'required': ['trace_id', 'slug', 'title', 'body', 'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
@@ -558,6 +560,9 @@ TOOL_REGISTRY = {
                         'body': {'type': 'string', 'minLength': 1},
                         'tags': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 10},
                         'source_refs': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 20},
+                        'module': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9_-]{0,63}$'},
+                        'research_topic': {'type': 'boolean', 'default': False},
+                        'expected_content': {'type': 'string'},
                         'confirmed': {'type': 'boolean'}}},
         _handle_notes_write,
     ),
@@ -734,6 +739,7 @@ TOOL_REGISTRY = {
     'dy_research_record_write': (
         '在用户确认后追加模块调研结论并保留历史版本。',
         {'type': 'object',
+         'additionalProperties': False,
          'required': ['trace_id', 'module', 'check_order', 'research_id', 'config_item', 'conclusion', 'scope',
                       'confirmed_by', 'confirmed_at', 'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},

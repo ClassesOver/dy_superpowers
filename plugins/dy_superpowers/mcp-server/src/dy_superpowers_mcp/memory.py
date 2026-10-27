@@ -41,7 +41,9 @@ def note_path(workspace: str | Path, slug: str) -> Path:
 
 
 def write_note(workspace: str | Path, slug: str, title: str, body: str, tags: list[str],
-               *, confirmed: bool = False, source_refs: list[str] | None = None) -> Path:
+               *, confirmed: bool = False, source_refs: list[str] | None = None,
+               module: str | None = None, research_topic: bool = False,
+               expected_content: str | None = None) -> Path:
     if confirmed is not True:
         raise PermissionError("wiki 记忆写入需要用户明确确认")
     path = note_path(workspace, slug)
@@ -49,15 +51,35 @@ def write_note(workspace: str | Path, slug: str, title: str, body: str, tags: li
         raise ValueError("note 标题必须是非空文本（≤120 字符）")
     if not isinstance(body, str) or not body.strip():
         raise ValueError("note 正文必须是非空文本")
+    if not isinstance(research_topic, bool):
+        raise ValueError("research_topic 必须是布尔值")
+    if module is not None or research_topic:
+        module = validate_module(module)
+    if expected_content is not None and not isinstance(expected_content, str):
+        raise ValueError("expected_content 必须是读取时的完整原文")
     tags = [str(tag).strip() for tag in (tags or []) if str(tag).strip()][:10]
     source_refs = [str(ref).strip() for ref in (source_refs or []) if str(ref).strip()][:20]
     # JSON 字符串与数组也是合法 YAML，避免用户文本改变 frontmatter 结构或值类型。
     frontmatter = ["---", f"title: {json.dumps(title.replace(chr(10), ' '), ensure_ascii=False)}", "type: note",
                    f"tags: {json.dumps(tags, ensure_ascii=False)}",
+                   f"module: {json.dumps(module, ensure_ascii=False)}",
+                   f"research_topic: {json.dumps(research_topic)}", "confirmed: true",
                    f"confirmed_at: {json.dumps(datetime.now(timezone.utc).isoformat())}",
                    f"source_refs: {json.dumps(source_refs, ensure_ascii=False)}", "---", ""]
     path.parent.mkdir(parents=True, exist_ok=True)
     with record_lock(path):
+        exists = path.exists()
+        current = path.read_text(encoding="utf-8") if exists else ""
+        existing_topic = False
+        if current.startswith("---\n") and "\n---\n" in current[4:]:
+            header = current[4:].split("\n---\n", 1)[0]
+            existing_topic = 'research_topic: true' in header.splitlines()
+        if exists and (research_topic or existing_topic) and expected_content is None:
+            raise ValueError("更新已有主题笔记必须提供读取时的 expected_content 完整原文")
+        if expected_content is not None and expected_content != current:
+            raise ValueError("主题笔记更新冲突，请重新读取并合并，再确认写入")
+        if not exists and expected_content:
+            raise ValueError("创建主题笔记时 expected_content 必须为空")
         atomic_write(path, "\n".join(frontmatter) + body.rstrip() + "\n")
     return path
 

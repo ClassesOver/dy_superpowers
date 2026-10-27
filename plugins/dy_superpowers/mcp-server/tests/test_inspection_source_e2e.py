@@ -422,12 +422,12 @@ def test_scoped_domain_never_uses_unknown_model_as_unbounded_query():
 def test_plan_preserves_extra_source_item_and_does_not_confirm():
     manifest = {"module": "expense", "records": [
         {"check_order": "1", "research_id": "01", "mapped": True, "conclusion": "需要安装，不代表已安装"},
-        {"check_order": "28", "research_id": "03", "source_check_order": "DY-28", "mapped": False},
+        {"check_order": "28", "research_id": "99", "source_check_order": "DY-28", "mapped": False},
     ]}
     plan = build_plan(manifest)
     assert len(plan["unmapped"]) == 1
     assert ("1", "01") in plan["sources"]
-    assert len(plan["standards"]) == 91
+    assert len(plan["standards"]) == 92
     assert "confirmed" not in manifest["records"][0]
 
 

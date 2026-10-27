@@ -35,6 +35,6 @@ def test_all_current_matrix_keys_have_unique_business_identifiers():
     for module in ('expense', 'general-ledger'):
         for order, item in _matrix(module)[1]:
             labels.append(_check_label(module, {'check_order': order, 'research_id': item}))
-    assert len(labels) == 172
+    assert len(labels) == 173
     assert len(labels) == len(set(labels))
     assert all(label.startswith(('EXP-', 'GL-')) and ' + ' not in label for label in labels)

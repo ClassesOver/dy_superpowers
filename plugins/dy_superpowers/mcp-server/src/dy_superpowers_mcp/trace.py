@@ -16,7 +16,8 @@ from typing import Any
 
 from .storage import atomic_write, record_lock
 
-SENSITIVE_PARTS = ("password", "passwd", "token", "secret", "api_key", "apikey", "credential")
+SENSITIVE_PARTS = ("password", "passwd", "token", "secret", "api_key", "apikey", "credential",
+                   "密码", "口令", "令牌", "密钥")
 DOMAIN_PRIVATE_PARTS = (
     "employee", "partner", "email", "phone", "mobile", "vat", "ssn", "passport",
     "identification", "birthday", "salary", "wage", "bank",
@@ -35,11 +36,20 @@ EVENT_FIELDS = {
     "workflow_id", "call_id", "otel_trace_id", "otel_span_id", "category",
     "check_key", "scope_id", "revision", "research_status", "trace_context", "valid", "error_count", "expected_count", "report_id",
 }
-SECRET_VALUE_PATTERN = re.compile(
-    r"(?i)(?P<prefix>(?P<key_quote>[\"']?)(?:password|passwd|token|secret|api[_-]?key|credential|confirmed[_ -]?by|"
+SECRET_PREFIX = (
+    r"(?P<prefix>(?P<key_quote>[\"']?)(?:password|passwd|token|secret|api[_-]?key|credential|confirmed[_ -]?by|"
     r"employee[_ -]?(?:name|id)|(?:work_)?email|(?:work_)?phone|mobile|vat|ssn|passport|"
-    r"identification(?:_id)?|birthday|salary|wage|bank_account)(?P=key_quote)\s*[:=]\s*)"
-    r"(?P<value>\"(?:\\[\s\S]|[^\"\\])*\"|'(?:''|\\[\s\S]|[^'\\])*'|[^\r\n,;]+)|"
+    r"identification(?:_id)?|birthday|salary|wage|bank_account|密码|口令|令牌|密钥)"
+    r"(?P=key_quote)\s*[:：=]\s*)"
+)
+SECRET_PREFIX_PATTERN = re.compile(r"(?i)" + SECRET_PREFIX + r"$")
+PRIVATE_VALUE_PATTERN = re.compile(
+    r"((?:手机号|身份证号|银行账号)\s*[:：=]\s*)([^\s,，;；\"']+)"
+)
+SECRET_VALUE_PATTERN = re.compile(
+    r"(?i)" + SECRET_PREFIX +
+    r"(?P<value>\"(?:\\[\s\S]|[^\"\\])*\"|'(?:''|\\[\s\S]|[^'\\])*'|"
+    r"(?:(?![ \t]+[\u3400-\u9fff]{1,20}\s*[:：=])[^\r\n,;，；])+)|"
     r"(?P<bearer>Bearer\s+)([A-Za-z0-9._~+/=-]+)"
 )
 TRACE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_.:/#-]{1,256}$")
@@ -67,29 +77,38 @@ def redact(value: Any) -> Any:
     if isinstance(value, list):
         return [redact(item) for item in value]
     if isinstance(value, str):
-        # 正文可混合 Markdown 与 JSON；先按结构处理完整片段，避免逗号截断敏感对象/数组。
-        decoder = json.JSONDecoder()
-        parts, end = [], 0
-        for start in re.finditer(r"[\[{]", value):
-            if start.start() < end:
-                continue
-            try:
-                parsed, length = decoder.raw_decode(value[start.start():])
-            except (ValueError, RecursionError):
-                continue
-            safe = redact(parsed)
-            parts.append(value[end:start.start()])
-            end = start.start() + length
-            parts.append(json.dumps(safe, ensure_ascii=False) if safe != parsed else value[start.start():end])
-        parts.append(value[end:])
-        value = "".join(parts)
         def replace(match: re.Match) -> str:
             if match.group("bearer"):
                 return match.group("bearer") + REDACTED
             matched = match.group("value")
             quote = matched[0] if matched[0] in "\"'" and matched[-1] == matched[0] else ""
             return match.group("prefix") + quote + REDACTED + quote
-        return SECRET_VALUE_PATTERN.sub(replace, value)
+
+        # 正文可混合 Markdown 与 JSON；先按结构处理完整片段，避免逗号截断敏感对象/数组。
+        decoder = json.JSONDecoder()
+        parts, end = [], 0
+        for start in re.finditer(r"[\[{]", value):
+            if start.start() < end:
+                continue
+            # 凭据中的方括号等普通字符不能把一个值拆成两段。
+            if start.start() and (value[start.start() - 1].isalnum() or value[start.start() - 1] in '_-'):
+                continue
+            try:
+                parsed, length = decoder.raw_decode(value[start.start():])
+            except (ValueError, RecursionError):
+                continue
+            before = value[end:start.start()]
+            secret_prefix = SECRET_PREFIX_PATTERN.search(before)
+            safe = redact(parsed)
+            if secret_prefix:
+                parts.append(SECRET_VALUE_PATTERN.sub(replace, before[:secret_prefix.start()]))
+                parts.append(secret_prefix.group('prefix') + REDACTED)
+            else:
+                parts.append(SECRET_VALUE_PATTERN.sub(replace, before))
+                parts.append(json.dumps(safe, ensure_ascii=False) if safe != parsed else value[start.start():start.start() + length])
+            end = start.start() + length
+        parts.append(SECRET_VALUE_PATTERN.sub(replace, value[end:]))
+        return PRIVATE_VALUE_PATTERN.sub(r"\1[REDACTED]", "".join(parts))
     return value
 
 

@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 import server
-from dy_superpowers_mcp.memory import write_note
+from dy_superpowers_mcp.memory import read_note, write_note
 from dy_superpowers_mcp.project_wiki import (
     build_bundle, configure_project, load_project, load_staged, owner_marker, safe_path, stage_wiki,
 )
@@ -41,6 +41,28 @@ def _server_env(monkeypatch, tmp_path):
 
 def run(tool, args, ws):
     return server.execute_tool(tool, {"trace_id": "project-wiki", **args}, ws)
+
+
+@pytest.mark.parametrize(("module", "order"), [("expense", "1"), ("general-ledger", "EXP-1-001")])
+def test_topic_page_retains_check_identifier(tmp_path, module, order):
+    workspace = _workspace(tmp_path, [_record(module=module, check_order=order)])
+    pages = build_bundle(workspace)["pages"]
+    topic = next(body for slug, body in pages.items() if "-topic-" in slug)
+
+    assert f"- 检查编号：{order}" in topic
+    assert "## 子项 01" in topic
+
+
+def test_research_tool_rejects_unsupported_attachment_field(tmp_path, monkeypatch):
+    _server_env(monkeypatch, tmp_path)
+    result, error = run("dy_research_record_write",
+                        _record(attachment_refs=["附件.xlsx#公司清单!A2:L3"]), tmp_path)
+
+    assert result is None
+    assert error["code"] == -32602
+    records, error = run("dy_module_memory_read", {"module": "expense"}, tmp_path)
+    assert error is None
+    assert records["records"] == []
 
 
 def test_configure_requires_user_confirmation(tmp_path):
@@ -142,6 +164,75 @@ def test_sources_registry_binding_and_link_rules(tmp_path):
     overview = build_bundle(workspace)["pages"][bundle["overview_slug"]]
     # md() 转义文件名中的点；GitLab 渲染后仍显示为原文件名。
     assert "[费用调研\\.xlsx](https://gitlab.example.com/superpowers/research/-/blob/main/sources/expense.xlsx)" in overview
+
+
+def test_confirmed_topic_notes_publish_with_stable_module_navigation(tmp_path):
+    workspace = _workspace(tmp_path)
+    write_note(workspace, 'private', '普通笔记', '普通笔记不能发布', [], confirmed=True, module='expense')
+    write_note(workspace, 'expense/policy', '扩展费用政策',
+               '住宿政策已确认。\n附件：[工作底稿](/home/user/research/private.xlsx)\n'
+               '归档附件：archives/private.pdf#page=2', [],
+               confirmed=True, module='expense', research_topic=True,
+               source_refs=['/home/user/research/private.xlsx'])
+    bundle = build_bundle(workspace)
+    topic_slug = next(slug for slug, page in bundle['pages'].items() if '# 扩展费用政策' in page)
+    index_slug = next(slug for slug in bundle['pages'] if slug.endswith('-expense-index'))
+    topic = bundle['pages'][topic_slug]
+    assert f'[扩展费用政策]({topic_slug})' in bundle['pages'][index_slug]
+    assert f'[本模块目录]({index_slug})' in topic
+    assert '住宿政策已确认' in topic and 'confirmed_at:' not in topic
+    assert '/home/user' not in topic and 'source_refs:' not in topic
+    assert 'archives/' not in topic and 'private.pdf#page=2' in topic
+    assert all('普通笔记不能发布' not in page for page in bundle['pages'].values())
+    assert any('-topic-' in slug and slug != topic_slug for slug in bundle['pages'])
+    original = read_note(workspace, 'expense/policy')
+    write_note(workspace, 'expense/policy', '修订费用政策', '修订正文', [], confirmed=True,
+               module='expense', research_topic=True, expected_content=original)
+    assert '# 修订费用政策' in build_bundle(workspace)['pages'][topic_slug]
+
+
+def test_topic_only_module_gets_navigation_without_becoming_inspection_records(tmp_path):
+    workspace = _workspace(tmp_path, records=[])
+    write_note(workspace, 'gl-scope', '总账范围', '本期总账范围', [], confirmed=True,
+               module='general-ledger', research_topic=True)
+    bundle = build_bundle(workspace)
+    index_slug = next(slug for slug in bundle['pages'] if slug.endswith('-general-ledger-index'))
+    assert '总账范围' in bundle['pages'][index_slug]
+    assert f'[总账管理]({index_slug})' in bundle['pages'][bundle['overview_slug']]
+    assert not (workspace / '.dy_superpowers/modules').exists()
+
+
+@pytest.mark.parametrize('change', ['add', 'modify', 'unpublish', 'delete', 'module'])
+def test_staged_manifest_rejects_publishable_topic_changes(tmp_path, change):
+    workspace = _workspace(tmp_path)
+    if change != 'add':
+        write_note(workspace, 'policy', '政策', '原文', [], confirmed=True,
+                   module='expense', research_topic=True)
+    stage_wiki(workspace)
+    if change == 'delete':
+        (workspace / '.dy_superpowers/notes/policy.md').unlink()
+    else:
+        write_note(workspace, 'policy', '政策', '修订正文', [], confirmed=True,
+                   module='general-ledger' if change == 'module' else 'expense',
+                   research_topic=change != 'unpublish',
+                   expected_content=read_note(workspace, 'policy'))
+    with pytest.raises(ValueError, match='主题.*重新构建'):
+        load_staged(workspace)
+    stage_wiki(workspace)
+    load_staged(workspace)
+
+
+def test_wiki_does_not_read_parsed_archive_or_unconfirmed_topics(tmp_path):
+    workspace = _workspace(tmp_path)
+    archive = workspace.parent / '.dy_superpowers-parsed'
+    archive.mkdir()
+    (archive / 'private.md').write_text('不能扫描的全文档案', encoding='utf-8')
+    write_note(workspace, 'policy', '政策', '未确认笔记不能发布', [], confirmed=True,
+               module='expense', research_topic=True)
+    path = workspace / '.dy_superpowers/notes/policy.md'
+    path.write_text(path.read_text().replace('confirmed: true', 'confirmed: false'), encoding='utf-8')
+    pages = '\n'.join(build_bundle(workspace)['pages'].values())
+    assert '不能扫描的全文档案' not in pages and '未确认笔记不能发布' not in pages
 
 
 def test_stage_and_load_staged_integrity(tmp_path, monkeypatch):

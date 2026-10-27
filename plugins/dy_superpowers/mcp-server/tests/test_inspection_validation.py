@@ -353,8 +353,8 @@ def test_partial_scope_reports_coverage_and_partial_limitation(tmp_path, report)
     result = validate(tmp_path, report)
     assert result['valid'] is True
     scope = next(key for key in result['coverage'] if key.startswith('expense|'))
-    assert result['coverage'][scope] == {'inspected': 1, 'excluded': 90, 'matrix': 91}
-    assert '部分范围巡检' in result['limitations'] and '1/91' in result['limitations']
+    assert result['coverage'][scope] == {'inspected': 1, 'excluded': 91, 'matrix': 92}
+    assert '部分范围巡检' in result['limitations'] and '1/92' in result['limitations']
 
 
 def test_full_scope_coverage_has_no_partial_limitation(tmp_path, report):
@@ -378,4 +378,4 @@ def test_full_scope_coverage_has_no_partial_limitation(tmp_path, report):
     assert result['valid'] is True
     assert '部分范围巡检' not in result['limitations']
     scope = next(key for key in result['coverage'] if key.startswith('expense|'))
-    assert result['coverage'][scope]['inspected'] == result['coverage'][scope]['matrix'] == 91
+    assert result['coverage'][scope]['inspected'] == result['coverage'][scope]['matrix'] == 92
