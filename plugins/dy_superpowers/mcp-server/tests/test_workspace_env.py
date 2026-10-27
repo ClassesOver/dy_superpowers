@@ -11,24 +11,33 @@ def test_env_loader_reads_whitelist_without_override(tmp_path, monkeypatch):
     workspace.mkdir()
     (workspace / ".env").write_text(
         "# 连接配置\n"
-        "ODOO_URL=http://erp.example.com\n"
-        "export ODOO_DB=vali5\n"
+        "APP_URL=http://erp.example.com\n"
+        "export DB_NAME=vali5\n"
+        "APP_USER=reader\n"
+        "APP_PASSWORD='pw'\n"
+        "DB_HOST=db.example.com\n"
+        "DB_PORT=5432\n"
+        "DB_USER=db-reader\n"
+        "DB_PASSWORD='db-pw'\n"
         "DY_WIKI_TOKEN=\"pat-secret\"\n"
-        "ODOO_PASSWORD='pw'\n"
         "NOT_ALLOWED_KEY=whatever\n"
         "DY_WIKI_API_URL=\n",
         encoding="utf-8")
-    for key in ("ODOO_URL", "ODOO_DB", "ODOO_PASSWORD", "DY_WIKI_TOKEN", "DY_WIKI_API_URL"):
+    for key in ("APP_URL", "DB_NAME", "APP_USER", "APP_PASSWORD", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DY_WIKI_TOKEN", "DY_WIKI_API_URL"):
         monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("ODOO_DB", "existing-db")
+    monkeypatch.setenv("DB_NAME", "existing-db")
 
     loaded = server.load_workspace_env(workspace)
-    assert loaded == ["ODOO_URL", "DY_WIKI_TOKEN", "ODOO_PASSWORD"]  # 按文件行序；空值不加载
+    assert loaded == ["APP_URL", "APP_USER", "APP_PASSWORD", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DY_WIKI_TOKEN"]  # 按文件行序；空值不加载
     import os
-    assert os.environ["ODOO_URL"] == "http://erp.example.com"
-    assert os.environ["ODOO_DB"] == "existing-db"  # 已设置的环境变量优先
+    assert os.environ["APP_URL"] == "http://erp.example.com"
+    assert os.environ["DB_NAME"] == "existing-db"  # 已设置的环境变量优先
     assert os.environ["DY_WIKI_TOKEN"] == "pat-secret"
-    assert os.environ["ODOO_PASSWORD"] == "pw"
+    assert os.environ["APP_PASSWORD"] == "pw"
+    assert os.environ["DB_HOST"] == "db.example.com"
+    assert os.environ["DB_PORT"] == "5432"
+    assert os.environ["DB_USER"] == "db-reader"
+    assert os.environ["DB_PASSWORD"] == "db-pw"
     assert "NOT_ALLOWED_KEY" not in os.environ  # 白名单外不加载
 
 

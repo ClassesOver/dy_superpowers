@@ -20,7 +20,7 @@
 
 Odoo 只读工具包括 `dy_odoo_record_search`、`dy_odoo_record_read`、`dy_odoo_model_fields`、`dy_odoo_module_list_installed` 和 `dy_odoo_module_info`。`dy_knowledge_module_info` 与 `dy_knowledge_search` 只提供本地模块解释，不替代实时账套事实或项目调研结论。
 
-Odoo 连接必须同时配置 `ODOO_URL` 和 `DY_ODOO_ALLOWED_ORIGINS`，例如 `ODOO_URL=http://10.0.0.8:8069`、`DY_ODOO_ALLOWED_ORIGINS=http://10.0.0.8:8069`。允许列表为逗号分隔的精确 `scheme://host:port`，不能使用通配符或 URL 路径。数据库、账号和密码仍分别通过 `ODOO_DB`、`ODOO_USERNAME`、`ODOO_PASSWORD` 配置。搜索统一使用 `dy_odoo_record_search`。
+Odoo 连接使用 `APP_URL`、`DB_NAME`、`APP_USER` 和 `APP_PASSWORD`。`APP_URL` 同时作为连接地址和受信任来源，必须是精确的 HTTP(S) origin，不能使用通配符或 URL 路径。`DB_HOST`、`DB_PORT`、`DB_USER` 和 `DB_PASSWORD` 可由工作区 `.env` 提供给其他组件；当前插件只通过 Odoo JSON-RPC 工作，不直接连接数据库。搜索统一使用 `dy_odoo_record_search`。
 
 本地日志每个工作区默认保留最近 30 个 UTC 自然日，总容量不超过 100 MiB；按 trace 和日期分文件，单文件达到 5 MiB 轮转，保留一份备份。追加和读取时执行清理；被清理的历史不再可查询。完整出站策略及边界见 [运行边界](docs/runtime-boundaries.md)。
 

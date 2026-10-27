@@ -45,8 +45,8 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
     rpc_thread = Thread(target=rpc.serve_forever, daemon=True)
     rpc_thread.start()
     origin = f'http://127.0.0.1:{rpc.server_address[1]}'
-    env = {**os.environ, 'ODOO_URL': origin, 'DY_ODOO_ALLOWED_ORIGINS': origin,
-           'ODOO_DB': 'db', 'ODOO_USERNAME': 'u', 'ODOO_PASSWORD': 'p', 'CODEX_HOME': str(tmp_path / 'codex')}
+    env = {**os.environ, 'APP_URL': origin, 'APP_URL': origin,
+           'DB_NAME': 'db', 'APP_USER': 'u', 'APP_PASSWORD': 'p', 'CODEX_HOME': str(tmp_path / 'codex')}
     env.pop('VIRTUAL_ENV', None)
     params = StdioServerParameters(
         command=config['command'],
@@ -183,11 +183,11 @@ def test_stdio_odoo_read_succeeds_over_jsonrpc_and_records_redacted_trace(tmp_pa
     codex_home = tmp_path / 'codex'
     env = {
         **os.environ,
-        'ODOO_URL': origin,
-        'DY_ODOO_ALLOWED_ORIGINS': origin,
-        'ODOO_DB': 'test-db',
-        'ODOO_USERNAME': 'consultant',
-        'ODOO_PASSWORD': ODOO_TEST_PLACEHOLDER,
+        'APP_URL': origin,
+        'APP_URL': origin,
+        'DB_NAME': 'test-db',
+        'APP_USER': 'consultant',
+        'APP_PASSWORD': ODOO_TEST_PLACEHOLDER,
         'CODEX_HOME': str(codex_home),
     }
     env.pop('VIRTUAL_ENV', None)

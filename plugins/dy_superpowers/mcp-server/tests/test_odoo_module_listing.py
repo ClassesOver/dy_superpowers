@@ -17,11 +17,11 @@ def disable_telemetry(monkeypatch, codex_home: Path):
 
 
 def stub_odoo_client(monkeypatch):
-    monkeypatch.setenv("ODOO_URL", "http://odoo")
-    monkeypatch.setenv("DY_ODOO_ALLOWED_ORIGINS", "http://odoo")
-    monkeypatch.setenv("ODOO_DB", "db")
-    monkeypatch.setenv("ODOO_USERNAME", "u")
-    monkeypatch.setenv("ODOO_PASSWORD", "p")
+    monkeypatch.setenv("APP_URL", "http://odoo")
+    monkeypatch.setenv("APP_URL", "http://odoo")
+    monkeypatch.setenv("DB_NAME", "db")
+    monkeypatch.setenv("APP_USER", "u")
+    monkeypatch.setenv("APP_PASSWORD", "p")
     monkeypatch.setattr(server.OdooReadClient, "__init__", lambda self, settings: None)
 
 

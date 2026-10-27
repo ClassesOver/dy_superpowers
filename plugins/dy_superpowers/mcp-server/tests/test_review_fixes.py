@@ -14,8 +14,8 @@ from dy_superpowers_mcp.research import read_record
 
 @pytest.mark.parametrize('password', [' password ', '\tpassword\n', '   '])
 def test_odoo_environment_preserves_password_verbatim(monkeypatch, password):
-    for name, value in {'ODOO_URL': ' http://odoo ', 'DY_ODOO_ALLOWED_ORIGINS': 'http://odoo',
-                        'ODOO_DB': ' db ', 'ODOO_USERNAME': ' u ', 'ODOO_PASSWORD': password}.items():
+    for name, value in {'APP_URL': ' http://odoo ',
+                        'DB_NAME': ' db ', 'APP_USER': ' u ', 'APP_PASSWORD': password}.items():
         monkeypatch.setenv(name, value)
     settings = OdooSettings.from_environment()
     assert settings.password == password
@@ -26,13 +26,13 @@ def test_odoo_environment_preserves_password_verbatim(monkeypatch, password):
 
 @pytest.mark.parametrize('password', [None, ''])
 def test_odoo_environment_rejects_missing_password(monkeypatch, password):
-    for name, value in {'ODOO_URL': 'http://odoo', 'DY_ODOO_ALLOWED_ORIGINS': 'http://odoo',
-                        'ODOO_DB': 'db', 'ODOO_USERNAME': 'u'}.items():
+    for name, value in {'APP_URL': 'http://odoo',
+                        'DB_NAME': 'db', 'APP_USER': 'u'}.items():
         monkeypatch.setenv(name, value)
-    monkeypatch.delenv('ODOO_PASSWORD', raising=False)
+    monkeypatch.delenv('APP_PASSWORD', raising=False)
     if password is not None:
-        monkeypatch.setenv('ODOO_PASSWORD', password)
-    with pytest.raises(ValueError, match='ODOO_PASSWORD'):
+        monkeypatch.setenv('APP_PASSWORD', password)
+    with pytest.raises(ValueError, match='APP_PASSWORD'):
         OdooSettings.from_environment()
 
 
@@ -40,13 +40,13 @@ def test_odoo_environment_rejects_missing_password(monkeypatch, password):
                                   'https://odoo/#secret', 'https://odoo/?secret=1',
                                   'http://127.0.0.1:8069', 'http://10.0.0.1:8069'])
 def test_odoo_rejects_untrusted_or_malformed_url(monkeypatch, url):
-    monkeypatch.delenv('DY_ODOO_ALLOWED_ORIGINS', raising=False)
+    monkeypatch.delenv('APP_URL', raising=False)
     with pytest.raises(ValueError):
         OdooSettings(url, 'db', 'u', 'p')
 
 
 def test_explicit_internal_odoo_origin_is_supported(monkeypatch):
-    monkeypatch.setenv('DY_ODOO_ALLOWED_ORIGINS', 'http://10.0.0.1:8069')
+    monkeypatch.setenv('APP_URL', 'http://10.0.0.1:8069')
     assert OdooSettings('http://10.0.0.1:8069/odoo', 'db', 'u', 'p').url.endswith('/odoo')
     with pytest.raises(ValueError):
         OdooSettings('http://10.0.0.1:8068', 'db', 'u', 'p')
@@ -186,8 +186,8 @@ def test_builtin_inspection_research_rejects_unknown_matrix_key(tmp_path):
 
 
 def test_odoo_connection_reused_and_credentials_invalidate_cache(tmp_path, monkeypatch):
-    monkeypatch.setenv('DY_ODOO_ALLOWED_ORIGINS', 'http://odoo')
-    for name, value in {'ODOO_URL': 'http://odoo', 'ODOO_DB': 'db', 'ODOO_USERNAME': 'u', 'ODOO_PASSWORD': 'p'}.items():
+    monkeypatch.setenv('APP_URL', 'http://odoo')
+    for name, value in {'APP_URL': 'http://odoo', 'DB_NAME': 'db', 'APP_USER': 'u', 'APP_PASSWORD': 'p'}.items():
         monkeypatch.setenv(name, value)
     created, closed = [], []
 
@@ -205,7 +205,7 @@ def test_odoo_connection_reused_and_credentials_invalidate_cache(tmp_path, monke
     try:
         assert server.execute_tool('dy_odoo_record_search', {'trace_id': 'reuse', 'model': 'account.move'}, tmp_path)[1] is None
         assert len(created) == 1
-        monkeypatch.setenv('ODOO_PASSWORD', 'new')
+        monkeypatch.setenv('APP_PASSWORD', 'new')
         server.execute_tool('dy_odoo_record_search', {'trace_id': 'reuse', 'model': 'account.move'}, tmp_path)
         assert len(created) == 2
         assert len(closed) == 1

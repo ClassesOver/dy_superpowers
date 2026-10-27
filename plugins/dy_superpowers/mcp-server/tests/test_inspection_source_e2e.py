@@ -381,7 +381,7 @@ async def source_workflow(workspace, manifest, connection, as_of, *, diagnostic_
             assert text == (workspace / saved["path"]).read_text(encoding="utf-8")
             assert not (workspace / ".dy_superpowers/modules").exists()
             trace = await call("dy_trace_read")
-            secret = connection["ODOO_PASSWORD"]
+            secret = connection["APP_PASSWORD"]
             assert not secret or secret not in json.dumps(trace, ensure_ascii=False)
             summary.update(gate=validation["gate"], report_path=saved["path"],
                            report_records=len(report["records"]), remote_writes=False,
@@ -514,7 +514,7 @@ def test_live_inspection_from_supplied_research(tmp_path, module):
     assert hashlib.sha256(source_path.read_bytes()).hexdigest() == manifest["source_sha256"], "原始来源已变化，应重新解析"
     validate_manifest(manifest)
     values = dotenv_values(Path(os.environ["DY_E2E_ODOO_ENV_FILE"]).resolve())
-    keys = ("ODOO_URL", "DY_ODOO_ALLOWED_ORIGINS", "ODOO_DB", "ODOO_USERNAME", "ODOO_PASSWORD")
+    keys = ("APP_URL", "APP_URL", "DB_NAME", "APP_USER", "APP_PASSWORD")
     if any(not isinstance(values.get(key), str) or not values[key] for key in keys):
         pytest.fail("缺少显式连接配置，不输出配置值")
     as_of = os.environ.get("DY_E2E_AS_OF", datetime.now(timezone.utc).date().isoformat())

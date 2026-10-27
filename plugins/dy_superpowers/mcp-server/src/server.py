@@ -42,7 +42,7 @@ SESSION_SOURCES = {"startup", "resume", "clear", "compact", "fork"}
 # 安装即用：连接与令牌允许放在工作区 .env（已被 .gitignore 排除），服务启动时读取。
 # 只认白名单键、不覆盖已设置的环境变量、不回显任何值。
 ENV_FILE_KEYS = (
-    "ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_PASSWORD", "DY_ODOO_ALLOWED_ORIGINS",
+    "APP_URL", "APP_USER", "APP_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
     "DY_WIKI_API_URL", "DY_WIKI_TOKEN", "DY_WIKI_PROJECT_ID", "DY_WIKI_GROUP_ID", "DY_WIKI_PROJECT_NAME",
 )
 

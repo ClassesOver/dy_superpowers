@@ -26,7 +26,7 @@ def research_data(**updates):
 
 
 def test_module_query_uses_odoo12_dependency_relation(monkeypatch):
-    monkeypatch.setenv("DY_ODOO_ALLOWED_ORIGINS", "http://odoo")
+    monkeypatch.setenv("APP_URL", "http://odoo")
     calls = []
 
     class Response:
@@ -77,7 +77,7 @@ def test_account_knowledge_distinguishes_posting_from_payment():
 
 @pytest.mark.parametrize("url", ["http://odoo", "https://odoo"])
 def test_odoo_jsonrpc_has_finite_timeout_and_does_not_follow_redirects(url, monkeypatch):
-    monkeypatch.setenv("DY_ODOO_ALLOWED_ORIGINS", url)
+    monkeypatch.setenv("APP_URL", url)
     calls = []
 
     class Response:

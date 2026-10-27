@@ -257,7 +257,7 @@ async def _workflow(workspace, module, connection, *, live=False):
             events = await call("dy_trace_read")
             assert events and any(event.get("event") == "inspection.report.save" for event in events)
             serialized = json.dumps(events, ensure_ascii=False)
-            secret = connection.get("ODOO_PASSWORD", "")
+            secret = connection.get("APP_PASSWORD", "")
             assert not secret or secret not in serialized
             assert "e2e-remote-row-must-not-log" not in serialized
             summary.update(trace_event_count=len(events), protocol_ok=True, remote_writes=False)
@@ -325,8 +325,8 @@ def test_inspection_skill_e2e_mock(tmp_path, module):
     workspace.mkdir()
     try:
         summary = asyncio.run(asyncio.wait_for(_workflow(workspace, module, {
-            "ODOO_URL": origin, "DY_ODOO_ALLOWED_ORIGINS": origin,
-            "ODOO_DB": "e2e-db", "ODOO_USERNAME": "e2e-user", "ODOO_PASSWORD": "e2e-fixture-value",
+            "APP_URL": origin, "APP_URL": origin,
+            "DB_NAME": "e2e-db", "APP_USER": "e2e-user", "APP_PASSWORD": "e2e-fixture-value",
         }), timeout=180))
     finally:
         rpc.shutdown()
@@ -343,7 +343,7 @@ def test_inspection_skill_e2e_live_readonly(tmp_path, module):
     from dotenv import dotenv_values
 
     values = dotenv_values(Path(os.environ["DY_E2E_ODOO_ENV_FILE"]).resolve())
-    keys = ("ODOO_URL", "DY_ODOO_ALLOWED_ORIGINS", "ODOO_DB", "ODOO_USERNAME", "ODOO_PASSWORD")
+    keys = ("APP_URL", "APP_URL", "DB_NAME", "APP_USER", "APP_PASSWORD")
     if any(not isinstance(values.get(key), str) or not values[key] for key in keys):
         pytest.fail("真实端测连接配置缺失；不会输出配置值")
     workspace = tmp_path / f"live-{module}"

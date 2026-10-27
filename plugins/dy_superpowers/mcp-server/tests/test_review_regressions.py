@@ -301,7 +301,7 @@ def test_wiki_loads_all_legal_module_identifiers_without_collisions(tmp_path):
 @pytest.mark.parametrize("raw,expected", [('"abc\'"', "abc'"), ("'abc\"'", 'abc"'),
     ("abc'", "abc'"), ('""abc""', '"abc"'), ("'abc'", "abc"), ('"abc"', "abc")])
 def test_env_only_removes_one_matching_quote_pair(tmp_path, monkeypatch, raw, expected):
-    monkeypatch.delenv("ODOO_PASSWORD", raising=False)
-    (tmp_path / ".env").write_text(f"ODOO_PASSWORD={raw}\n", encoding="utf-8")
-    assert server.load_workspace_env(tmp_path) == ["ODOO_PASSWORD"]
-    assert os.environ["ODOO_PASSWORD"] == expected
+    monkeypatch.delenv("APP_PASSWORD", raising=False)
+    (tmp_path / ".env").write_text(f"APP_PASSWORD={raw}\n", encoding="utf-8")
+    assert server.load_workspace_env(tmp_path) == ["APP_PASSWORD"]
+    assert os.environ["APP_PASSWORD"] == expected

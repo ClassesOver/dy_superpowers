@@ -27,15 +27,13 @@ class OdooSettings:
 
     def __post_init__(self):
         try:
-            validate_endpoint(self.url, "DY_ODOO_ALLOWED_ORIGINS")
+            validate_endpoint(self.url, "APP_URL")
         except ValueError as exc:
             raise OdooConfigurationError(str(exc)) from exc
 
     @classmethod
     def from_environment(cls) -> "OdooSettings":
-        # 环境变量名 = 字段名大写加 ODOO_ 前缀（database 特例为 ODOO_DB）。
-        names = {"url": "ODOO_URL", "database": "ODOO_DB"}
-        names.update({field: f"ODOO_{field.upper()}" for field in ("username", "password")})
+        names = {"url": "APP_URL", "database": "DB_NAME", "username": "APP_USER", "password": "APP_PASSWORD"}
         values = {field: os.environ.get(env_name, "") for field, env_name in names.items()}
         for field in ("url", "database", "username"):
             values[field] = values[field].strip()

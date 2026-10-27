@@ -23,7 +23,7 @@ def isolated_telemetry(monkeypatch):
     for name in ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT",
                  "DY_SUPERPOWERS_OTLP_TRACES_ENDPOINT"):
         monkeypatch.delenv(name, raising=False)
-    for name in ("ODOO_URL", "ODOO_DB", "ODOO_USERNAME", "ODOO_PASSWORD"):
+    for name in ("APP_URL", "DB_NAME", "APP_USER", "APP_PASSWORD"):
         monkeypatch.delenv(name, raising=False)
     yield
 
@@ -141,11 +141,11 @@ def test_concurrent_research_updates_preserve_every_revision(workspace):
 
 
 def test_odoo_record_read_uses_explicit_read_operation(workspace, monkeypatch):
-    monkeypatch.setenv("ODOO_URL", "http://odoo")
-    monkeypatch.setenv("DY_ODOO_ALLOWED_ORIGINS", "http://odoo")
-    monkeypatch.setenv("ODOO_DB", "db")
-    monkeypatch.setenv("ODOO_USERNAME", "u")
-    monkeypatch.setenv("ODOO_PASSWORD", "p")
+    monkeypatch.setenv("APP_URL", "http://odoo")
+    monkeypatch.setenv("APP_URL", "http://odoo")
+    monkeypatch.setenv("DB_NAME", "db")
+    monkeypatch.setenv("APP_USER", "u")
+    monkeypatch.setenv("APP_PASSWORD", "p")
     monkeypatch.setattr("server.OdooReadClient.__init__", lambda self, settings: None)
     read = lambda self, model, ids, fields: [{"id": 3, "name": "Demo"}]
     monkeypatch.setattr("server.OdooReadClient.read_records", read)
@@ -160,11 +160,11 @@ def test_odoo_record_read_uses_explicit_read_operation(workspace, monkeypatch):
 
 
 def test_odoo_model_fields_is_read_only(workspace, monkeypatch):
-    monkeypatch.setenv("ODOO_URL", "http://odoo")
-    monkeypatch.setenv("DY_ODOO_ALLOWED_ORIGINS", "http://odoo")
-    monkeypatch.setenv("ODOO_DB", "db")
-    monkeypatch.setenv("ODOO_USERNAME", "u")
-    monkeypatch.setenv("ODOO_PASSWORD", "p")
+    monkeypatch.setenv("APP_URL", "http://odoo")
+    monkeypatch.setenv("APP_URL", "http://odoo")
+    monkeypatch.setenv("DB_NAME", "db")
+    monkeypatch.setenv("APP_USER", "u")
+    monkeypatch.setenv("APP_PASSWORD", "p")
     monkeypatch.setattr("server.OdooReadClient.__init__", lambda self, settings: None)
     called = []
     monkeypatch.setattr("server.OdooReadClient.fields_get", lambda self, model: called.append(model) or {"name": {"type": "char"}})
@@ -203,7 +203,7 @@ def test_odoo_read_requires_connection_environment(workspace):
         workspace,
     )
     assert "error" in result
-    assert "ODOO_URL" in result["error"]["message"]
+    assert "APP_URL" in result["error"]["message"]
 
 
 def test_invalid_json_is_reported_without_crashing_server():

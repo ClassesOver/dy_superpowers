@@ -2,7 +2,7 @@
 
 ## 出站目标
 
-插件不使用外部遥测，唯一的出站目标类别是 Odoo。Odoo 目标均须通过 `DY_ODOO_ALLOWED_ORIGINS` 明确授权。变量接受逗号分隔的精确 origin，例如 `https://odoo.example:443,http://10.0.0.8:8069`。省略端口时按 HTTP 80、HTTPS 443 匹配。授权不包含 URL 路径，目标 URL 可包含部署路径。
+插件不使用外部遥测，唯一的出站目标类别是 Odoo。`APP_URL` 同时提供 Odoo 连接地址和受信任来源，必须是精确的 HTTP(S) origin，不能使用通配符或 URL 路径。连接参数另使用 `DB_NAME`、`APP_USER` 和 `APP_PASSWORD`。`DB_HOST`、`DB_PORT`、`DB_USER` 和 `DB_PASSWORD` 由工作区环境加载器透传，但插件不会用它们直接连接数据库。
 
 校验拒绝无 scheme 或 host、非 HTTP(S)、用户信息、查询、片段、非法端口和非法主机名；拒绝字面量链路本地地址、未指定地址和组播地址。未授权的公网、私网和环回 origin 一律拒绝。内网 Odoo 需要精确授权；显式授权 HTTP 表示接受该目标的明文连接风险，远程部署推荐 HTTPS。
 
