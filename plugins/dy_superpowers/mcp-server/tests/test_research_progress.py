@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from dy_superpowers_mcp.research_progress import _guide_items, calculate_progress, export_unanswered_template
 from dy_superpowers_mcp.research import write_record
+import dy_superpowers_mcp.research_progress as progress_module
 import server
 
 
@@ -59,6 +60,14 @@ def test_unmapped_gl_guide_question_is_not_counted_as_a_matrix_subitem():
     progress = calculate_progress("general-ledger", [], scope="中心院区")
     assert progress["total"] == 82
     assert all(item["research_id"] != "017" for item in progress["items"])
+
+
+def test_progress_and_template_source_subitems_only_from_research_guide(monkeypatch, tmp_path):
+    assert not hasattr(progress_module, "_matrix")
+    progress = calculate_progress("expense", [], scope="中心院区")
+    assert progress["total"] == 92
+    export_unanswered_template(tmp_path, "expense", "trace-1", records=[],
+                               scope="中心院区", confirmed=True)
 
 
 def test_export_requires_confirmation_and_never_overwrites_or_follows_symlinks(tmp_path):

@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .inspection import _matrix
 from .memory import validate_module
 
 
@@ -27,12 +26,11 @@ def _guide_items(module: str) -> list[dict[str, str]]:
                 continue
             order = str(int(match.group(1)))
         items[order, research_id] = {"check_order": order, "research_id": research_id,
-                                      "question": question, "attachment": cells[4]}
-    _, matrix = _matrix(module)
-    expected = set(matrix)
-    if set(items) != expected:
-        raise ValueError(f"{module} 调研指南与巡检矩阵子项不一致，无法计算存储度")
-    return [{**items[key], "config_item": matrix[key]} for key in matrix]
+                                      "question": question, "attachment": cells[4],
+                                      "config_item": question.split("：", 1)[0].strip()}
+    if not items:
+        raise ValueError(f"{module} 调研指南缺少矩阵映射子项")
+    return list(items.values())
 
 
 def calculate_progress(module: str, records: list[dict], *, scope: str | None = None,

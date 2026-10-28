@@ -104,17 +104,13 @@ def test_module_routes_load_research_guides_before_inspection_matrices():
     skill = SKILL.read_text(encoding="utf-8")
     source_section = skill.split("## 调研来源", 1)[1].split("## 费用内置 QA", 1)[0]
 
-    assert (
-        "费用模块：先读取 `references/expense-research-guide.md`，"
-        "再读取 `../expense-inspection/references/inspection-matrix.md`"
-    ) in source_section
-    assert (
-        "总账模块：先读取 `references/general-ledger-research-guide.md`，"
-        "再读取 `../general-ledger-inspection/references/inspection-matrix.md`"
-    ) in source_section
+    assert "费用模块：读取[费用调研指南](references/expense-research-guide.md)" in source_section
+    assert "总账模块：读取[总账调研指南](references/general-ledger-research-guide.md)" in source_section
+    assert "inspection-matrix.md" not in source_section
+    assert "调研阶段不要读取巡检矩阵" in source_section
     assert "先按用户文字和附件内容识别模块" in source_section
     assert "不能先向用户提出通用项目问题" in source_section
-    assert source_section.index("费用模块：先读取") < source_section.index("读取指南后再从模块指南")
+    assert source_section.index("费用模块：读取") < source_section.index("读取指南后直接从指南")
 
 
 def test_research_memory_progress_routes_by_scope_and_fixed_threshold():

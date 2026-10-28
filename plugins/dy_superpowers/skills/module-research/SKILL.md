@@ -11,7 +11,7 @@ description: 在 HRP 项目交付中需要通过多轮问答、清单或源文�
 
 ## 调研来源
 
-先按用户文字和附件内容识别模块；图片、截图和扫描件先按[源文件解析与完整性核对](references/source-intake.md)完成最低限度解析，不能先向用户提出通用项目问题。模块无法判定时，唯一允许的前置问题是模块归属；不得先追问项目名称、上线单位或阶段。识别后第一步读取对应模块调研指南和用户提供的源材料：费用模块：先读取 `references/expense-research-guide.md`，再读取 `../expense-inspection/references/inspection-matrix.md`；总账模块：先读取 `references/general-ledger-research-guide.md`，再读取 `../general-ledger-inspection/references/inspection-matrix.md`；其他模块使用其对应清单。读取指南后再从模块指南的问题中提取公司/院区、业务范围、上线阶段、期间、例外、依据等缺口；优先复用当前会话中用户明确给出的事实和回答，只针对指南要求的缺口追问。巡检矩阵只用于检查键、子项映射和验收标准，不替代模块调研指南中的汇总问题、逐点提取问题或附件字段。仓内统一入口为 `scripts/research_sources.py <来源文件> --module <模块> --workspace <当前项目工作区>`，将完整解析结果写入工作区固定隐藏目录 `.dy_superpowers-parsed/`，终端只返回状态与档案路径。解析档案不是记忆，不进入 Basic Memory 或 Wiki；候选结论仍须按本 skill 的确认、映射和回读流程处理。
+先按用户文字和附件内容识别模块；图片、截图和扫描件先按[源文件解析与完整性核对](references/source-intake.md)完成最低限度解析，不能先向用户提出通用项目问题。模块无法判定时，唯一允许的前置问题是模块归属；不得先追问项目名称、上线单位或阶段。识别后第一步读取对应模块调研指南和用户提供的源材料：费用模块：读取[费用调研指南](references/expense-research-guide.md)；总账模块：读取[总账调研指南](references/general-ledger-research-guide.md)；其他模块使用其对应调研指南。调研阶段不要读取巡检矩阵；读取指南后直接从指南的问题、提取要素和附件结构中提取公司/院区、业务范围、上线阶段、期间、例外、依据等缺口。优先复用当前会话中用户明确给出的事实和回答，只针对指南要求的缺口追问。巡检矩阵仅在巡检校验或确认结论回链时由对应流程按需读取，不替代模块调研指南中的汇总问题、逐点提取问题或附件字段。仓内统一入口为 `scripts/research_sources.py <来源文件> --module <模块> --workspace <当前项目工作区>`，将完整解析结果写入工作区固定隐藏目录 `.dy_superpowers-parsed/`，终端只返回状态与档案路径。解析档案不是记忆，不进入 Basic Memory 或 Wiki；候选结论仍须按本 skill 的确认、映射和回读流程处理。
 
 模块路由对附件形式不例外：费用、报销、费用政策、费用项目或 `EXP-` 等词出现在用户文字、图片、截图或解析后的附件内容中时，必须先读 `references/expense-research-guide.md`；总账、凭证、制证、期间或 `GL-` 等词出现时，必须先读 `references/general-ledger-research-guide.md`。未读取对应调研指南前不得开始提问、整理候选结论或写入记忆；模块无法判断时先只询问模块归属，不得用通用问题替代模块 QA。
 
