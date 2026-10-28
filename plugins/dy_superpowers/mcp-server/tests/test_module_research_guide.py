@@ -110,6 +110,29 @@ def test_expense_source_generic_carrier_subitem_has_exact_matrix_mapping():
     assert "通用承运人映射" in text
 
 
+def test_imported_pending_business_signoffs_must_trigger_native_qa_before_finalizing():
+    skill = SKILL.read_text(encoding="utf-8")
+    source_intake = (SKILL.parent / "references/source-intake.md").read_text(encoding="utf-8")
+
+    assert "request_user_input" in skill
+    assert "待业务签认" in skill
+    assert "待确认" in skill
+    assert "不能只生成候选台账后结束" in skill
+    assert "每组最多 3 个相互独立的问题" in skill
+    assert "解析不能作为最终回复结束" in source_intake
+    assert "不能只列“待业务签认”后结束" in source_intake
+    assert "项目档案生成不适用此自动 QA 规则" in source_intake
+
+
+def test_research_candidate_ledger_output_is_grouped_and_scannable():
+    skill = SKILL.read_text(encoding="utf-8")
+
+    assert "不要把大量长结论放入单张宽表" in skill
+    assert "按配置组分节" in skill
+    assert "先展示待确认与待业务签认项" in skill
+    assert "逐条使用短标签换行展示" in skill
+
+
 
 def test_expense_source_roles_and_actual_workbook_inventory():
     text = (ROOT / "skills/module-research/references/expense-research-guide.md").read_text(encoding="utf-8")
