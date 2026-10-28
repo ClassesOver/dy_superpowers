@@ -56,13 +56,19 @@ def calculate_progress(module: str, records: list[dict], *, scope: str | None = 
     items = _guide_items(module)
     expected = {(item["check_order"], item["research_id"]) for item in items}
     answered = {(record.get("check_order"), record.get("research_id")) for record in selected
-                if record.get("status") == "confirmed"}
+                if record.get("status") == "confirmed"
+                and record.get("research_complete") is True}
     answered &= expected
     percentage = len(answered) / len(items) * 100 if items else 0
     missing = [item for item in items if (item["check_order"], item["research_id"]) not in answered]
     return {"module": module, "scope": scope, "scope_id": scope_id,
             "answered": len(answered), "total": len(items), "percentage": percentage,
-            "route": "interactive" if percentage >= 70 else "excel", "items": missing}
+            "route": "interactive" if percentage >= 70 else "excel", "items": missing,
+            "unmapped_records": [record for record in selected
+                                 if (record.get("check_order"), record.get("research_id")) not in expected],
+            "completeness_unknown": [record for record in selected
+                                     if record.get("status") == "confirmed"
+                                     and "research_complete" not in record]}
 
 
 def export_unanswered_template(workspace: str | Path, module: str, trace_id: str, *,

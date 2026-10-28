@@ -472,8 +472,8 @@ def test_trace_read_excludes_its_own_lifecycle_events(workspace):
 def test_server_requires_mcp_sdk_instead_of_starting_compatibility_protocol(workspace, tmp_path, monkeypatch):
     plugin_root = Path(__file__).parents[2]
     config = json.loads((plugin_root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]["dy-superpowers-odoo"]
-    assert "${PLUGIN_ROOT}" in " ".join(config["args"])
-    assert config.get("cwd") is None
+    assert config["command"] == "./mcp-server/start.sh"
+    assert config.get("cwd") == "."
     monkeypatch.setenv("PLUGIN_ROOT", str(plugin_root))
     # 禁用 site-packages，验证缺少必需 SDK 时给出明确错误且不切换协议实现。
     process = subprocess.run(

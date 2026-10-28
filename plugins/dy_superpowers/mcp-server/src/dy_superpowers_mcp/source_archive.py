@@ -14,7 +14,7 @@ from .storage import atomic_write, record_lock
 from .trace import redact
 
 ROOT = '.dy_superpowers-parsed'
-PARSER_VERSION = 'dy-document-extract/v2'
+PARSER_VERSION = 'dy-document-extract/v3'
 _HASH = re.compile(r'^[a-f0-9]{64}$')
 _PRIVATE = re.compile(r'(?<!\d)(?:1[3-9]\d{9}|\d{17}[\dXx])(?!\d)')
 

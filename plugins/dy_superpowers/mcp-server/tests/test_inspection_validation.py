@@ -83,6 +83,26 @@ def test_research_revision_change_and_retirement_invalidate_previous_pass(tmp_pa
     current = read_record(tmp_path, 'expense', '1', '01')
     write_record(tmp_path, {**current, 'confirmed': True, 'conclusion': '本期上线含扩展', 'expected_revision': current['revision']})
     assert validate(tmp_path, report)['valid'] is False
+
+
+def test_partial_confirmed_research_cannot_back_a_definitive_result(tmp_path, report):
+    current = read_record(tmp_path, 'expense', '1', '01')
+    write_record(tmp_path, {**current, 'confirmed': True, 'research_complete': False,
+                            'expected_revision': current['revision']})
+    latest = read_record(tmp_path, 'expense', '1', '01')
+    report['records'][0]['research_revision'] = latest['revision']
+    report['records'][0]['verified_at'] = datetime.now(timezone.utc).isoformat()
+
+    result = validate(tmp_path, report)
+
+    assert result['valid'] is False
+    assert any('完整' in error['message'] for error in result['errors'])
+
+
+def test_research_revision_change_and_retirement_invalidate_previous_pass(tmp_path, report):
+    current = read_record(tmp_path, 'expense', '1', '01')
+    write_record(tmp_path, {**current, 'confirmed': True, 'conclusion': '本期上线含扩展', 'expected_revision': current['revision']})
+    assert validate(tmp_path, report)['valid'] is False
     current = read_record(tmp_path, 'expense', '1', '01')
     report['records'][0]['research_revision'] = current['revision']
     report['records'][0]['verified_at'] = datetime.now(timezone.utc).isoformat()

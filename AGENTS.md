@@ -15,6 +15,7 @@
 
 ## 开发与验证
 
+- 每次执行 `git commit` 前，必须更新 `plugins/dy_superpowers/.codex-plugin/plugin.json` 的 `version`，并将版本号变更包含在同一次提交中；不得沿用上一次提交的版本号。
 - 使用中文编写新增文档、skill 和用户可见文本。
 - 新功能先写 pytest 测试；不要新增 `unittest` 测试。`plugins/dy_superpowers/mcp-server/tests/test_runtime.py` 是迁移前的既有测试，除非专门安排测试迁移，不要复制其风格到新测试。
 - MCP 测试：`PYTHONPATH=... python3 -m pytest -q plugins/dy_superpowers/mcp-server/tests`。

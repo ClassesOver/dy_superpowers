@@ -1,0 +1,11 @@
+{"time":"2026-10-28T13:36:33.625Z","event":"start","root":"/tmp/feishu-dy-real-Io7qCG"}
+{"time":"2026-10-28T13:36:45.927Z","event":"zip_install_prepared","version":"0.1.1","python":"3.12.13","defaultEnabled":false}
+{"time":"2026-10-28T13:36:46.346Z","event":"archive_stage","copiedVenv":false,"cwdRemoved":true}
+{"time":"2026-10-28T13:36:48.055Z","event":"native_discovery","workspace":"/tmp/feishu-dy-real-Io7qCG/business-a","toolCount":27}
+{"time":"2026-10-28T13:36:48.056Z","event":"chat_install_entry_checked"}
+{"time":"2026-10-28T13:36:49.582Z","event":"native_discovery","workspace":"/tmp/feishu-dy-real-Io7qCG/business-a","toolCount":27}
+{"event": "progress", "isError": false, "payload": {"module": "general-ledger", "scope": null, "scope_id": null, "answered": 0, "total": null, "percentage": null, "route": "needs_scope", "needs_scope": true, "items": []}}
+{"time":"2026-10-28T13:36:52.408Z","event":"memory_scope_checked","workspace":"/tmp/feishu-dy-real-Io7qCG/business-a","mode":"write"}
+{"event": "progress", "isError": false, "payload": {"module": "general-ledger", "scope": null, "scope_id": null, "answered": 0, "total": null, "percentage": null, "route": "needs_scope", "needs_scope": true, "items": []}}
+{"time":"2026-10-28T13:36:55.229Z","event":"memory_scope_checked","workspace":"/tmp/feishu-dy-real-Io7qCG/business-b","mode":"read"}
+{"time":"2026-10-28T13:36:55.230Z","event":"complete","root":"/tmp/feishu-dy-real-Io7qCG","checks":["真实ZIP安装","Python3.12预装","原生工具发现","档案快照入口","工作区隔离","未授权写入拒绝"]}

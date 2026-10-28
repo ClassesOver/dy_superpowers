@@ -4,7 +4,7 @@
 
 一个工作区只对应一个项目。`.dy_superpowers/` 保存该项目的 `preferences.md`、`profile.md`、`delivery-register.md`、`decisions.md`、`skill-candidates.md`，以及按 `modules/<module>/research.md` 隔离的模块调研记录和按 `reports/<module>/<YYYY-MM-DD>/<UTC时间戳-唯一后缀>.md` 保存的巡检报告。报告时间戳和唯一后缀由保存工具生成，避免模型猜编号和同日覆盖。这些文件不修改既有项目 Markdown。
 
-MCP 服务端提供工作区记忆、调研记录、计划校验、Odoo 12 只读查询和运行追踪（trace），并承担 MCP 工具调用前后的参数检查与生命周期追踪。入口通过 `${PLUGIN_ROOT}` 定位插件代码，进程工作目录保留为当前项目工作区；因此 `.dy_superpowers/` 记忆按项目工作区隔离，不写入插件安装目录。具体工具边界见 [hooks.md](hooks.md)、[memory.md](memory.md) 和 [odoo-config-engine.md](odoo-config-engine.md)。
+MCP 服务端提供工作区记忆、调研记录、计划校验、Odoo 12 只读查询和运行追踪（trace），并承担 MCP 工具调用前后的参数检查与生命周期追踪。入口使用插件相对启动脚本定位代码；Codex 将启动目录设为插件根目录，业务工作区由启动前的 `DY_WORKSPACE_ROOT` 显式指定并透传。服务拒绝将插件安装目录作为业务工作区，因此 `.dy_superpowers/` 记忆按项目隔离。具体工具边界见 [hooks.md](hooks.md)、[memory.md](memory.md) 和 [odoo-config-engine.md](odoo-config-engine.md)。
 
 标准 MCP 启动命令为 `uv run --frozen --project <插件>/mcp-server python <插件>/mcp-server/src/server.py`。Codex 运行环境需提供 uv；依赖由插件内 `uv.lock` 固定，虚拟环境位于插件的 `mcp-server/.venv`，与工作区记忆隔离。首次准备依赖需要可访问的包源，离线部署应提前同步依赖。
 

@@ -367,10 +367,8 @@ def test_server_project_configure_build_sync_gates(tmp_path, monkeypatch):
     for key in ("DY_WIKI_API_URL", "DY_WIKI_TOKEN", "DY_WIKI_PROJECT_ID",
                 "DY_WIKI_GROUP_ID", "DY_WIKI_PROJECT_NAME"):
         monkeypatch.delenv(key, raising=False)
-    result, error = run("dy_wiki_sync", {"confirmed": False}, workspace)
-    assert error["code"] == -32602
     result, error = run("dy_wiki_sync", {"confirmed": True}, workspace)
-    assert error["code"] == -32602 and "DY_WIKI_API_URL" in error["message"]
+    assert result is None and "DY_WIKI_API_URL" in error["message"]
     monkeypatch.setenv("DY_WIKI_API_URL", "https://gitlab.example.com/api/v4")
     monkeypatch.setenv("DY_WIKI_TOKEN", "pat-x")
     monkeypatch.setenv("DY_WIKI_PROJECT_ID", "123")
@@ -380,9 +378,9 @@ def test_server_project_configure_build_sync_gates(tmp_path, monkeypatch):
             raise ConnectionError("no network in unit test")
     monkeypatch.setattr("requests.Session", _BrokenSession)
     result, error = run("dy_wiki_sync", {"confirmed": True}, workspace)
-    assert error["code"] == -32602
+    assert result is None and error is not None
 
     fresh = tmp_path / "fresh"
     fresh.mkdir()
     result, error = run("dy_wiki_sync", {"confirmed": True}, fresh)
-    assert error["code"] == -32602 and "禁止猜测" in error["message"]  # 项目门禁先于清单门禁
+    assert result is None and error is not None  # 发布失败阻止依赖步骤

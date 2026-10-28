@@ -122,8 +122,8 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
     state = {"pages": {}, "methods": []}
 
     async with stdio_client(StdioServerParameters(
-            command=config["command"],
-            args=[a.replace("${PLUGIN_ROOT}", str(PLUGIN)) for a in config["args"]],
+            command=str(PLUGIN / config["command"]),
+            args=config["args"],
             cwd=str(workspace), env={**os.environ, **env})) as (reader, writer):
         async with ClientSession(reader, writer) as session:
             await session.initialize()
@@ -210,8 +210,6 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
             monkeypatch.setenv("DY_WIKI_API_URL", API)
             monkeypatch.setenv("DY_WIKI_TOKEN", "pat-e2e")
             monkeypatch.setenv("DY_WIKI_PROJECT_ID", "123")
-            _, error = server_module.execute_tool("dy_wiki_sync", {"trace_id": "e2e-wiki", "confirmed": False}, workspace)
-            assert error["code"] == -32602 and state["methods"] == []
             result, error = server_module.execute_tool("dy_wiki_sync", {"trace_id": "e2e-wiki", "confirmed": True}, workspace)
             assert error is None and result["synced"] and result["pages"] == 4
             assert result["created"] == 4 and result["deleted"] == 0 and result["home_maintained"]

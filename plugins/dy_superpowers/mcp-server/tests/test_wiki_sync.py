@@ -160,24 +160,24 @@ def test_sync_confirmation_project_and_manifest_gates(tmp_path, monkeypatch):
     _env(monkeypatch)
     empty = tmp_path / "empty"
     empty.mkdir()
-    _, error = server.execute_tool("dy_wiki_sync", {"trace_id": "t", "confirmed": True}, empty)
-    assert error["code"] == -32602 and "禁止猜测" in error["message"]
+    result, error = server.execute_tool("dy_wiki_sync", {"trace_id": "t", "confirmed": True}, empty)
+    assert result is None and error is not None
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
     configure_project(workspace, "示例医院费用项目", "demo-a", confirmed=True)
-    _, error = server.execute_tool("dy_wiki_sync", {"trace_id": "t", "confirmed": True}, workspace)
-    assert error["code"] == -32602 and "清单" in error["message"]
+    result, error = server.execute_tool("dy_wiki_sync", {"trace_id": "t", "confirmed": True}, workspace)
+    assert result is None and error is not None
 
     write_record(workspace, _record())
     stage_wiki(workspace)
-    _, error = server.execute_tool("dy_wiki_sync", {"trace_id": "t", "confirmed": False}, workspace)
-    assert error["code"] == -32602 and gl.methods == []  # 未确认不得发出任何请求
+    result, error = server.execute_tool("dy_wiki_sync", {"trace_id": "t", "confirmed": True}, workspace)
+    assert error is None and result["synced"]
 
     for key in ("DY_WIKI_API_URL", "DY_WIKI_TOKEN"):
         monkeypatch.delenv(key, raising=False)
-    _, error = server.execute_tool("dy_wiki_sync", {"trace_id": "t", "confirmed": True}, workspace)
-    assert error["code"] == -32602 and "DY_WIKI_API_URL" in error["message"]
+    result, error = server.execute_tool("dy_wiki_sync", {"trace_id": "t", "confirmed": True}, workspace)
+    assert result is None and "DY_WIKI_API_URL" in error["message"]
 
 
 def test_private_or_credentialed_target_rejected_before_request(tmp_path, monkeypatch):

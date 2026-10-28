@@ -29,9 +29,8 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
         '.venv', '.pytest_cache', '__pycache__', '*.egg-info'
     ))
     config = json.loads((plugin / '.mcp.json').read_text(encoding='utf-8'))['mcpServers']['dy-superpowers-odoo']
-    assert config['command'] == 'uv'
-    assert '--frozen' in config['args']
-    assert config.get('cwd') is None
+    assert config['command'] == './mcp-server/start.sh'
+    assert config.get('cwd') == '.'
     workspace = tmp_path / 'project'
     workspace.mkdir()
     class UnavailableOdooHandler(BaseHTTPRequestHandler):
@@ -49,8 +48,8 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
            'DB_NAME': 'db', 'APP_USER': 'u', 'APP_PASSWORD': 'p', 'CODEX_HOME': str(tmp_path / 'codex')}
     env.pop('VIRTUAL_ENV', None)
     params = StdioServerParameters(
-        command=config['command'],
-        args=[arg.replace('${PLUGIN_ROOT}', str(plugin)) for arg in config['args']],
+        command=str(plugin / config['command']),
+        args=config['args'],
         env=env,
         cwd=str(workspace),
     )
@@ -192,8 +191,8 @@ def test_stdio_odoo_read_succeeds_over_jsonrpc_and_records_redacted_trace(tmp_pa
     }
     env.pop('VIRTUAL_ENV', None)
     params = StdioServerParameters(
-        command=config['command'],
-        args=[arg.replace('${PLUGIN_ROOT}', str(plugin)) for arg in config['args']],
+        command=str(plugin / config['command']),
+        args=config['args'],
         env=env,
         cwd=str(workspace),
     )
