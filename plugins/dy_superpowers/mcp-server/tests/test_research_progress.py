@@ -1,11 +1,14 @@
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-from dy_superpowers_mcp.research_progress import _guide_items, calculate_progress, export_unanswered_template
+from dy_superpowers_mcp.research_progress import (
+    _guide_items, calculate_progress, calculate_routing_progress, export_unanswered_template,
+)
 from dy_superpowers_mcp.research import write_record
 import dy_superpowers_mcp.research_progress as progress_module
 import server
@@ -137,12 +140,164 @@ def test_mcp_tools_calculate_scoped_progress_and_require_export_confirmation(tmp
     assert exported["question_count"] == 91
 
 
-def test_mcp_progress_without_scope_returns_scope_requirement_instead_of_failing(tmp_path, monkeypatch):
+@pytest.mark.parametrize("module,total", [("expense", 92), ("general-ledger", 82)])
+def test_mcp_progress_without_scope_routes_empty_memory_to_excel(tmp_path, monkeypatch, module, total):
     workspace = tmp_path / "project"
     workspace.mkdir()
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
     result, error = server.execute_tool("dy_research_progress", {
-        "trace_id": "progress-scope", "module": "expense"}, workspace)
+        "trace_id": "progress-scope", "module": module}, workspace)
     assert error is None
-    assert result["route"] == "needs_scope"
-    assert result["needs_scope"] is True
+    assert result["route"] == "excel"
+    assert (result["answered"], result["total"], result["percentage"]) == (0, total, 0)
+    assert result["scope"] is None and result["scope_id"] is None
+    assert result["scope_mode"] == "unscoped"
+    assert len(result["items"]) == total
+    assert not (workspace / ".dy_superpowers").exists()
+
+
+def _save_records(workspace, module, scope_id, start, stop, scope="中心院区"):
+    for item in _guide_items(module)[start:stop]:
+        write_record(workspace, {
+            "module": module, "check_order": item["check_order"], "research_id": item["research_id"],
+            "config_item": item["config_item"], "conclusion": "仅测试：已确认要素齐备",
+            "scope": scope, "scope_id": scope_id, "confirmed_by": "test",
+            "confirmed_at": "2026-01-01", "confirmed": True, "research_complete": True,
+        })
+
+
+@pytest.mark.parametrize("answered,route", [(57, "excel"), (58, "interactive")])
+def test_mcp_progress_without_scope_reuses_single_scope(tmp_path, monkeypatch, answered, route):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    workspace = tmp_path / "project"
+    _save_records(workspace, "general-ledger", "site-a", 0, answered)
+
+    result, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "single-scope", "module": "general-ledger"}, workspace)
+
+    assert error is None
+    assert result["scope_id"] == "site-a" and result["scope"] == "中心院区"
+    assert result["scope_mode"] == "selected"
+    assert result["answered"] == answered and result["total"] == 82
+    assert result["route"] == route
+
+
+def test_mcp_unselected_scopes_report_separate_progress_and_export_full_template(tmp_path, monkeypatch):
+    from openpyxl import load_workbook
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    workspace = tmp_path / "project"
+    # 两个同名范围各45项；并集90项，不能冒充任一范围已达到70%。也覆盖跨页读取。
+    _save_records(workspace, "expense", "site-a", 0, 45)
+    _save_records(workspace, "expense", "site-b", 45, 90)
+    # 补充重复键使总记录超过100，第三范围本身达到互动门槛也不能自动选中。
+    _save_records(workspace, "expense", "site-c", 0, 65, scope="第三院区")
+    memory_before = {path: path.read_bytes() for path in (workspace / ".dy_superpowers").rglob("*.md")}
+
+    result, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "multiple-scopes", "module": "expense"}, workspace)
+    assert error is None
+    assert result["scope_mode"] == "multiple"
+    assert result["scope"] is None and result["scope_id"] is None
+    assert result["route"] == "excel" and result["answered"] == 0
+    assert len(result["items"]) == 92
+    assert [(row["scope_id"], row["answered"], row["route"]) for row in result["scope_progress"]] == [
+        ("site-a", 45, "excel"), ("site-b", 45, "excel"), ("site-c", 65, "interactive")]
+
+    exported, error = server.execute_tool("dy_research_unanswered_export", {
+        "trace_id": "multiple-scopes", "module": "expense", "confirmed": True}, workspace)
+    assert error is None
+    assert exported["question_count"] == 92 and exported["scope_id"] is None
+    with closing(load_workbook(workspace / exported["path"], read_only=True)) as workbook:
+        rows = list(workbook.active.iter_rows(min_row=2, values_only=True))
+        assert len(rows) == 92
+        assert all(row[5:9] == (None, None, None, None) for row in rows)
+    assert all(path.read_bytes() == content for path, content in memory_before.items())
+
+    selected, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "multiple-scopes", "module": "expense", "scope_id": "site-a"}, workspace)
+    assert error is None and selected["answered"] == 45
+
+
+@pytest.mark.parametrize("answered,question_count", [(0, 92), (1, 91)])
+def test_mcp_export_without_scope_preserves_confirmation_and_reuses_single_scope(
+        tmp_path, monkeypatch, answered, question_count):
+    from openpyxl import load_workbook
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    _save_records(workspace, "expense", "site-a", 0, answered)
+    arguments = {"trace_id": "export-no-scope", "module": "expense"}
+    _, error = server.execute_tool("dy_research_unanswered_export", {
+        **arguments, "confirmed": False}, workspace)
+    assert error and "明确确认" in error["message"]
+    assert not (workspace / ".dy_superpowers/research").exists()
+
+    exported, error = server.execute_tool("dy_research_unanswered_export", {
+        **arguments, "confirmed": True}, workspace)
+    assert error is None
+    assert exported["question_count"] == question_count
+    assert exported["scope_id"] == ("site-a" if answered else None)
+    with closing(load_workbook(workspace / exported["path"], read_only=True)) as workbook:
+        rows = list(workbook.active.iter_rows(min_row=2, values_only=True))
+        assert len(rows) == question_count
+        assert all(row[5] == ("中心院区" if answered else None) for row in rows)
+
+
+def test_mcp_export_by_scope_id_keeps_known_scope_label(tmp_path, monkeypatch):
+    from openpyxl import load_workbook
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    _save_records(tmp_path, "expense", "site-a", 0, 1)
+    exported, error = server.execute_tool("dy_research_unanswered_export", {
+        "trace_id": "export-scoped-label", "module": "expense", "scope_id": "site-a",
+        "confirmed": True}, tmp_path)
+
+    assert error is None
+    with closing(load_workbook(tmp_path / exported["path"], read_only=True)) as workbook:
+        assert workbook.active["F2"].value == "中心院区"
+
+
+def test_mcp_export_by_new_scope_id_keeps_explicit_binding_without_inventing_label(tmp_path, monkeypatch):
+    from openpyxl import load_workbook
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    exported, error = server.execute_tool("dy_research_unanswered_export", {
+        "trace_id": "export-new-scope", "module": "expense", "scope_id": "site-new",
+        "confirmed": True}, tmp_path)
+
+    assert error is None
+    assert exported["scope_id"] == "site-new" and exported["scope"] is None
+    with closing(load_workbook(tmp_path / exported["path"], read_only=True)) as workbook:
+        assert workbook.active["F2"].value == "site-new"
+
+
+@pytest.mark.parametrize("tool", ["dy_research_progress", "dy_research_unanswered_export"])
+def test_unscoped_routing_does_not_hide_corrupted_memory(tmp_path, monkeypatch, tool):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    _save_records(tmp_path, "expense", "site-a", 0, 1)
+    path = tmp_path / ".dy_superpowers/modules/expense/research.md"
+    path.write_text(path.read_text().replace("仅测试：已确认要素齐备", "未经确认的编辑"))
+    arguments = {"trace_id": "corrupt-routing", "module": "expense"}
+    if tool.endswith("export"):
+        arguments["confirmed"] = True
+
+    result, error = server.execute_tool(tool, arguments, tmp_path)
+
+    assert result is None and error["code"] == -32602
+    assert not (tmp_path / ".dy_superpowers/research").exists()
+
+
+def test_multiple_scope_routing_preserves_unknown_completeness_and_unmapped_diagnostics():
+    unknown = _records("expense", "site-a", 1)[0]
+    del unknown["research_complete"]
+    unmapped = {**_records("expense", "site-b", 1)[0], "check_order": "legacy"}
+
+    result = calculate_routing_progress("expense", [unknown, unmapped])
+
+    assert result["route"] == "excel" and result["answered"] == 0
+    assert result["completeness_unknown"][0]["scope_id"] == "site-a"
+    assert result["unmapped_records"][0]["scope_id"] == "site-b"
+    assert all("conclusion" not in row and "history" not in row
+               for field in ("completeness_unknown", "unmapped_records") for row in result[field])
