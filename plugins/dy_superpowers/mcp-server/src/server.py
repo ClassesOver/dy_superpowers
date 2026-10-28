@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from contextlib import nullcontext
@@ -23,6 +24,7 @@ from dy_superpowers_mcp.wiki_sync import sync_wiki
 from dy_superpowers_mcp.project_wiki import configure_project, stage_wiki
 from dy_superpowers_mcp.knowledge import module_info as knowledge_module_info, search as knowledge_search
 from dy_superpowers_mcp.research import read_module_records, read_record, write_record
+from dy_superpowers_mcp.research_progress import calculate_progress, export_unanswered_template
 from dy_superpowers_mcp.reports import export_report_pdf, read_report, save_report
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 from dy_superpowers_mcp.inspection import validate_inspection
@@ -452,18 +454,22 @@ def _handle_knowledge_search(name: str, arguments: dict, workspace: Path, store:
     return knowledge_search(query)
 
 def _handle_research_record_write(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    record_arguments = dict(arguments)
+    sender_id = os.environ.get('FEISHU_CODEX_BOT_SENDER_USER_ID', '').strip()
+    record_arguments['confirmed_by'] = sender_id or str(arguments.get('confirmed_by') or '未提供')
+    record_arguments['confirmed_at'] = datetime.now(timezone.utc).isoformat()
     try:
-        result = write_record(workspace, arguments)
+        result = write_record(workspace, record_arguments)
     except PermissionError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     except ValueError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     operation = 'repair_record' if arguments.get('repair') else 'retire_scope' if result['status'] == 'retired' else 'confirmed_record'
-    record = read_record(workspace, arguments['module'], arguments['check_order'], arguments['research_id'],
-                         scope=arguments.get('scope'), scope_id=result['scope_id'])
+    record = read_record(workspace, record_arguments['module'], record_arguments['check_order'], record_arguments['research_id'],
+                         scope=record_arguments.get('scope'), scope_id=result['scope_id'])
     event = {'event': 'research.write', 'operation': operation, 'tool': name, 'status': 'ok',
-             'module': arguments['module'], 'check_order': arguments['check_order'],
-             'research_id': arguments['research_id'], 'revision_count': result['revision_count'],
+             'module': record_arguments['module'], 'check_order': record_arguments['check_order'],
+             'research_id': record_arguments['research_id'], 'revision_count': result['revision_count'],
              'check_key': result['check_key'], 'scope_id': result['scope_id'],
              'revision': result['revision'], 'research_status': result['status'],
              'research_content': record,
@@ -503,6 +509,56 @@ def _handle_module_memory_read(name: str, arguments: dict, workspace: Path, stor
                       'check_key': f"{module}:{record['check_order']}:{record['research_id']}",
                       'scope_id': record['scope_id'], 'revision': record['revision'],
                       'research_status': record['status'], 'history_count': len(record.get('history', []))})
+    append_trace(store, arguments['trace_id'], event)
+    record_otel_event(otel_span, event)
+    return result
+
+def _handle_research_progress(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    try:
+        module = validate_module(arguments['module'])
+        scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
+        if scope is None and scope_id is None:
+            result = {'module': module, 'scope': None, 'scope_id': None, 'answered': 0,
+                      'total': None, 'percentage': None, 'route': 'needs_scope',
+                      'needs_scope': True, 'items': []}
+            event = {'event': 'research.progress', 'operation': 'calculate_progress', 'tool': name,
+                     'status': 'needs_scope', 'module': module, 'span_id': span_id}
+            append_trace(store, arguments['trace_id'], event)
+            record_otel_event(otel_span, event)
+            return result
+        records, has_more = read_module_records(workspace, module, limit=100, scope=scope, scope_id=scope_id)
+        if has_more:
+            raise ValueError('调研记录超过单次读取上限，无法可靠计算存储度')
+        result = calculate_progress(module, records, scope=scope, scope_id=scope_id)
+    except ValueError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    event = {'event': 'research.progress', 'operation': 'calculate_progress', 'tool': name, 'status': 'ok',
+             'module': module, 'scope_id': scope_id, 'answered': result['answered'], 'total': result['total'],
+             'percentage': result['percentage'], 'route': result['route'], 'span_id': span_id}
+    append_trace(store, arguments['trace_id'], event)
+    record_otel_event(otel_span, event)
+    return result
+
+def _handle_research_unanswered_export(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    try:
+        module = validate_module(arguments['module'])
+        scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
+        if scope is None and scope_id is None:
+            raise ValueError('必须提供 scope 或 scope_id，避免跨适用范围导出')
+        records, has_more = read_module_records(workspace, module, limit=100, scope=scope, scope_id=scope_id)
+        if has_more:
+            raise ValueError('调研记录超过单次读取上限，无法可靠生成清单')
+        export_scope = scope or (records[0].get('scope') if records else None) or scope_id or '未提供'
+        result = export_unanswered_template(workspace, module, arguments['trace_id'], records=records,
+                                            scope=export_scope, scope_id=scope_id,
+                                            confirmed=arguments.get('confirmed'))
+    except PermissionError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    except ValueError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    event = {'event': 'research.unanswered.export', 'operation': 'export_unanswered_template',
+             'tool': name, 'status': 'ok', 'module': module, 'scope_id': scope_id,
+             'question_count': result['question_count'], 'path': result['path'], 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
     return result
@@ -649,6 +705,23 @@ TOOL_REGISTRY = {
                         'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100}}},
         _handle_module_memory_read,
     ),
+    'dy_research_progress': (
+        '按指定模块和适用范围计算已确认调研子项的存储度；未提供范围时返回 needs_scope，不合并不同范围。低于70%走清单，达到70%走互动问答。',
+        {'type': 'object', 'required': ['trace_id', 'module'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
+                        'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
+                        'scope': {'type': 'string'}, 'scope_id': {'type': 'string'}}},
+        _handle_research_progress,
+    ),
+    'dy_research_unanswered_export': (
+        '用户明确确认后，按固定模板导出指定模块和适用范围内未回答问题的 Excel 清单；不覆盖已有文件。',
+        {'type': 'object', 'required': ['trace_id', 'module', 'confirmed'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
+                        'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
+                        'scope': {'type': 'string'}, 'scope_id': {'type': 'string'},
+                        'confirmed': {'type': 'boolean'}}},
+        _handle_research_unanswered_export,
+    ),
     'dy_memory_search': (
         '使用 Basic Memory 索引搜索当前工作区记忆；服务不可用时回退本地 Markdown。',
         {'type': 'object',
@@ -741,7 +814,7 @@ TOOL_REGISTRY = {
         {'type': 'object',
          'additionalProperties': False,
          'required': ['trace_id', 'module', 'check_order', 'research_id', 'config_item', 'conclusion', 'scope',
-                      'confirmed_by', 'confirmed_at', 'confirmed'],
+                      'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string'},
                         'check_order': {'type': 'string'},
@@ -750,8 +823,8 @@ TOOL_REGISTRY = {
                         'conclusion': {'type': 'string'},
                         'scope': {'type': 'string'},
                         'evidence_ref': {'type': 'string'},
-                        'confirmed_by': {'type': 'string'},
-                        'confirmed_at': {'type': 'string'},
+                        'confirmed_by': {'type': 'string', 'description': '由 Feishu 发送人环境变量自动写入；调用方无需提供。'},
+                        'confirmed_at': {'type': 'string', 'description': '由 MCP 使用当前系统时间自动写入；调用方无需提供。'},
                         'confirmed': {'type': 'boolean'},
                         'expected_revision': {'type': 'string', 'description': '已有记录必须提供读取版本；冲突时重新读取并确认。'},
                         'scope_id': {'type': 'string', 'description': '稳定范围标识；首次可省略，后续沿用读取值。'},

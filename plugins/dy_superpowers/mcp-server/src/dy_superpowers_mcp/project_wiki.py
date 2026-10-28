@@ -210,7 +210,7 @@ def build_bundle(workspace):
                            f"**调研内容**：{md(_publication_text(item['conclusion'], authorized_urls))}", "",
                            f"- 适用范围：{md(_publication_text(item['scope'], authorized_urls))}",
                            f"- 来源及依据：{md(_publication_text(item.get('evidence_ref'), authorized_urls)) or '尚未提供'}",
-                           f"- 记录的确认信息：{md(_publication_text(item['confirmed_by'], authorized_urls))} / {md(item['confirmed_at'])}",
+                           f"- 本次记录操作人/写入时间：{md(_publication_text(item['confirmed_by'], authorized_urls))} / {md(item['confirmed_at'])}",
                            "- 说明：来源导入、业务签认和巡检通过是不同状态，不能相互替代。", ""]
             add(topic_slug, f"{label}｜{title}", detail)
             lines.append(f"| [{md(title)}]({topic_slug}) | {len(items)} |")

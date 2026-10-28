@@ -227,18 +227,19 @@ def write_record(workspace: str | Path, data: dict[str, Any]) -> dict[str, Any]:
     for name in ("check_order", "research_id"):
         if _KEY_PART.fullmatch(data[name]) is None:
             raise ValueError(f"{name} 必须是字母、数字、点、下划线或连字符组成的标识")
-    try:
-        confirmed_at = datetime.fromisoformat(data["confirmed_at"].replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("confirmed_at 必须是 ISO 8601 日期或日期时间") from exc
-    now = datetime.now(timezone.utc)
-    if "T" in data["confirmed_at"] or " " in data["confirmed_at"]:
-        if confirmed_at.tzinfo is None:
-            confirmed_at = confirmed_at.replace(tzinfo=timezone.utc)
-        if confirmed_at.astimezone(timezone.utc) > now:
-            raise ValueError("confirmed_at 不能晚于当前时间")
-    elif confirmed_at.date() > now.date():
-        raise ValueError("confirmed_at 不能晚于当前日期")
+    if data["confirmed_at"] != "未提供":
+        try:
+            confirmed_at = datetime.fromisoformat(data["confirmed_at"].replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("confirmed_at 必须是 ISO 8601 日期或日期时间，或填写“未提供”") from exc
+        now = datetime.now(timezone.utc)
+        if "T" in data["confirmed_at"] or " " in data["confirmed_at"]:
+            if confirmed_at.tzinfo is None:
+                confirmed_at = confirmed_at.replace(tzinfo=timezone.utc)
+            if confirmed_at.astimezone(timezone.utc) > now:
+                raise ValueError("confirmed_at 不能晚于当前时间")
+        elif confirmed_at.date() > now.date():
+            raise ValueError("confirmed_at 不能晚于当前日期")
     status = data.get("status", "confirmed")
     if not isinstance(status, str) or status not in {"confirmed", "retired"}:
         raise ValueError("status 仅支持 confirmed 或 retired")

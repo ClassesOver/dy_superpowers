@@ -100,6 +100,50 @@ def test_expense_guidance_routes_qa_and_preserves_material_boundary():
     assert "模板示例" in text and "历史观察" in text
 
 
+def test_module_routes_load_research_guides_before_inspection_matrices():
+    skill = SKILL.read_text(encoding="utf-8")
+    source_section = skill.split("## 调研来源", 1)[1].split("## 费用内置 QA", 1)[0]
+
+    assert "费用模块：读取[费用调研指南](references/expense-research-guide.md)" in source_section
+    assert "总账模块：读取[总账调研指南](references/general-ledger-research-guide.md)" in source_section
+    assert "inspection-matrix.md" not in source_section
+    assert "调研阶段不要读取巡检矩阵" in source_section
+    assert "先按用户文字和附件内容识别模块" in source_section
+    assert "不能先向用户提出通用项目问题" in source_section
+    assert source_section.index("费用模块：读取") < source_section.index("读取指南后直接从指南")
+
+
+def test_research_memory_progress_routes_by_scope_and_fixed_threshold():
+    skill = SKILL.read_text(encoding="utf-8")
+
+    assert "dy_research_progress" in skill
+    assert "dy_research_unanswered_export" in skill
+    assert "小于 70%" in skill
+    assert "大于或等于 70%" in skill
+    assert "每轮只问一个最小缺口" in skill
+    assert "unanswered-questions.xlsx" in skill
+    assert "不能把不同公司、院区、业务或期间合并" in skill
+    assert "调研 Skill 不主动触发巡检 Skill" in skill
+
+
+def test_progress_must_run_before_scope_questions_and_project_name_is_not_a_gate():
+    skill = SKILL.read_text(encoding="utf-8")
+    assert "即使用户尚未给出范围，也先只传模块调用" in skill
+    assert "项目名称不是存储度计算前置条件" in skill
+    assert "EXP-002 公司" in skill
+    assert "GL-1-002 核算主体范围" in skill
+
+
+def test_module_materials_cannot_skip_their_builtin_qa_guides():
+    skill = SKILL.read_text(encoding="utf-8")
+
+    assert "费用、报销、费用政策、费用项目或 `EXP-`" in skill
+    assert "必须先读 `references/expense-research-guide.md`" in skill
+    assert "总账、凭证、制证、期间或 `GL-`" in skill
+    assert "必须先读 `references/general-ledger-research-guide.md`" in skill
+    assert "未读取对应调研指南前不得开始提问" in skill
+
+
 def test_expense_source_generic_carrier_subitem_has_exact_matrix_mapping():
     text = (ROOT / "skills/module-research/references/expense-research-guide.md").read_text(encoding="utf-8")
     matrix = _expense_matrix_subitems()
@@ -108,6 +152,53 @@ def test_expense_source_generic_carrier_subitem_has_exact_matrix_mapping():
     source = (ROOT / "skills/expense-inspection/references/inspection-matrix.md").read_text(encoding="utf-8")
     assert "03｜仅在确认需要席别映射时检查通用承运人范围；允许或不允许的口径与实际匹配结果一致。" in source
     assert "通用承运人映射" in text
+
+
+def test_imported_pending_business_signoffs_must_trigger_native_qa_before_finalizing():
+    skill = SKILL.read_text(encoding="utf-8")
+    source_intake = (SKILL.parent / "references/source-intake.md").read_text(encoding="utf-8")
+
+    assert "request_user_input" in skill
+    assert "待业务签认" in skill
+    assert "待确认" in skill
+    assert "不能只生成候选台账后结束" in skill
+    assert "每组最多 3 个相互独立的问题" in skill
+    assert "解析不能作为最终回复结束" in source_intake
+    assert "不能只列“待业务签认”后结束" in source_intake
+    assert "项目档案生成不适用此自动 QA 规则" in source_intake
+
+
+def test_research_candidate_ledger_output_is_grouped_and_scannable():
+    skill = SKILL.read_text(encoding="utf-8")
+
+    assert "不要把大量长结论放入单张宽表" in skill
+    assert "按配置组分节" in skill
+    assert "先展示待确认与待业务签认项" in skill
+    assert "逐条使用短标签换行展示" in skill
+
+
+def test_pending_source_items_are_confirmed_individually_before_completion():
+    skill = SKILL.read_text(encoding="utf-8")
+
+    assert "每一条待确认结论" in skill
+    assert "每一条待确认结论都要有对应的业务回答" in skill
+    assert "未逐条确认不得报告完整导入" in skill
+
+
+def test_explicit_wiki_request_continues_through_build_and_sync_after_confirmation():
+    skill = SKILL.read_text(encoding="utf-8")
+
+    assert "用户明确要求写入 Wiki" in skill
+    assert "dy_project_configure" in skill
+    assert "dy_wiki_build" in skill
+    assert "dy_wiki_sync" in skill
+    assert "确认结论写入记忆并回读成功后" in skill
+    assert "不重复询问是否保存" in skill
+    assert "本次明确要求写入 Wiki 即作为外发确认" in skill
+    assert "构建预览后，Wiki 外发同步仍须单独确认" not in skill
+    assert "不追问确认人或日期" in skill
+    assert "FEISHU_CODEX_BOT_SENDER_USER_ID" in skill
+    assert "系统时间" in skill
 
 
 
