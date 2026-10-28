@@ -518,7 +518,14 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
         module = validate_module(arguments['module'])
         scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
         if scope is None and scope_id is None:
-            raise ValueError('必须提供 scope 或 scope_id，避免跨适用范围合并')
+            result = {'module': module, 'scope': None, 'scope_id': None, 'answered': 0,
+                      'total': None, 'percentage': None, 'route': 'needs_scope',
+                      'needs_scope': True, 'items': []}
+            event = {'event': 'research.progress', 'operation': 'calculate_progress', 'tool': name,
+                     'status': 'needs_scope', 'module': module, 'span_id': span_id}
+            append_trace(store, arguments['trace_id'], event)
+            record_otel_event(otel_span, event)
+            return result
         records, has_more = read_module_records(workspace, module, limit=100, scope=scope, scope_id=scope_id)
         if has_more:
             raise ValueError('调研记录超过单次读取上限，无法可靠计算存储度')
@@ -699,7 +706,7 @@ TOOL_REGISTRY = {
         _handle_module_memory_read,
     ),
     'dy_research_progress': (
-        '按指定模块和适用范围计算已确认调研子项的存储度，并返回低于70%导出清单或达到70%互动问答的分流结果。',
+        '按指定模块和适用范围计算已确认调研子项的存储度；未提供范围时返回 needs_scope，不合并不同范围。低于70%走清单，达到70%走互动问答。',
         {'type': 'object', 'required': ['trace_id', 'module'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},

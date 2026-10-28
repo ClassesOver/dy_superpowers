@@ -125,3 +125,14 @@ def test_mcp_tools_calculate_scoped_progress_and_require_export_confirmation(tmp
         "trace_id": "progress-test", "module": "expense", "scope_id": "site-a", "confirmed": True}, workspace)
     assert error is None
     assert exported["question_count"] == 91
+
+
+def test_mcp_progress_without_scope_returns_scope_requirement_instead_of_failing(tmp_path, monkeypatch):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    result, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "progress-scope", "module": "expense"}, workspace)
+    assert error is None
+    assert result["route"] == "needs_scope"
+    assert result["needs_scope"] is True

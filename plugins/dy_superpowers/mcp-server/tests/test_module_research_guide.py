@@ -122,8 +122,16 @@ def test_research_memory_progress_routes_by_scope_and_fixed_threshold():
     assert "大于或等于 70%" in skill
     assert "每轮只问一个最小缺口" in skill
     assert "unanswered-questions.xlsx" in skill
-    assert "不能把不同公司、院区、业务或期间合并计算" in skill
+    assert "不能把不同公司、院区、业务或期间合并" in skill
     assert "调研 Skill 不主动触发巡检 Skill" in skill
+
+
+def test_progress_must_run_before_scope_questions_and_project_name_is_not_a_gate():
+    skill = SKILL.read_text(encoding="utf-8")
+    assert "即使用户尚未给出范围，也先只传模块调用" in skill
+    assert "项目名称不是存储度计算前置条件" in skill
+    assert "EXP-002 公司" in skill
+    assert "GL-1-002 核算主体范围" in skill
 
 
 def test_module_materials_cannot_skip_their_builtin_qa_guides():
