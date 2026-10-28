@@ -185,7 +185,8 @@ async def _workflow(workspace, module, connection, *, live=False):
                             "research_id": key["research_id"], "config_item": "仅测试：基础应用",
                             "conclusion": "仅测试夹具：该子项核验基础模块；不构成真实项目调研结论",
                             "scope": "隔离端到端测试夹具", "scope_id": key["scope_id"],
-                            "confirmed_by": "测试夹具", "confirmed_at": datetime.now(timezone.utc).isoformat()}
+                            "confirmed_by": "测试夹具", "confirmed_at": datetime.now(timezone.utc).isoformat(),
+                            "research_complete": True}
                 with pytest.raises(MCPError) as denied:
                     await call("dy_research_record_write", **research, confirmed=False)
                 assert denied.value.code == -32602

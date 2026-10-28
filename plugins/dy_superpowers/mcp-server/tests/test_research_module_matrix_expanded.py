@@ -161,9 +161,9 @@ def test_multiscope_revision_retirement_and_inspection_require_current_confirmed
     root, other_workspace = workspaces
     pairs, matrix_revision, standards, _ = matrix_source(module)
     pair = pairs[0]
-    first_data = payload(module, pair)
+    first_data = dict(payload(module, pair), research_complete=True)
     first = call(root, "dy_research_record_write", **first_data)
-    second_data = payload(module, pair, scope="虚构乙公司/2026年/本期")
+    second_data = dict(payload(module, pair, scope="虚构乙公司/2026年/本期"), research_complete=True)
     second = call(root, "dy_research_record_write", **second_data)
     assert first["scope_id"] != second["scope_id"]
     _, ambiguous = server.execute_tool("dy_module_memory_read", dict(

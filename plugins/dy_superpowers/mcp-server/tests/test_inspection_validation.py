@@ -20,7 +20,7 @@ def report(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     args = dict(module="expense", check_order="1", research_id="01",
                 config_item="应用安装", scope="公司A/本期", conclusion="本期必需", confirmed=True,
-                confirmed_by="顾问", confirmed_at="2026-10-21")
+                confirmed_by="顾问", confirmed_at="2026-10-21", research_complete=True)
     write_record(tmp_path, args)
     research = read_record(tmp_path, "expense", "1", "01")
     matrix = Path(__file__).parents[2] / 'skills/expense-inspection/references/inspection-matrix.md'
@@ -95,6 +95,19 @@ def test_partial_confirmed_research_cannot_back_a_definitive_result(tmp_path, re
 
     result = validate(tmp_path, report)
 
+    assert result['valid'] is False
+    assert any('完整' in error['message'] for error in result['errors'])
+
+
+def test_legacy_research_without_completeness_cannot_back_definitive_result(tmp_path, report):
+    # 重建一条不含完整性字段的合法旧格式记录，不篡改事实源摘要。
+    import dy_superpowers_mcp.research as research_module
+    current = read_record(tmp_path, 'expense', '1', '01')
+    legacy = {key: value for key, value in current.items() if key not in {'research_complete', 'revision'}}
+    path = tmp_path / '.dy_superpowers/modules/expense/research.md'
+    path.write_text('\n'.join(research_module._visible(legacy)), encoding='utf-8')
+    report['records'][0]['research_revision'] = read_record(tmp_path, 'expense', '1', '01')['revision']
+    result = validate(tmp_path, report)
     assert result['valid'] is False
     assert any('完整' in error['message'] for error in result['errors'])
 
@@ -218,7 +231,7 @@ def test_updating_revision_string_does_not_make_old_evidence_current(tmp_path, r
 def test_general_ledger_uses_its_own_original_check_numbers(tmp_path, report):
     write_record(tmp_path, dict(module='general-ledger', check_order='GL-1-001', research_id='01',
                                scope='公司A/本期', conclusion='总账本期必需', confirmed=True,
-                               config_item='应用安装', confirmed_by='顾问', confirmed_at='2026-10-21'))
+                               config_item='应用安装', confirmed_by='顾问', confirmed_at='2026-10-21', research_complete=True))
     research = read_record(tmp_path, 'general-ledger', 'GL-1-001', '01')
     matrix = Path(__file__).parents[2] / 'skills/general-ledger-inspection/references/inspection-matrix.md'
     criterion = next(line.split('|')[2].strip() for line in matrix.read_text().splitlines() if line.startswith('| 01｜'))
@@ -249,7 +262,7 @@ def test_multi_check_matrix_keeps_scope_revision_and_pending_gate_separate(tmp_p
     standards = {order: matrix_standards[str(int(order)), order] for order in ('01', '02')}
     first_args = dict(module='expense', check_order='1', research_id='01', config_item='应用安装',
                       scope='公司A/2026一期', conclusion='费用基础应用纳入一期', confirmed=True,
-                      confirmed_by='顾问', confirmed_at='2026-10-22')
+                      confirmed_by='顾问', confirmed_at='2026-10-22', research_complete=True)
     first, error = server.execute_tool('dy_research_record_write', {
         'trace_id': 'expense-matrix-flow', **first_args,
             'trace_context': {'skill': 'expense-inspection', 'module': 'expense', 'check_order': '1',
@@ -351,6 +364,7 @@ def test_supplemental_research_revision_requires_reinspection(tmp_path, report, 
         'conclusion': '本期覆盖公司A和公司B', 'evidence_ref': '顾问确认纪要#2026-10-22',
         'confirmed': True, 'confirmed_by': '顾问', 'confirmed_at': '2026-10-22',
         'expected_revision': current['revision'],
+        'research_complete': True,
     }, tmp_path)
     assert error is None
     assert updated['revision'] != current['revision']

@@ -442,6 +442,11 @@ def main():
                                     candidates=result)
     print(json.dumps({"module": args.module, "status": source_archive["status"],
                       "path": source_archive["path"], "source_sha256": source_archive["source_sha256"],
+                      "files": {name: f"{source_archive['path']}/{name}.json"
+                                for name in ('manifest', 'candidates', 'coverage', 'issues', 'content')},
+                      "pending": {"candidate_records": result["coverage"]["contains_pending_questions"],
+                                  "source_cells": result["coverage"]["source_pending_cells"],
+                                  "unanswered": len(result["unanswered"])},
                       "source_subitems": result["coverage"]["source_subitems"],
                       "issues": source_archive["coverage"]["unresolved"],
                       "worksheets": len(result["worksheets"]), "attachments": attachments},

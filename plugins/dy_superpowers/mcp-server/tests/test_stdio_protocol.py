@@ -107,6 +107,19 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
                     'trace_id': 'protocol-research-read', 'module': 'expense', 'check_order': '1', 'research_id': '01',
                 })
                 current = json.loads(research.content[0].text)['records'][0]
+                prepared = await session.call_tool('dy_inspection_prepare', {
+                    'trace_id': 'protocol-prepare', 'module': 'expense', 'scope_id': current['scope_id'],
+                    'environment': 'UAT', 'checks': [{'check_order': '1', 'research_id': '01'}],
+                })
+                preparation = json.loads(prepared.content[0].text)
+                assert preparation['items'][0]['readiness'] == 'completeness_unknown'
+                assert preparation['verification']['performed'] is False
+                compact = await session.call_tool('dy_module_memory_read', {
+                    'trace_id': 'protocol-current', 'module': 'expense', 'scope_id': current['scope_id'],
+                    'checks': [{'check_order': '1', 'research_id': '01'}], 'view': 'current',
+                })
+                compact_record = json.loads(compact.content[0].text)['records'][0]
+                assert compact_record['revision'] == current['revision'] and 'history' not in compact_record
                 with pytest.raises(MCPError, match='expected_revision'):
                     await session.call_tool('dy_research_record_write', research_args)
                 retired = await session.call_tool('dy_research_record_write', {

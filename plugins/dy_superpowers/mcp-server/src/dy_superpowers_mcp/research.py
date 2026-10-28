@@ -348,7 +348,8 @@ def write_record(workspace: str | Path, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def read_record(workspace: str | Path, module: str, check_order: str, research_id: str,
-                scope: str | None = None, scope_id: str | None = None) -> dict[str, Any] | None:
+                scope: str | None = None, scope_id: str | None = None, *,
+                include_history: bool = True) -> dict[str, Any] | None:
     for name, value in (("scope", scope), ("scope_id", scope_id)):
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"{name} 必须是非空文本")
@@ -376,14 +377,48 @@ def read_record(workspace: str | Path, module: str, check_order: str, research_i
         return None
     match, value = matches[0]
     _validate_block(match.group(0), value)
-    directory = path.parent
-    history = _read_history(directory, value.get("history", []))
-    return {**value, "history": history, "scope_id": _scope_id(value), "revision": _revision(match.group(0))}
+    return _read_view(value, path.parent, _revision(match.group(0)), include_history)
+
+
+def record_summary(record: dict) -> dict:
+    fields = ('module', 'check_order', 'research_id', 'config_item', 'scope', 'scope_id',
+              'revision', 'status', 'research_complete', 'updated_at', 'history_count')
+    return {field: record[field] for field in fields if field in record}
+
+
+def validate_checks(checks: list[dict] | None) -> set[tuple[str, str]] | None:
+    if checks is None:
+        return None
+    if not isinstance(checks, list) or not 1 <= len(checks) <= 100:
+        raise ValueError('checks 必须包含1至100个检查键')
+    keys = set()
+    for check in checks:
+        if (not isinstance(check, dict) or set(check) != {'check_order', 'research_id'}
+                or any(not isinstance(check[field], str) or not _KEY_PART.fullmatch(check[field])
+                       for field in ('check_order', 'research_id'))):
+            raise ValueError('checks 每项必须提供合法 check_order 和 research_id')
+        key = (check['check_order'], check['research_id'])
+        if key in keys:
+            raise ValueError('checks 检查键不得重复')
+        keys.add(key)
+    return keys
+
+
+def _read_view(value: dict, directory: Path, revision: str, include_history: bool) -> dict:
+    result = {key: item for key, item in value.items() if key != 'history'}
+    result.update(scope_id=_scope_id(value), revision=revision)
+    if include_history:
+        result['history'] = _read_history(directory, value.get('history', []))
+    else:
+        result['history_count'] = len(value.get('history', []))
+    return result
 
 
 def read_module_records(workspace: str | Path, module: str, *, offset: int = 0, limit: int = 100,
-                        scope: str | None = None, scope_id: str | None = None) -> tuple[list[dict[str, Any]], bool]:
+                        scope: str | None = None, scope_id: str | None = None,
+                        include_history: bool = True, checks: list[dict] | None = None) -> tuple[list[dict[str, Any]], bool]:
     module = validate_module(module)
+    keys = validate_checks(checks)
     if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
         raise ValueError("offset 必须是非负整数")
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
@@ -401,8 +436,7 @@ def read_module_records(workspace: str | Path, module: str, *, offset: int = 0, 
         if value is None or value.get("module") != module:
             raise ResearchIntegrityError(block.text)
         _validate_block(block.text, value)
-        records.append({**value, "history": _read_history(path.parent, value.get("history", [])),
-                        "scope_id": _scope_id(value), "revision": _revision(block.text)})
+        records.append({**value, "scope_id": _scope_id(value), "revision": _revision(block.text)})
     if scope is not None or scope_id is not None:
         normalized_scope = _scope_text(scope) if scope is not None else None
         filtered = [record for record in records
@@ -414,5 +448,8 @@ def read_module_records(workspace: str | Path, module: str, *, offset: int = 0, 
         ):
             raise ValueError("scope 与 scope_id 不匹配")
         records = filtered
-    selected = records[offset:offset + limit]
+    if keys is not None:
+        records = [record for record in records if (record['check_order'], record['research_id']) in keys]
+    selected = [_read_view(record, path.parent, record['revision'], include_history)
+                for record in records[offset:offset + limit]]
     return selected, offset + limit < len(records)

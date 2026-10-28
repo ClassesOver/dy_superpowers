@@ -23,11 +23,12 @@ from dy_superpowers_mcp.odoo_jsonrpc import OdooConfigurationError, OdooReadClie
 from dy_superpowers_mcp.wiki_sync import sync_wiki
 from dy_superpowers_mcp.project_wiki import configure_project, stage_wiki
 from dy_superpowers_mcp.knowledge import module_info as knowledge_module_info, search as knowledge_search
-from dy_superpowers_mcp.research import read_module_records, read_record, write_record
+from dy_superpowers_mcp.research import read_module_records, read_record, record_summary, write_record
 from dy_superpowers_mcp.research_progress import calculate_progress, export_unanswered_template
 from dy_superpowers_mcp.reports import export_report_pdf, read_report, save_report
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 from dy_superpowers_mcp.inspection import validate_inspection
+from dy_superpowers_mcp.inspection_prepare import prepare_inspection
 
 
 MEMORY_READ_FILES = [
@@ -146,6 +147,25 @@ def _handle_session_initialize(name: str, arguments: dict, workspace: Path, stor
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
     return context
+
+def _handle_inspection_prepare(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    try:
+        result = prepare_inspection(workspace, arguments['module'], arguments['scope_id'],
+                                    arguments['environment'], checks=arguments.get('checks'),
+                                    previous_records=arguments.get('previous_records'))
+    except ValueError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    event = {'event': 'inspection.prepare', 'operation': 'prepare', 'tool': name, 'status': 'ok',
+             'module': arguments['module'], 'scope_id': arguments['scope_id'],
+             'trace_context': {'module': arguments['module'], 'scope_id': arguments['scope_id'],
+                               'environment': arguments['environment']},
+             'expected_count': result['preparation']['total'],
+             'count': result['preparation']['research_ready'],
+             'result_count': result['preparation']['blocked'], 'span_id': span_id}
+    append_trace(store, arguments['trace_id'], event)
+    record_otel_event(otel_span, event)
+    return result
+
 
 def _handle_inspection_validate(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     result = validate_inspection(workspace, arguments.get('report'))
@@ -488,11 +508,15 @@ def _handle_module_memory_read(name: str, arguments: dict, workspace: Path, stor
     try:
         module = validate_module(arguments['module'])
         has_key = arguments.get('check_order') is not None or arguments.get('research_id') is not None
+        view = arguments.get('view', 'full')
+        if has_key and arguments.get('checks') is not None:
+            raise ValueError('单个检查键与 checks 批量查询不能同时提供')
         if has_key and (not isinstance(arguments.get('check_order'), str) or not isinstance(arguments.get('research_id'), str)):
             raise ValueError('check_order 和 research_id 必须同时提供')
         if has_key:
             result = read_record(workspace, module, arguments['check_order'], arguments['research_id'],
-                                 scope=arguments.get('scope'), scope_id=arguments.get('scope_id'))
+                                 scope=arguments.get('scope'), scope_id=arguments.get('scope_id'),
+                                 include_history=view == 'full')
             records = [result] if result is not None else []
             has_more = False
         else:
@@ -500,11 +524,15 @@ def _handle_module_memory_read(name: str, arguments: dict, workspace: Path, stor
                                                      offset=arguments.get('offset', 0),
                                                      limit=arguments.get('limit', 100),
                                                      scope=arguments.get('scope'),
-                                                     scope_id=arguments.get('scope_id'))
+                                                     scope_id=arguments.get('scope_id'),
+                                                     include_history=view == 'full', checks=arguments.get('checks'))
+        if view == 'summary':
+            records = [record_summary(record) for record in records]
     except ValueError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     result = {'module': module, 'records': records, 'found': bool(records), 'has_more': has_more,
-              'offset': arguments.get('offset', 0), 'limit': arguments.get('limit', 100)}
+              'offset': arguments.get('offset', 0), 'limit': arguments.get('limit', 100),
+              'next_offset': arguments.get('offset', 0) + len(records) if has_more else None}
     event = {'event': 'memory.module.read', 'operation': 'module_memory_read', 'tool': name, 'status': 'ok',
              'module': module, 'found': bool(records), 'result_count': len(records),
              'has_more': has_more, 'memory_file': str(module_memory_path(workspace, module).relative_to(workspace)),
@@ -514,7 +542,8 @@ def _handle_module_memory_read(name: str, arguments: dict, workspace: Path, stor
         event.update({'check_order': record['check_order'], 'research_id': record['research_id'],
                       'check_key': f"{module}:{record['check_order']}:{record['research_id']}",
                       'scope_id': record['scope_id'], 'revision': record['revision'],
-                      'research_status': record['status'], 'history_count': len(record.get('history', []))})
+                      'research_status': record['status'],
+                      'history_count': record.get('history_count', len(record.get('history', [])))})
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
     return result
@@ -523,7 +552,7 @@ def _progress_records(workspace, module, scope, scope_id):
     records = []
     while True:
         page, has_more = read_module_records(workspace, module, offset=len(records), limit=100,
-                                             scope=scope, scope_id=scope_id)
+                                             scope=scope, scope_id=scope_id, include_history=False)
         records.extend(page)
         if not has_more:
             return records
@@ -586,6 +615,23 @@ TOOL_REGISTRY = {
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'source': {'type': 'string', 'enum': ['clear', 'compact', 'fork', 'resume', 'startup']}}},
         _handle_session_initialize,
+    ),
+    'dy_inspection_prepare': (
+        '只读准备同范围巡检：返回当前调研完整性、矩阵标准、阻塞与补问、上次版本的复查原因。准备就绪不等于验收通过，不执行Odoo查询，不保存或沿用旧结果。',
+        {'type': 'object', 'additionalProperties': False,
+         'required': ['trace_id', 'module', 'scope_id', 'environment'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': TRACE_ID_PATTERN.pattern},
+                        'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
+                        'scope_id': {'type': 'string', 'pattern': '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'},
+                        'environment': {'type': 'string', 'maxLength': 128, 'pattern': TRACE_CODE_PATTERN.pattern,
+                                        'description': '与证据 trace_context 一致的稳定环境标识，例如 UAT 或 PROD，不是中文显示名。'},
+                        'checks': {'type': 'array', 'minItems': 1, 'maxItems': 100, 'items': {
+                            'type': 'object', 'additionalProperties': False,
+                            'required': ['check_order', 'research_id'],
+                            'properties': {'check_order': {'type': 'string', 'minLength': 1},
+                                           'research_id': {'type': 'string', 'minLength': 1}}}},
+                        'previous_records': {'type': 'array', 'maxItems': 1000, 'items': {'type': 'object'}}}},
+        _handle_inspection_prepare,
     ),
     'dy_inspection_validate': (
         '校验声明范围内的巡检覆盖、证据引用、当前调研与矩阵版本；不验证证据真实性或授予写入授权。',
@@ -708,15 +754,23 @@ TOOL_REGISTRY = {
         _handle_memory_read,
     ),
     'dy_module_memory_read': (
-        '通过工具读取当前项目指定模块的调研记忆；可按检查键、适用范围和版本读取，不接受任意文件路径。',
+        '读取当前项目指定模块调研记忆；可按检查键、适用范围和版本读取。分页默认 limit=100，最大100；has_more=true 时用返回的 next_offset 继续，保持其他参数不变。无需传 limit=200。不接受任意文件路径。',
         {'type': 'object',
          'required': ['trace_id', 'module'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9_-]{0,63}$'},
                         'check_order': {'type': 'string'}, 'research_id': {'type': 'string'},
+                        'view': {'type': 'string', 'enum': ['current', 'summary', 'full'], 'default': 'full',
+                                 'description': '巡检用 current；目录或进度用 summary；仅审阅历史时用 full。旧调用省略保持完整返回。'},
+                        'checks': {'type': 'array', 'minItems': 1, 'maxItems': 100, 'items': {
+                            'type': 'object', 'additionalProperties': False,
+                            'required': ['check_order', 'research_id'],
+                            'properties': {'check_order': {'type': 'string', 'minLength': 1},
+                                           'research_id': {'type': 'string', 'minLength': 1}}}},
                         'scope': {'type': 'string'}, 'scope_id': {'type': 'string'},
                         'offset': {'type': 'integer', 'minimum': 0},
-                        'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100}}},
+                        'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100, 'default': 100,
+                                  'description': '每页1至100条；省略即100。超限时改用100，不重试相同非法参数。'}}},
         _handle_module_memory_read,
     ),
     'dy_research_progress': (
