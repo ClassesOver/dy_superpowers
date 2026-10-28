@@ -72,14 +72,50 @@ def calculate_progress(module: str, records: list[dict], *, scope: str | None = 
                                      and "research_complete" not in record]}
 
 
+def calculate_routing_progress(module: str, records: list[dict], *, scope: str | None = None,
+                               scope_id: str | None = None) -> dict:
+    """未选范围也可分流；多范围返回独立进度及不扣减答案的通用清单。"""
+    if scope is not None or scope_id is not None:
+        result = calculate_progress(module, records, scope=scope, scope_id=scope_id)
+        if scope is None:
+            result["scope"] = next((record.get("scope") for record in records
+                                    if record.get("module") == module and record.get("scope_id") == scope_id), None)
+        result["scope_mode"] = "selected"
+        return result
+
+    result = calculate_progress(module, [])
+    scope_ids = sorted({record["scope_id"] for record in records if record.get("module") == module})
+    if len(scope_ids) == 1:
+        result = calculate_progress(module, records, scope_id=scope_ids[0])
+        result["scope"] = next(record.get("scope") for record in records
+                               if record.get("module") == module and record["scope_id"] == scope_ids[0])
+        result["scope_mode"] = "selected"
+    elif scope_ids:
+        result["scope_mode"] = "multiple"
+        result["scope_progress"] = []
+        for selected_id in scope_ids:
+            selected = calculate_progress(module, records, scope_id=selected_id)
+            result["scope_progress"].append({
+                "scope_id": selected_id,
+                "scope": next(record.get("scope") for record in records
+                              if record.get("module") == module and record["scope_id"] == selected_id),
+                **{key: selected[key] for key in ("answered", "total", "percentage", "route")},
+            })
+            for field in ("unmapped_records", "completeness_unknown"):
+                result[field].extend(selected[field])
+    else:
+        result["scope_mode"] = "unscoped"
+    return result
+
+
 def export_unanswered_template(workspace: str | Path, module: str, trace_id: str, *,
-                               records: list[dict], scope: str, scope_id: str | None = None,
+                               records: list[dict], scope: str | None = None, scope_id: str | None = None,
                                confirmed: bool) -> dict:
     if confirmed is not True:
         raise PermissionError("导出待补问题清单需要用户明确确认")
     if not isinstance(trace_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", trace_id):
         raise ValueError("trace_id 格式不合法")
-    progress = calculate_progress(module, records, scope=scope, scope_id=scope_id)
+    progress = calculate_routing_progress(module, records, scope=scope, scope_id=scope_id)
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     output_dir = Path(workspace) / ".dy_superpowers" / "research" / module
@@ -105,7 +141,7 @@ def export_unanswered_template(workspace: str | Path, module: str, trace_id: str
         cell.alignment = Alignment(vertical="center", wrap_text=True)
     for item in progress["items"]:
         sheet.append([module, item["check_order"], item["research_id"], item["config_item"],
-                      item["question"], scope, "", "", "", "", ""])
+                      item["question"], progress["scope"] or progress["scope_id"], "", "", "", "", ""])
     widths = [18, 18, 14, 32, 64, 24, 28, 24, 48, 36, 32]
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[chr(64 + index)].width = width
@@ -121,4 +157,5 @@ def export_unanswered_template(workspace: str | Path, module: str, trace_id: str
             output.unlink()
         raise
     return {"module": module, "path": str(output.relative_to(workspace)),
-            "question_count": len(progress["items"]), "scope": scope, "scope_id": scope_id}
+            "question_count": len(progress["items"]), "scope": progress["scope"],
+            "scope_id": progress["scope_id"], "scope_mode": progress["scope_mode"]}

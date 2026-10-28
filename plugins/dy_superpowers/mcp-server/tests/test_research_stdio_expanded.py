@@ -15,6 +15,7 @@ PLUGIN = Path(__file__).parents[2]
 sys.path.insert(0, str(PLUGIN / "mcp-server/src"))
 from dy_superpowers_mcp.inspection import _matrix
 from dy_superpowers_mcp.project_wiki import load_staged
+from dy_superpowers_mcp.research_progress import _guide_items
 from dy_superpowers_mcp.trace import TraceStore
 
 
@@ -44,6 +45,56 @@ def _uninspected_report(module, scope_id):
                         "verified_at": datetime.now(timezone.utc).isoformat(),
                         "evidence_refs": []})
     return {"expected_checks": expected, "excluded_checks": [], "records": records}
+
+
+@pytest.mark.parametrize("module,total", [("expense", 92), ("general-ledger", 82)])
+def test_stdio_scope_optional_routing_and_generic_export(tmp_path, module, total):
+    from openpyxl import load_workbook
+
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    item = _guide_items(module)[0]
+
+    async def exercise():
+        async with stdio_client(_parameters(workspace, tmp_path / "codex")) as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+
+                async def call(name, **arguments):
+                    response = await session.call_tool(name, dict(trace_id="optional-scope", module=module, **arguments))
+                    return json.loads(response.content[0].text)
+
+                empty = await call("dy_research_progress")
+                assert (empty["answered"], empty["total"], empty["route"]) == (0, total, "excel")
+                assert empty["scope_mode"] == "unscoped"
+                assert not (workspace / ".dy_superpowers").exists()
+                with pytest.raises(MCPError, match="明确确认"):
+                    await call("dy_research_unanswered_export", confirmed=False)
+                payload = dict(check_order=item["check_order"], research_id=item["research_id"],
+                               config_item=item["config_item"], conclusion="仅测试：业务已确认，未执行巡检",
+                               research_complete=True, confirmed=True)
+                first = await call("dy_research_record_write", **payload, scope="虚构甲院/本期")
+                single = await call("dy_research_progress")
+                assert single["scope_mode"] == "selected" and single["answered"] == 1
+                assert single["scope_id"] == first["scope_id"]
+                await call("dy_research_record_write", **payload, scope="虚构乙院/本期")
+                path = workspace / ".dy_superpowers/modules" / module / "research.md"
+                before = path.read_bytes()
+                multiple = await call("dy_research_progress")
+                assert multiple["scope_mode"] == "multiple" and multiple["answered"] == 0
+                assert len(multiple["scope_progress"]) == 2
+                assert all(row["answered"] == 1 for row in multiple["scope_progress"])
+                exported = await call("dy_research_unanswered_export", confirmed=True)
+                assert exported["question_count"] == total and exported["scope_id"] is None
+                workbook = load_workbook(workspace / exported["path"], read_only=True)
+                try:
+                    rows = list(workbook.active.iter_rows(min_row=2, values_only=True))
+                    assert len(rows) == total and all(row[5:9] == (None,) * 4 for row in rows)
+                finally:
+                    workbook.close()
+                assert path.read_bytes() == before
+
+    asyncio.run(asyncio.wait_for(exercise(), timeout=30))
 
 
 @pytest.mark.parametrize("module", ["expense", "general-ledger"])

@@ -24,7 +24,7 @@ from dy_superpowers_mcp.wiki_sync import sync_wiki
 from dy_superpowers_mcp.project_wiki import configure_project, stage_wiki
 from dy_superpowers_mcp.knowledge import module_info as knowledge_module_info, search as knowledge_search
 from dy_superpowers_mcp.research import read_module_records, read_record, record_summary, write_record
-from dy_superpowers_mcp.research_progress import calculate_progress, export_unanswered_template
+from dy_superpowers_mcp.research_progress import calculate_routing_progress, export_unanswered_template
 from dy_superpowers_mcp.reports import export_report_pdf, read_report, save_report
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 from dy_superpowers_mcp.inspection import validate_inspection
@@ -564,21 +564,13 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
     try:
         module = validate_module(arguments['module'])
         scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
-        if scope is None and scope_id is None:
-            result = {'module': module, 'scope': None, 'scope_id': None, 'answered': 0,
-                      'total': None, 'percentage': None, 'route': 'needs_scope',
-                      'needs_scope': True, 'items': []}
-            event = {'event': 'research.progress', 'operation': 'calculate_progress', 'tool': name,
-                     'status': 'needs_scope', 'module': module, 'span_id': span_id}
-            append_trace(store, arguments['trace_id'], event)
-            record_otel_event(otel_span, event)
-            return result
         records = _progress_records(workspace, module, scope, scope_id)
-        result = calculate_progress(module, records, scope=scope, scope_id=scope_id)
+        result = calculate_routing_progress(module, records, scope=scope, scope_id=scope_id)
     except ValueError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'research.progress', 'operation': 'calculate_progress', 'tool': name, 'status': 'ok',
-             'module': module, 'scope_id': scope_id, 'answered': result['answered'], 'total': result['total'],
+             'module': module, 'scope_id': result['scope_id'], 'scope_mode': result['scope_mode'],
+             'answered': result['answered'], 'total': result['total'],
              'percentage': result['percentage'], 'route': result['route'], 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
@@ -588,19 +580,17 @@ def _handle_research_unanswered_export(name: str, arguments: dict, workspace: Pa
     try:
         module = validate_module(arguments['module'])
         scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
-        if scope is None and scope_id is None:
-            raise ValueError('必须提供 scope 或 scope_id，避免跨适用范围导出')
         records = _progress_records(workspace, module, scope, scope_id)
-        export_scope = scope or (records[0].get('scope') if records else None) or scope_id or '未提供'
         result = export_unanswered_template(workspace, module, arguments['trace_id'], records=records,
-                                            scope=export_scope, scope_id=scope_id,
+                                            scope=scope, scope_id=scope_id,
                                             confirmed=arguments.get('confirmed'))
     except PermissionError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     except ValueError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'research.unanswered.export', 'operation': 'export_unanswered_template',
-             'tool': name, 'status': 'ok', 'module': module, 'scope_id': scope_id,
+             'tool': name, 'status': 'ok', 'module': module, 'scope_id': result['scope_id'],
+             'scope_mode': result['scope_mode'],
              'question_count': result['question_count'], 'path': result['path'], 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
@@ -774,7 +764,7 @@ TOOL_REGISTRY = {
         _handle_module_memory_read,
     ),
     'dy_research_progress': (
-        '按指定模块和适用范围计算已确认调研子项的存储度；未提供范围时返回 needs_scope，不合并不同范围。低于70%走清单，达到70%走互动问答。',
+        '计算模块调研存储度并直接分流：无范围无记忆按0%走清单，唯一已有范围自动复用；多个范围分别返回scope_progress并走通用清单，不合并答案、不要求前置范围补问。低于70%走清单，达到70%走互动问答。',
         {'type': 'object', 'required': ['trace_id', 'module'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
@@ -782,7 +772,7 @@ TOOL_REGISTRY = {
         _handle_research_progress,
     ),
     'dy_research_unanswered_export': (
-        '用户明确确认后，按固定模板导出指定模块和适用范围内未回答问题的 Excel 清单；不覆盖已有文件。',
+        '用户明确确认后导出模块未回答问题的Excel；范围可省略，唯一已有范围自动复用，无记录或多范围未选择时导出完整通用清单、范围栏留空，不合并答案，不覆盖已有文件。',
         {'type': 'object', 'required': ['trace_id', 'module', 'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
