@@ -13,6 +13,29 @@ sources = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sources)
 
 
+def test_cli_exposes_existing_archive_files_and_pending_counts(tmp_path):
+    from openpyxl import Workbook
+    book = Workbook()
+    sheet = book.active
+    sheet.append(['检查顺序', '配置项', '调研结果'])
+    sheet.append(['GL-1-001', '应用', '01｜已配置，待确认'])
+    path = tmp_path / '调研.xlsx'
+    book.save(path)
+    completed = subprocess.run([sys.executable, str(SCRIPT), str(path), '--module',
+                                'general-ledger', '--workspace', str(tmp_path)],
+                               capture_output=True, text=True, timeout=40)
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result['pending'] == {'candidate_records': 1, 'source_cells': 1, 'unanswered': 0}
+    for name in ('manifest', 'candidates', 'coverage', 'issues', 'content'):
+        target = tmp_path / result['files'][name]
+        assert target.is_file()
+        assert target.parent == tmp_path / result['path']
+    candidates = json.loads((tmp_path / result['files']['candidates']).read_text())
+    assert candidates['records'][0]['conclusion'] == '01｜已配置，待确认'
+    assert '已配置' not in completed.stdout
+
+
 @pytest.mark.parametrize('encoding', ['utf-16', 'utf-32'])
 def test_qa_json_unicode_bom_decodes_strictly(tmp_path, encoding):
     path = tmp_path / '问答.json'

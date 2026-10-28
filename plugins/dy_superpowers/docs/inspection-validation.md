@@ -1,5 +1,9 @@
 # 巡检校验合同
 
+巡检开始或恢复时可先调用 `dy_inspection_prepare(trace_id, module, scope_id, environment)`，可选 `checks` 限定本轮子项、`previous_records` 对照上次依赖。返回 `research_ready/missing/incomplete/completeness_unknown/retired`、验收标准、补问入口及复查原因；该视图不保存事实、不选定验收分支、不自动发问或执行查询。用 `dy_module_memory_read(view="current", checks=[...], scope_id=...)` 批量读取准备项的当前结论；历史按需用 `view="full"` 读取。补充调研确认保存并回读后重新准备，仅依赖已补齐的子项恢复。
+
+明确结果要求当前调研 `status=confirmed` 且显式 `research_complete=true`。缺失完整性字段的旧记录按未知处理，不能默认完整；可报告待确认、未知或未检查，核实要素后再经用户确认修订。调研存储度、调研准备覆盖及实际巡检结果是不同指标。上次结果即使版本一致也不自动算本轮通过，证据真实性与时效性仍须复核。
+
 形成报告前调用插件内 `dy_inspection_validate(trace_id, report)`。它是只读校验，不保存报告或记忆，也不授予业务写入权限。校验后向顾问展示报告与门禁结果；获确认后调用 `dy_inspection_report_save(trace_id, report, confirmed=true)`，工具会重新校验、生成 UTC 时间戳和唯一后缀，并保存到工作区目录 `.dy_superpowers/reports/<module>/<YYYY-MM-DD>/<report-id>.md`。工具返回实际报告编号和路径，后续按响应编号读取；既有报告不覆盖。
 
 保存后的报告面向业务人员：开头先给中文交付结论、范围和数量摘要，随后列出阻塞事项与建议下一步；明细按巡检矩阵中的业务分类展示检查项、优先级、结果和说明。每项的完整验收要求、验证方法及证据引用置于明细后，末尾保留报告编号、校验时间、矩阵版本和完整机器可读 JSON。未提供的责任人和计划完成日期明确标记为待指定，不由工具推测。
@@ -12,7 +16,7 @@
 - `records`：范围内每个子项恰好一条当前结果。未完成项也须记录，不得通过删掉预期项来制造通过；复查历史保留在台账中，不混入当前结果列表。
 - `excluded_checks`：本次范围外的矩阵子项，每项包含同样的范围键和非空 `reason`。对每个模块、范围标识和环境，`expected_checks` 与 `excluded_checks` 的并集必须覆盖当前矩阵全部子项；排除项会随报告保存，便于审阅范围边界。
 
-模块支持 `expense`、`general-ledger`。检查顺序和子项编号必须原样取自领域清单，例如费用 `1 + 01`、总账 `EXP-1-001 + 01`；不要自行统一编号。`scope_id` 沿用调研读取工具的返回值，环境名称须与声明范围一致。每个 `module + scope_id + environment` 分别覆盖完整清单；保存时一次提交单一模块报告。
+模块支持 `expense`、`general-ledger`。检查顺序和子项编号必须原样取自领域清单，例如费用 `1 + 01`、总账 `GL-1-001 + 01`；不要自行统一编号。`scope_id` 沿用调研读取工具的返回值，环境名称须与声明范围一致。每个 `module + scope_id + environment` 分别覆盖完整清单；保存时一次提交单一模块报告。
 
 每条 `records` 除范围字段外，还须包含：
 

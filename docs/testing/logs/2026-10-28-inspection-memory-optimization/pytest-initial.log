@@ -1,0 +1,670 @@
+........................................................................ [ 12%]
+...........................................ss...........ss.............. [ 24%]
+........................................................................ [ 36%]
+........................................................................ [ 49%]
+................FF...................................................... [ 61%]
+........................................................................ [ 73%]
+........................................................................ [ 86%]
+........................................................................ [ 98%]
+........                                                                 [100%]
+=================================== FAILURES ===================================
+_ test_multiscope_revision_retirement_and_inspection_require_current_confirmed_record[expense] _
+
+workspaces = (PosixPath('/tmp/pytest-of-junge/pytest-288/test_multiscope_revision_retir0/项目甲'), PosixPath('/tmp/pytest-of-junge/pytest-288/test_multiscope_revision_retir0/项目乙'))
+module = 'expense'
+
+    @pytest.mark.parametrize("module", ["expense", "general-ledger"])
+    def test_multiscope_revision_retirement_and_inspection_require_current_confirmed_record(workspaces, module):
+        root, other_workspace = workspaces
+        pairs, matrix_revision, standards, _ = matrix_source(module)
+        pair = pairs[0]
+        first_data = payload(module, pair)
+        first = call(root, "dy_research_record_write", **first_data)
+        second_data = payload(module, pair, scope="虚构乙公司/2026年/本期")
+        second = call(root, "dy_research_record_write", **second_data)
+        assert first["scope_id"] != second["scope_id"]
+        _, ambiguous = server.execute_tool("dy_module_memory_read", dict(
+            trace_id="expanded-matrix", module=module, check_order=pair[0], research_id=pair[1]), root)
+        assert ambiguous is not None and ambiguous["code"] == -32602
+        first_record = read(root, module, pair, scope_id=first["scope_id"])["records"][0]
+        second_record = read(root, module, pair, scope_id=second["scope_id"])["records"][0]
+        assert read(root, module, scope=second_data["scope"])["records"] == [second_record]
+        page1 = read(root, module, limit=1)
+        page2 = read(root, module, offset=1, limit=1)
+        assert page1["has_more"] and not page2["has_more"]
+        assert {page1["records"][0]["scope_id"], page2["records"][0]["scope_id"]} == {first["scope_id"], second["scope_id"]}
+
+        before_report = inspection_report(module, pair, first_record, matrix_revision, standards)
+>       assert call(root, "dy_inspection_validate", report=before_report)["valid"]
+E       assert False
+
+plugins/dy_superpowers/mcp-server/tests/test_research_module_matrix_expanded.py:181: AssertionError
+_ test_multiscope_revision_retirement_and_inspection_require_current_confirmed_record[general-ledger] _
+
+workspaces = (PosixPath('/tmp/pytest-of-junge/pytest-288/test_multiscope_revision_retir1/项目甲'), PosixPath('/tmp/pytest-of-junge/pytest-288/test_multiscope_revision_retir1/项目乙'))
+module = 'general-ledger'
+
+    @pytest.mark.parametrize("module", ["expense", "general-ledger"])
+    def test_multiscope_revision_retirement_and_inspection_require_current_confirmed_record(workspaces, module):
+        root, other_workspace = workspaces
+        pairs, matrix_revision, standards, _ = matrix_source(module)
+        pair = pairs[0]
+        first_data = payload(module, pair)
+        first = call(root, "dy_research_record_write", **first_data)
+        second_data = payload(module, pair, scope="虚构乙公司/2026年/本期")
+        second = call(root, "dy_research_record_write", **second_data)
+        assert first["scope_id"] != second["scope_id"]
+        _, ambiguous = server.execute_tool("dy_module_memory_read", dict(
+            trace_id="expanded-matrix", module=module, check_order=pair[0], research_id=pair[1]), root)
+        assert ambiguous is not None and ambiguous["code"] == -32602
+        first_record = read(root, module, pair, scope_id=first["scope_id"])["records"][0]
+        second_record = read(root, module, pair, scope_id=second["scope_id"])["records"][0]
+        assert read(root, module, scope=second_data["scope"])["records"] == [second_record]
+        page1 = read(root, module, limit=1)
+        page2 = read(root, module, offset=1, limit=1)
+        assert page1["has_more"] and not page2["has_more"]
+        assert {page1["records"][0]["scope_id"], page2["records"][0]["scope_id"]} == {first["scope_id"], second["scope_id"]}
+
+        before_report = inspection_report(module, pair, first_record, matrix_revision, standards)
+>       assert call(root, "dy_inspection_validate", report=before_report)["valid"]
+E       assert False
+
+plugins/dy_superpowers/mcp-server/tests/test_research_module_matrix_expanded.py:181: AssertionError
+=============================== warnings summary ===============================
+tests/test_delivery_report.py::test_report_save_writes_validated_report_under_module_directory
+  /home/junge/pros/dypowers/dy_superpowers/plugins/dy_superpowers/mcp-server/.venv/lib/python3.14/site-packages/weasyprint/text/ffi.py:528: DeprecationWarning: HarfBuzz-Subset will be required by future versions of WeasyPrint. Please install this library with your package manager.
+    warnings.warn(
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:55: SyntaxWarning: "\m" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\m"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:299: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:13: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:14: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:15: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:16: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:17: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:18: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:282: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:343: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:390: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:577: SyntaxWarning: "\i" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\i"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:169: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:170: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:171: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:172: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:173: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:174: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:393: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:430: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:521: SyntaxWarning: "\m" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\m"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:676: SyntaxWarning: "\m" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\m"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1050: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:3527: SyntaxWarning: "\(" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\("? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:3537: SyntaxWarning: "\(" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\("? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:3546: SyntaxWarning: "\[" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\["? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:62: SyntaxWarning: "\)" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\)"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:10: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:11: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:12: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:13: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:14: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:15: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:119: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:159: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:277: SyntaxWarning: "\(" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\("? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:287: SyntaxWarning: "\(" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\("? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:296: SyntaxWarning: "\[" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\["? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:82: SyntaxWarning: "\[" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\["? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:8: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:50: SyntaxWarning: "\w" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\w"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:51: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:81: SyntaxWarning: "\w" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\w"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:11: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2582: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:4352: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:4496: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:4498: SyntaxWarning: "\-" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\-"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:4500: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:4502: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1897: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1090: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:867: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:876: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:917: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1316: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1541: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1270: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2153: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2234: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2236: SyntaxWarning: "\-" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\-"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2238: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2240: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:730: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:848: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:857: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1373: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:626: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1201: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:206: SyntaxWarning: "\-" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\-"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:503: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:314: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:472: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:514: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:686: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:376: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:355: SyntaxWarning: "\ " is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\ "? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:268: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:252: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:260: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:236: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:199: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1168: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1665: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:254: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:269: SyntaxWarning: "\_" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\_"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:8415: SyntaxWarning: "\p" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\p"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2598: SyntaxWarning: "\p" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\p"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:894: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:909: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1758: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:1775: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2163: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2178: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2701: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:5110: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:3370: SyntaxWarning: "\c" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\c"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:2358: SyntaxWarning: "\c" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\c"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:286: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:450: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:16: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:17: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:18: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:19: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:20: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:21: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:134: SyntaxWarning: "\s" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\s"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:982: SyntaxWarning: "\{" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\{"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:107: SyntaxWarning: "\[" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\["? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:118: SyntaxWarning: "\[" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\["? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:95: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:206: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:418: SyntaxWarning: "\D" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\D"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:419: SyntaxWarning: "\D" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\D"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:116: SyntaxWarning: "\." is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\."? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:483: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+tests/test_skill_source_claims.py::test_every_claimed_model_exists_in_source
+tests/test_skill_source_claims.py::test_declared_wizards_are_transient_and_others_are_persistent
+tests/test_skill_source_claims.py::test_query_reference_models_exist_in_source
+  <unknown>:749: SyntaxWarning: "\d" is an invalid escape sequence. Such sequences will not work in the future. Did you mean "\\d"? A raw string is also an option.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED plugins/dy_superpowers/mcp-server/tests/test_research_module_matrix_expanded.py::test_multiscope_revision_retirement_and_inspection_require_current_confirmed_record[expense]
+FAILED plugins/dy_superpowers/mcp-server/tests/test_research_module_matrix_expanded.py::test_multiscope_revision_retirement_and_inspection_require_current_confirmed_record[general-ledger]
+2 failed, 578 passed, 4 skipped, 355 warnings in 455.11s (0:07:35)

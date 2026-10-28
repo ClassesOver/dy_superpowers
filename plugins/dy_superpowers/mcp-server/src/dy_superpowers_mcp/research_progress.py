@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from .memory import validate_module
+from .research import record_summary
 
 
 def _guide_items(module: str) -> list[dict[str, str]]:
@@ -64,9 +65,9 @@ def calculate_progress(module: str, records: list[dict], *, scope: str | None = 
     return {"module": module, "scope": scope, "scope_id": scope_id,
             "answered": len(answered), "total": len(items), "percentage": percentage,
             "route": "interactive" if percentage >= 70 else "excel", "items": missing,
-            "unmapped_records": [record for record in selected
+            "unmapped_records": [record_summary(record) for record in selected
                                  if (record.get("check_order"), record.get("research_id")) not in expected],
-            "completeness_unknown": [record for record in selected
+            "completeness_unknown": [record_summary(record) for record in selected
                                      if record.get("status") == "confirmed"
                                      and "research_complete" not in record]}
 
