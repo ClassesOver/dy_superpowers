@@ -14,7 +14,7 @@ import server
 def _records(module, scope_id, answered):
     return [
         {"module": module, "check_order": item["check_order"], "research_id": item["research_id"],
-         "scope": "中心院区", "scope_id": scope_id, "status": "confirmed"}
+         "scope": "中心院区", "scope_id": scope_id, "status": "confirmed", "research_complete": True}
         for item in _guide_items(module)[:answered]
     ]
 
@@ -32,6 +32,15 @@ def test_expense_progress_uses_unique_guide_subitems_and_confirmed_records_only(
     assert progress["answered"] == 64
     assert progress["percentage"] == pytest.approx(64 / 92 * 100)
     assert progress["route"] == "excel"
+
+
+def test_partial_confirmed_record_does_not_count_as_answered():
+    records = _records("expense", "site-a", 1)
+    records[0]["research_complete"] = False
+    progress = calculate_progress("expense", records, scope_id="site-a")
+
+    assert progress["answered"] == 0
+    assert progress["items"][0]["research_id"] == records[0]["research_id"]
 
 
 def test_below_70_percent_exports_but_at_or_above_70_uses_interactive_questions():
@@ -109,7 +118,8 @@ def test_mcp_tools_calculate_scoped_progress_and_require_export_confirmation(tmp
     write_record(workspace, {"module": "expense", "check_order": item["check_order"],
                              "research_id": item["research_id"], "config_item": item["config_item"],
                              "conclusion": "已确认", "scope": "中心院区", "confirmed_by": "test",
-                             "confirmed_at": "2026-01-01", "confirmed": True, "scope_id": "site-a"})
+                             "confirmed_at": "2026-01-01", "confirmed": True, "scope_id": "site-a",
+                             "research_complete": True})
 
     progress, error = server.execute_tool("dy_research_progress", {
         "trace_id": "progress-test", "module": "expense", "scope_id": "site-a"}, workspace)

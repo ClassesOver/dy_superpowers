@@ -156,7 +156,7 @@ def _home_content(registry):
 
 def sync_wiki(workspace, *, confirmed=False):
     if confirmed is not True:
-        raise PermissionError("Wiki 同步是外发动作，需要用户明确确认")
+        raise PermissionError("发布 Wiki 需要用户明确确认")
     import requests
 
     workspace = Path(workspace).resolve()

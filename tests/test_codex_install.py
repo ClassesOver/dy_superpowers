@@ -1,6 +1,8 @@
 """在隔离用户目录中验证 Codex 市场安装，避免复用开发环境。"""
 
 import json
+import queue
+import threading
 import os
 import shutil
 import subprocess
@@ -37,6 +39,43 @@ def test_codex_installs_plugin_from_clean_marketplace(tmp_path):
     inventory = run('list', '--marketplace', 'dy-superpowers')
     assert any(item['name'] == 'dy_superpowers' and item['installed'] and item['enabled']
                for item in inventory['installed'])
+    effective = subprocess.run(['codex', 'mcp', 'get', 'dy-superpowers-odoo', '--json'],
+                               env=env, capture_output=True, text=True, timeout=30)
+    assert effective.returncode == 0, effective.stderr
+    transport = json.loads(effective.stdout)['transport']
+    workspace = tmp_path / 'business-workspace'
+    workspace.mkdir()
+    env['DY_WORKSPACE_ROOT'] = str(workspace)
+    process = subprocess.Popen(['codex', 'app-server', '--stdio'], env=env, cwd=workspace,
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    messages = queue.Queue()
+    errors = []
+    def read_errors():
+        for line in process.stderr:
+            errors.append(line)
+    threading.Thread(target=read_errors, daemon=True).start()
+    def read():
+        for line in process.stdout:
+            messages.put(json.loads(line))
+    threading.Thread(target=read, daemon=True).start()
+    def request(identifier, method, params):
+        process.stdin.write(json.dumps({'id': identifier, 'method': method, 'params': params}) + '\n')
+        process.stdin.flush()
+        while True:
+            message = messages.get(timeout=90)
+            if message.get('id') == identifier:
+                assert 'error' not in message, message.get('error')
+                return message['result']
+    try:
+        request(1, 'initialize', {'clientInfo': {'name': 'plugin-install-test', 'version': '1'}})
+        process.stdin.write(json.dumps({'method': 'initialized'}) + '\n')
+        process.stdin.flush()
+        status = request(2, 'mcpServerStatus/list', {'serverName': 'dy-superpowers-odoo'})
+        entry = next(item for item in status['data'] if item['name'] == 'dy-superpowers-odoo')
+        assert 'dy_research_progress' in entry['tools'], str(entry.get('toolsError')) + '\n' + ''.join(errors[-10:])
+    finally:
+        process.terminate()
+        process.communicate(timeout=10)
 
 
 @pytest.mark.skipif(shutil.which('codex') is None, reason='需要本机 Codex CLI')

@@ -327,9 +327,14 @@ def write_record(workspace: str | Path, data: dict[str, Any]) -> dict[str, Any]:
             scope_id = data.get("scope_id") or (prior_id if isinstance(prior_id, str) and _KEY_PART.fullmatch(prior_id) else _scope_id(data))
         else:
             scope_id = data.get("scope_id") or (_scope_id(prior) if prior else _scope_id(data))
+        if "research_complete" in data:
+            if not isinstance(data["research_complete"], bool):
+                raise ValueError("research_complete 必须是布尔值")
         record.update({"scope_id": scope_id,
                        "evidence_ref": data.get("evidence_ref", ""), "status": status, "history": history,
                        "updated_at": datetime.now(timezone.utc).isoformat()})
+        if "research_complete" in data:
+            record["research_complete"] = data["research_complete"]
         if status == "retired":
             record["retirement_reason"] = data["retirement_reason"]
         block = "\n".join(_visible(record))

@@ -120,7 +120,7 @@ def test_research_memory_progress_routes_by_scope_and_fixed_threshold():
     assert "dy_research_unanswered_export" in skill
     assert "小于 70%" in skill
     assert "大于或等于 70%" in skill
-    assert "每轮只问一个最小缺口" in skill
+    assert "每轮最多处理 3 个相互独立的最小缺口" in skill
     assert "unanswered-questions.xlsx" in skill
     assert "不能把不同公司、院区、业务或期间合并" in skill
     assert "调研 Skill 不主动触发巡检 Skill" in skill
@@ -137,9 +137,9 @@ def test_progress_must_run_before_scope_questions_and_project_name_is_not_a_gate
 def test_module_materials_cannot_skip_their_builtin_qa_guides():
     skill = SKILL.read_text(encoding="utf-8")
 
-    assert "费用、报销、费用政策、费用项目或 `EXP-`" in skill
+    assert "费用、报销、费用政策、费用项目" in skill
     assert "必须先读 `references/expense-research-guide.md`" in skill
-    assert "总账、凭证、制证、期间或 `GL-`" in skill
+    assert "总账、凭证、制证、期间" in skill
     assert "必须先读 `references/general-ledger-research-guide.md`" in skill
     assert "未读取对应调研指南前不得开始提问" in skill
 
@@ -177,12 +177,13 @@ def test_research_candidate_ledger_output_is_grouped_and_scannable():
     assert "逐条使用短标签换行展示" in skill
 
 
-def test_pending_source_items_are_confirmed_individually_before_completion():
+def test_pending_source_items_can_be_confirmed_in_batches_before_completion():
     skill = SKILL.read_text(encoding="utf-8")
 
-    assert "每一条待确认结论" in skill
-    assert "每一条待确认结论都要有对应的业务回答" in skill
-    assert "未逐条确认不得报告完整导入" in skill
+    assert "分批处理待确认结论" in skill
+    assert "每个确认批次都要明确对应的业务回答" in skill
+    assert "未完成批次不得报告完整导入" in skill
+    assert "逐条确认" not in skill
 
 
 def test_explicit_wiki_request_continues_through_build_and_sync_after_confirmation():

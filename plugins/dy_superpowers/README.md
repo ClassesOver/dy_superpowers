@@ -28,6 +28,8 @@ Hook 边界见 [docs/hooks.md](docs/hooks.md)。
 
 ## 启动插件
 
+宿主可通过任务环境提供上述 Odoo/数据库及 Wiki 配置；MCP 仅透传这些明确列出的业务键、工作区和发送人标识，不透传模型密钥或飞书应用密钥。任务环境优先于当前工作区 .env；隔离档案任务由宿主决定允许的业务环境，插件不跨工作区寻找 .env。
+
 先安装 uv 并确保 Codex 启动时可从 PATH 找到它。插件通过 `uv run --frozen --project` 使用随包分发的 `uv.lock` 安装依赖并启动；首次启动需要访问 Python 包源，后续使用本地环境。需要提前准备依赖时，在市场仓库根目录执行：
 
 ```bash
@@ -35,7 +37,7 @@ uv sync --frozen --project plugins/dy_superpowers/mcp-server
 uv run --frozen --project plugins/dy_superpowers/mcp-server python plugins/dy_superpowers/mcp-server/src/server.py
 ```
 
-Codex 通过 `.mcp.json` 的 `${PLUGIN_ROOT}` 定位插件和依赖项目，`--project` 不切换进程工作目录，默认以启动目录作为工作区，并向 stderr 提示；可通过 `DY_WORKSPACE_ROOT=/绝对项目路径` 或服务参数 `--workspace /绝对项目路径` 显式指定，命令行优先。启动时验证目录存在，并拒绝插件安装目录及其子目录。市场安装本身不安装 Python 依赖；标准启动在插件内创建 `.venv`，使用锁定的 MCP 2.x SDK stdio 传输；工具说明、schema 和处理器统一注册，参数错误与内部错误分别保留 `-32602`、`-32603`。缺少 MCP SDK 时会明确报错，不会切换到另一套协议实现。
+Codex 使用插件内相对入口 `./mcp-server/start.sh`，并将服务启动目录固定为插件根目录，不依赖宿主对参数 `${PLUGIN_ROOT}` 的插值。脚本从自身位置定位锁定环境。**启动 Codex 前必须设置 `DY_WORKSPACE_ROOT=/绝对项目路径`**，MCP 显式透传该变量，再从该项目读取 `.env`；不能仅在项目 `.env` 中设置此启动定位变量。不要将变量设为插件目录。直接运行脚本且启动目录是业务项目时，也可保留默认启动目录或传 `--workspace`；命令行优先。启动时验证目录存在，并拒绝插件安装目录及其子目录，未指定安全工作区时明确失败，不把记忆写进插件缓存。市场安装本身不安装 Python 依赖；标准启动在插件内创建 `.venv`，使用锁定的 MCP 2.x SDK stdio 传输；工具说明、schema 和处理器统一注册，参数错误与内部错误分别保留 `-32602`、`-32603`。缺少 MCP SDK 时会明确报错，不会切换到另一套协议实现。
 
 ## 工作区记忆
 

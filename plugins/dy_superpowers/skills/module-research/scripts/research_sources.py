@@ -69,7 +69,13 @@ def parse_xlsx(path: Path) -> dict:
     workbook = load_workbook(path, data_only=False)
     cached = load_workbook(path, data_only=True)
     worksheets, issues, tables = [], [], []  # tables: (表头标签, 行集合)
+    unanswered, pending_locations = [], []
     for ws in workbook:
+        for cells in ws:
+            for cell in cells:
+                if cell.data_type != 'f' and PENDING.search(_text(cell.value)):
+                    pending_locations.append({'sheet': ws.title, 'cell': cell.coordinate,
+                                              'hidden': ws.sheet_state != 'visible' or bool(ws.row_dimensions[cell.row].hidden)})
         merges = [(a.min_row, a.max_row, a.min_col, a.max_col) for a in ws.merged_cells.ranges]
         worksheets.append({"sheet": ws.title, "visibility": ws.sheet_state, "rows": ws.max_row,
                            "columns": ws.max_column, "merged_ranges": len(merges),
@@ -81,6 +87,8 @@ def parse_xlsx(path: Path) -> dict:
         for row in range(1, min(ws.max_row, 20) + 1):
             names = {_text(c.value): c.column for c in ws[row] if c.value is not None}
             conclusion = next((k for k in names if k.startswith(("调研结果", "调研结论"))), None)
+            if conclusion is None and '答案' in names and '调研子项' in names:
+                conclusion = '答案'
             order = next((k for k in ("检查编号", "检查顺序") if k in names), None)
             if conclusion and order and "配置项" in names:
                 header = row, names, conclusion, order
@@ -107,6 +115,11 @@ def parse_xlsx(path: Path) -> dict:
             if not any(_text(ws.cell(row, col).value) for col in names.values()):
                 continue
             value = cell.value
+            if conclusion_label == '答案' and not _text(value):
+                unanswered.append({'check_order': _text(structural(row, names[order_label])),
+                                   'research_id': _text(structural(row, names.get('调研子项'))),
+                                   'locator': {'sheet': ws.title, 'cell': cell.coordinate}})
+                continue
             if cell.data_type == "f":
                 target = cached[ws.title][cell.coordinate].value
                 if target is None:
@@ -127,17 +140,25 @@ def parse_xlsx(path: Path) -> dict:
                                    _text(value), {"sheet": ws.title, "cell": cell.coordinate},
                                    structural(row, names.get("适用条件与不适用边界", 0)) or "",
                                    structural(row, names.get("建议材料 / 验证依据", 0)) or "", hidden=hidden))
+            record = table_rows[-1]
+            if '调研子项' in names:
+                record['research_id'] = _text(structural(row, names['调研子项']))
+            if conclusion_label == '答案':
+                record['scope_fields'] = {label: _text(structural(row, names.get(label)))
+                                          for label in ('适用公司/院区', '适用业务范围', '上线阶段/期间')}
+                record['applicability'] = '；'.join(f'{label}：{value}' for label, value in record['scope_fields'].items() if value)
+                record['suggested_evidence'] = _text(structural(row, names.get('依据/来源')))
+                record['attachment_materials'] = _text(structural(row, names.get('附件/补充材料')))
         tables.append((conclusion_label, table_rows))
     workbook.close()
     cached.close()
-    # 多张结论表（如主表+镜像公式表）时择优：主表用"调研结果"，镜像表用"调研结论"引用。
-    rows = tables[0][1] if len(tables) == 1 else \
-        next((t for label, t in tables if label.startswith("调研结果")),
-             tables[0][1] if tables else [])
+    # 保留每张结果表；镜像或冲突由定位回链核对，不因表头相似而丢弃来源。
+    rows = [record for _label, table in tables for record in table]
     if len(tables) > 1:
         issues.append({"code": "multiple_conclusion_tables", "count": len(tables),
-                       "selected": "调研结果表", "skipped": len(tables) - 1})
-    return {"rows": rows, "worksheets": worksheets, "issues": issues}
+                       "selected": "全部结论表", "skipped": 0})
+    return {"rows": rows, "worksheets": worksheets, "issues": issues,
+            'unanswered': unanswered, 'pending_locations': pending_locations}
 
 
 def parse_docx(path: Path) -> dict:
@@ -364,7 +385,10 @@ def parse_source(path: Path, module: str) -> dict:
             "source_file": path.name, "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "records": extracted["rows"], "worksheets": extracted.get("worksheets", []),
             "issues": extracted.get("issues", []),
+            'unanswered': extracted.get('unanswered', []),
+            'pending_locations': extracted.get('pending_locations', []),
             "coverage": {"source_subitems": len(extracted["rows"]),
+                         'source_pending_cells': len(extracted.get('pending_locations', [])),
                          "contains_pending_questions": sum(r["contains_pending_questions"] for r in extracted["rows"]),
                          "confirmed_written": 0},
             "limitations": "解析候选事实不是业务确认；不自动写 confirmed、不改验收矩阵、不把来源要求当系统现状。"}

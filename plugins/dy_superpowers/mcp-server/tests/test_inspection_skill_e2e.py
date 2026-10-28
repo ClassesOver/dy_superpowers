@@ -64,8 +64,8 @@ def _parameters(workspace, connection):
     env.update(connection)
     env.update(CODEX_HOME=str(workspace / "codex"), DY_WORKSPACE_ROOT=str(workspace))
     return StdioServerParameters(
-        command=config["command"],
-        args=[item.replace("${PLUGIN_ROOT}", str(PLUGIN)) for item in config["args"]],
+        command=str(PLUGIN / config["command"]),
+        args=config["args"],
         cwd=str(workspace), env=env,
     )
 

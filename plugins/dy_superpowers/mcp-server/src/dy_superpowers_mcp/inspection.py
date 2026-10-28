@@ -182,6 +182,8 @@ def validate_inspection(workspace: Path, report: object) -> dict:
                 research = read_record(workspace, record["module"], record["check_order"], record["research_id"], scope_id=record["scope_id"])
                 if research is None or research["status"] != "confirmed":
                     error(f"{path}.research_revision", "调研缺失或范围已停用，必须重新调研确认")
+                elif research.get("research_complete", True) is not True and record.get("result") in DEFINITIVE:
+                    error(f"{path}.research_revision", "调研结论尚未完整，不能支撑明确巡检结果")
                 elif record.get("research_revision") != research["revision"]:
                     error(f"{path}.research_revision", "调研修订已变化，旧结果须重新验证")
                 elif result in DEFINITIVE and verified_at is not None:

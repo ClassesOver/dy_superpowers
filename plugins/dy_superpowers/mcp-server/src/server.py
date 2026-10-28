@@ -282,12 +282,18 @@ def _handle_wiki_build(name: str, arguments: dict, workspace: Path, store: Trace
 
 def _handle_wiki_sync(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     if arguments.get('confirmed') is not True:
-        raise ToolRequestError(-32602, 'wiki 同步是外发动作，需要用户明确确认')
+        raise ToolRequestError(-32602, '发布 Wiki 需要用户明确确认')
     try:
         result = sync_wiki(workspace, confirmed=True)
     # WikiSyncError 是 ValueError 子类；OSError 覆盖清单页面文件缺失等本地读取失败。
     except (ValueError, OSError, PermissionError) as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
+        warning = str(exc)
+        event = {'event': 'wiki.sync', 'operation': 'sync', 'tool': name,
+                 'status': 'warning', 'count': 0, 'result': 'warning',
+                 'warning': warning, 'span_id': span_id}
+        append_trace(store, arguments['trace_id'], event)
+        record_otel_event(otel_span, event)
+        raise ToolRequestError(-32602, warning) from exc
     event = {'event': 'wiki.sync', 'operation': 'sync', 'tool': name,
              'status': 'ok' if result.get('synced') else 'noop',
              'count': result.get('pages', 0), 'result': 'ok' if result.get('synced') else '未知',
@@ -513,6 +519,18 @@ def _handle_module_memory_read(name: str, arguments: dict, workspace: Path, stor
     record_otel_event(otel_span, event)
     return result
 
+def _progress_records(workspace, module, scope, scope_id):
+    records = []
+    while True:
+        page, has_more = read_module_records(workspace, module, offset=len(records), limit=100,
+                                             scope=scope, scope_id=scope_id)
+        records.extend(page)
+        if not has_more:
+            return records
+        if not page:
+            raise ValueError('调研记录分页没有前进，停止计算')
+
+
 def _handle_research_progress(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     try:
         module = validate_module(arguments['module'])
@@ -526,9 +544,7 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
             append_trace(store, arguments['trace_id'], event)
             record_otel_event(otel_span, event)
             return result
-        records, has_more = read_module_records(workspace, module, limit=100, scope=scope, scope_id=scope_id)
-        if has_more:
-            raise ValueError('调研记录超过单次读取上限，无法可靠计算存储度')
+        records = _progress_records(workspace, module, scope, scope_id)
         result = calculate_progress(module, records, scope=scope, scope_id=scope_id)
     except ValueError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
@@ -545,9 +561,7 @@ def _handle_research_unanswered_export(name: str, arguments: dict, workspace: Pa
         scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
         if scope is None and scope_id is None:
             raise ValueError('必须提供 scope 或 scope_id，避免跨适用范围导出')
-        records, has_more = read_module_records(workspace, module, limit=100, scope=scope, scope_id=scope_id)
-        if has_more:
-            raise ValueError('调研记录超过单次读取上限，无法可靠生成清单')
+        records = _progress_records(workspace, module, scope, scope_id)
         export_scope = scope or (records[0].get('scope') if records else None) or scope_id or '未提供'
         result = export_unanswered_template(workspace, module, arguments['trace_id'], records=records,
                                             scope=export_scope, scope_id=scope_id,
@@ -660,7 +674,7 @@ TOOL_REGISTRY = {
         _handle_wiki_build,
     ),
     'dy_wiki_sync': (
-        '用户确认后把已构建的本项目 Wiki 清单发布到 GitLab Wiki：按页面所有权标记和上次同步哈希校验，'
+        '用户明确确认后把已构建的本项目 Wiki 清单发布到 GitLab Wiki：按页面所有权标记和上次同步哈希校验，'
         '维护共享知识库首页的项目目录；不删除远端页面、不覆盖其他项目页面、不推交付物。'
         '需 DY_WIKI_API_URL / DY_WIKI_TOKEN 及目标项目（DY_WIKI_PROJECT_ID 或 DY_WIKI_GROUP_ID+DY_WIKI_PROJECT_NAME）。',
         {'type': 'object',
@@ -828,6 +842,7 @@ TOOL_REGISTRY = {
                         'confirmed': {'type': 'boolean'},
                         'expected_revision': {'type': 'string', 'description': '已有记录必须提供读取版本；冲突时重新读取并确认。'},
                         'scope_id': {'type': 'string', 'description': '稳定范围标识；首次可省略，后续沿用读取值。'},
+                        'research_complete': {'type': 'boolean', 'description': '调研要素和验收依据是否完整；局部确认事实填写 false。'},
                         'status': {'type': 'string', 'enum': ['confirmed', 'retired']},
                         'retirement_reason': {'type': 'string'},
                         'repair': {'type': 'boolean', 'description': '损坏记录经核实并确认后显式修复。'}}},

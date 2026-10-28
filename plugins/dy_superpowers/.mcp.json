@@ -1,8 +1,15 @@
 {
   "mcpServers": {
     "dy-superpowers-odoo": {
-      "command": "uv",
-      "args": ["run", "--frozen", "--project", "${PLUGIN_ROOT}/mcp-server", "python", "${PLUGIN_ROOT}/mcp-server/src/server.py"]
+      "command": "./mcp-server/start.sh",
+      "args": [],
+      "cwd": ".",
+      "startup_timeout_sec": 60,
+      "env_vars": [
+        "DY_WORKSPACE_ROOT", "FEISHU_CODEX_BOT_SENDER_USER_ID",
+        "APP_URL", "APP_USER", "APP_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
+        "DY_WIKI_API_URL", "DY_WIKI_TOKEN", "DY_WIKI_PROJECT_ID", "DY_WIKI_GROUP_ID", "DY_WIKI_PROJECT_NAME"
+      ]
     }
   }
 }
