@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 import server
 from dy_superpowers_mcp.inspection import _matrix, validate_inspection
 from dy_superpowers_mcp.reports import export_report_pdf, save_report
+from dy_superpowers_mcp import reports
+from dy_superpowers_mcp.report_pdf import render_report_pdf
 
 
 def valid_report():
@@ -196,6 +198,45 @@ def test_report_reexport_preserves_saved_validation_and_generation_time(tmp_path
     assert text.count("2020-01-02T03:04:05Z") == 2, "生成时间和技术追溯必须保留原始校验时间"
     assert "1999-01-01T00:00:00Z" not in text
     assert md_path.read_text(encoding="utf-8") == saved_md
+
+
+def test_report_save_removes_markdown_when_pdf_write_fails(tmp_path, monkeypatch):
+    report = valid_report()
+    validation = validate_inspection(tmp_path, report)
+
+    def fail_pdf_write(path, content):
+        raise OSError("simulated PDF write failure")
+
+    monkeypatch.setattr(reports, "_write_new_bytes", fail_pdf_write)
+    with pytest.raises(OSError, match="simulated PDF"):
+        save_report(tmp_path, "expense", report, validation)
+
+    report_dir = tmp_path / ".dy_superpowers/reports/expense"
+    assert not list(report_dir.glob("*.md"))
+    assert not list(report_dir.glob("*.pdf"))
+
+
+def test_pdf_uses_same_business_label_as_markdown(monkeypatch):
+    captured = {}
+
+    class FakeHTML:
+        def __init__(self, *, string):
+            captured["html"] = string
+
+        def write_pdf(self):
+            return b"%PDF-test"
+
+    monkeypatch.setitem(sys.modules, "weasyprint", type("FakeWeasyPrint", (), {"HTML": FakeHTML}))
+    report = {"expected_checks": [], "excluded_checks": [], "records": [{
+        "check_order": "GL-8-026-02", "research_id": "01", "result": "未知",
+        "reason": "待核验",
+    }]}
+    validation = {"gate": "待确认", "coverage": {}, "validated_at": "2026-10-28T00:00:00Z"}
+
+    render_report_pdf("general-ledger", "report-1", report, validation)
+
+    assert "GL-026-02-01" in captured["html"]
+    assert "GL-8-026-02 + 01" not in captured["html"]
 
 
 @pytest.mark.parametrize("replacement", [

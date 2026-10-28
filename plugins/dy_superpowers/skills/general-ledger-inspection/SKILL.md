@@ -13,7 +13,7 @@ description: 在巡检 Odoo 12 HRP 总账交付、科目、账簿、凭证、期
 
 ## 适用范围
 
-- 模块标识 `general-ledger`，调用上下文 `skill=general-ledger-inspection`；检查键原样取自 [总账清单](references/inspection-matrix.md)，如 `EXP-1-001 + 01`。
+- 模块标识 `general-ledger`，调用上下文 `skill=general-ledger-inspection`；检查键原样取自 [总账清单](references/inspection-matrix.md)，如 `GL-1-001 + 01`。
 - 当前支持确认调研、矩阵键校验及 `dy_inspection_*` 正式报告闭环。
 - 依次核对应用与主数据、科目和辅助、岗位与凭证、期间和账簿、财务/预算映射、报表与现金流、月末/年末结转和通用转账、打印归档。预算、机构专项及后期能力按实际制度和交付范围裁剪。
 - 凭证平衡、借贷方向、科目/辅助范围、公司隔离、期间控制、财务/预算关联、报表取数、现金流分类、结转顺序和防重均须对应业务证据；不适用只能豁免相应子项，不能免掉适用的财务结果核验。
@@ -28,6 +28,8 @@ description: 在巡检 Odoo 12 HRP 总账交付、科目、账簿、凭证、期
 ## 调研衔接
 
 调研缺失、过期、冲突或不足以选定验收分支时，按通用流程调用 `module-research`。传原 `trace_id`、检查键、阻塞原因、完整验收标准和已知事实；保存确认结论后按同键及 `scope_id` 回读，只恢复有效 `confirmed` 子项。其他独立子项继续执行。
+
+总账补充调研按 [总账调研 QA 与附件模板](../module-research/references/general-ledger-research-guide.md) 执行。该参考页的提取指引要素用于判断结论是否足以驱动本检查项，附件模板用于收集结构化证据；模板示例不属于项目事实，附件观察也不能替代业务确认。巡检报告引用确认后的检查键、适用范围和验收标准，不把附件全文或未确认字段发布到 Wiki。
 
 ## 源码对照
 

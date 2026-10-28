@@ -196,13 +196,13 @@ def test_updating_revision_string_does_not_make_old_evidence_current(tmp_path, r
 
 
 def test_general_ledger_uses_its_own_original_check_numbers(tmp_path, report):
-    write_record(tmp_path, dict(module='general-ledger', check_order='EXP-1-001', research_id='01',
+    write_record(tmp_path, dict(module='general-ledger', check_order='GL-1-001', research_id='01',
                                scope='公司A/本期', conclusion='总账本期必需', confirmed=True,
                                config_item='应用安装', confirmed_by='顾问', confirmed_at='2026-10-21'))
-    research = read_record(tmp_path, 'general-ledger', 'EXP-1-001', '01')
+    research = read_record(tmp_path, 'general-ledger', 'GL-1-001', '01')
     matrix = Path(__file__).parents[2] / 'skills/general-ledger-inspection/references/inspection-matrix.md'
     criterion = next(line.split('|')[2].strip() for line in matrix.read_text().splitlines() if line.startswith('| 01｜'))
-    key = {**report['expected_checks'][0], 'module': 'general-ledger', 'check_order': 'EXP-1-001', 'scope_id': research['scope_id']}
+    key = {**report['expected_checks'][0], 'module': 'general-ledger', 'check_order': 'GL-1-001', 'scope_id': research['scope_id']}
     record = {**report['records'][0], **key, 'research_revision': research['revision'],
               'acceptance_standard': criterion, 'matrix_revision': hashlib.sha256(matrix.read_bytes()).hexdigest(),
               'verified_at': datetime.now(timezone.utc).isoformat()}
@@ -353,8 +353,8 @@ def test_partial_scope_reports_coverage_and_partial_limitation(tmp_path, report)
     result = validate(tmp_path, report)
     assert result['valid'] is True
     scope = next(key for key in result['coverage'] if key.startswith('expense|'))
-    assert result['coverage'][scope] == {'inspected': 1, 'excluded': 90, 'matrix': 91}
-    assert '部分范围巡检' in result['limitations'] and '1/91' in result['limitations']
+    assert result['coverage'][scope] == {'inspected': 1, 'excluded': 91, 'matrix': 92}
+    assert '部分范围巡检' in result['limitations'] and '1/92' in result['limitations']
 
 
 def test_full_scope_coverage_has_no_partial_limitation(tmp_path, report):
@@ -378,4 +378,4 @@ def test_full_scope_coverage_has_no_partial_limitation(tmp_path, report):
     assert result['valid'] is True
     assert '部分范围巡检' not in result['limitations']
     scope = next(key for key in result['coverage'] if key.startswith('expense|'))
-    assert result['coverage'][scope]['inspected'] == result['coverage'][scope]['matrix'] == 91
+    assert result['coverage'][scope]['inspected'] == result['coverage'][scope]['matrix'] == 92

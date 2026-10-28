@@ -49,27 +49,27 @@ RECIPES = {
          "fields": ["id", "company_id", "state", "expense_period_status"]},
     ],
     "general-ledger": [
-        {"order": "EXP-1-002", "model": "res.company", "domain": [], "fields": ["id"], "expected": r"配置(\d+)个公司"},
-        {"order": "EXP-2-005", "model": "dy.fin.account.structure", "domain": [],
+        {"order": "GL-1-002", "model": "res.company", "domain": [], "fields": ["id"], "expected": r"配置(\d+)个公司"},
+        {"order": "GL-2-005", "model": "dy.fin.account.structure", "domain": [],
          "fields": ["id"], "expected": r"配置(\d+)套结构"},
-        {"order": "EXP-2-006", "model": "dy.fin.account.type", "domain": [], "fields": ["id"], "expected": r"配置(\d+)种科目类型"},
-        {"order": "EXP-2-010", "model": "dy.account.permissions.settings", "domain": [["active", "=", True]],
+        {"order": "GL-2-006", "model": "dy.fin.account.type", "domain": [], "fields": ["id"], "expected": r"配置(\d+)种科目类型"},
+        {"order": "GL-2-010", "model": "dy.account.permissions.settings", "domain": [["active", "=", True]],
          "fields": ["id", "permission_user_ids", "permission_account_ids"], "expected": r"有(\d+)套启用"},
-        {"order": "EXP-3-012", "model": "dy.fin.account.period", "domain": [],
+        {"order": "GL-3-012", "model": "dy.fin.account.period", "domain": [],
          "fields": ["id", "company_id", "state", "date_from", "date_to"], "expected": r"(\d+)个期间记录"},
-        {"order": "EXP-5-016", "model": "dy.fin.account.analytic.plan", "domain": [],
+        {"order": "GL-5-016", "model": "dy.fin.account.analytic.plan", "domain": [],
          "fields": ["id", "company_id", "plan_ids"], "expected": r"已建(\d+)套方案"},
-        {"order": "EXP-6-019", "model": "account.journal", "domain": [["active", "=", True]],
+        {"order": "GL-6-019", "model": "account.journal", "domain": [["active", "=", True]],
          "fields": ["id", "company_id", "account_structure_id", "journal_company_ids"], "expected": r"(\d+)个有效分类账"},
-        {"order": "EXP-6-021", "model": "dy.fin.acc.account.periodicity.voucher", "domain": [],
+        {"order": "GL-6-021", "model": "dy.fin.acc.account.periodicity.voucher", "domain": [],
          "fields": ["id", "company_id", "line_ids"], "expected": r"配置(\d+)个经常性凭证模板"},
-        {"order": "EXP-8-024", "model": "dy.fin.acc.financial.report.item", "domain": [],
+        {"order": "GL-8-024", "model": "dy.fin.acc.financial.report.item", "domain": [],
          "fields": ["id"], "expected": r"配置(\d+)条财务报表项目"},
-        {"order": "EXP-8-027", "model": "dy.fin.account.cash.flow.statement.entry", "domain": [],
+        {"order": "GL-8-027", "model": "dy.fin.account.cash.flow.statement.entry", "domain": [],
          "fields": ["id", "account_structure_id"], "expected": r"配置(\d+)条现金流量表项"},
-        {"order": "EXP-8-028", "model": "dy.fin.cash.flow.mapping", "domain": [],
+        {"order": "GL-8-028", "model": "dy.fin.cash.flow.mapping", "domain": [],
          "fields": ["id", "company_id", "active"], "expected": r"配置(\d+)条现金流映射"},
-        {"order": "EXP-9-029", "model": "account.mapping", "domain": [],
+        {"order": "GL-9-029", "model": "account.mapping", "domain": [],
          "fields": ["id", "company_id"], "expected": r"配置(\d+)条财务与预算科目映射"},
     ],
 }
@@ -422,12 +422,12 @@ def test_scoped_domain_never_uses_unknown_model_as_unbounded_query():
 def test_plan_preserves_extra_source_item_and_does_not_confirm():
     manifest = {"module": "expense", "records": [
         {"check_order": "1", "research_id": "01", "mapped": True, "conclusion": "需要安装，不代表已安装"},
-        {"check_order": "28", "research_id": "03", "source_check_order": "DY-28", "mapped": False},
+        {"check_order": "28", "research_id": "99", "source_check_order": "DY-28", "mapped": False},
     ]}
     plan = build_plan(manifest)
     assert len(plan["unmapped"]) == 1
     assert ("1", "01") in plan["sources"]
-    assert len(plan["standards"]) == 91
+    assert len(plan["standards"]) == 92
     assert "confirmed" not in manifest["records"][0]
 
 

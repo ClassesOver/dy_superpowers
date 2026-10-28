@@ -10,8 +10,14 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
+
+MCP_SRC = Path(__file__).parents[3] / "mcp-server" / "src"
+sys.path.insert(0, str(MCP_SRC))
+
+from dy_superpowers_mcp.source_archive import archive_source
 
 SUBITEM = re.compile(r"^\s*(\d{1,3})\s*[｜|．.、]\s*(.+)$", re.DOTALL)
 PENDING = re.compile(r"待确认|需确认|尚未确认|未签认|待补充|请确认")
@@ -27,6 +33,16 @@ def _text(value) -> str:
     if value is None:
         return ""
     return str(value).replace("\r\n", "\n").strip()
+
+
+def _unicode_text(path: Path) -> str:
+    raw = path.read_bytes()
+    encoding = "utf-8-sig"
+    if raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        encoding = "utf-32"
+    elif raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        encoding = "utf-16"
+    return raw.decode(encoding)
 
 
 def _semantics(text: str) -> dict:
@@ -87,7 +103,8 @@ def parse_xlsx(path: Path) -> dict:
 
         for row in range(header_row + 1, ws.max_row + 1):
             cell = ws.cell(row, names[conclusion_label])
-            if cell.value is None:
+            # 只有实际业务行才校验；格式化空行和普通附件模板不是调研行。
+            if not any(_text(ws.cell(row, col).value) for col in names.values()):
                 continue
             value = cell.value
             if cell.data_type == "f":
@@ -96,6 +113,15 @@ def parse_xlsx(path: Path) -> dict:
                     issues.append({"code": "formula_without_cache", "sheet": ws.title, "cell": cell.coordinate})
                     continue
                 value = target
+            missing = False
+            for label in (order_label, "配置项", conclusion_label):
+                field_value = value if label == conclusion_label else structural(row, names[label])
+                if not _text(field_value):
+                    issues.append({"code": "research_field_missing", "sheet": ws.title,
+                                   "cell": ws.cell(row, names[label]).coordinate, "field": label})
+                    missing = True
+            if missing:
+                continue
             hidden = ws.sheet_state != "visible" or bool(ws.row_dimensions[row].hidden)
             table_rows.append(_row(structural(row, names[order_label]), structural(row, names["配置项"]),
                                    _text(value), {"sheet": ws.title, "cell": cell.coordinate},
@@ -180,7 +206,7 @@ def parse_pdf(path: Path) -> dict:
 
 
 def parse_plain(path: Path) -> dict:
-    text = path.read_text(encoding="utf-8", errors="replace")
+    text = _unicode_text(path)
     lines = text.splitlines()
     # 同时出现“问：”与“答：”结构时按 QA 块解析；否则保持逐行清单模式。
     if any(QUESTION.match(line) for line in lines) and any(ANSWER.match(line) for line in lines):
@@ -276,22 +302,23 @@ def _attachment(value: str, issues: list, base_dir: Path) -> tuple[str, dict | N
     parser = PARSERS.get(path.suffix.lower())
     if parser is None:
         issues.append({"code": "attachment_unsupported_type", "suffix": path.suffix})
-        return value, {"attachment": value, "fetched": False}
+        return str(path), {"attachment": str(path), "local": True, "fetched": False}
     try:
         parsed = parser(path)
     except Exception as exc:  # 损坏文件会抛各类异常；保留引用并记录问题，不中断整批解析。
         issues.append({"code": "attachment_parse_failed", "reason": type(exc).__name__})
-        return str(path), {"attachment": str(path), "fetched": False}
-    issues.extend({"code": "attachment_" + str(item.get("code", "issue"))}
-                  for item in parsed.get("issues", [])[:5])
-    return str(path), {"attachment": str(path), "fetched": True, "parser": path.suffix.lower(),
-                       "rows": len(parsed["rows"]),
+        return str(path), {"attachment": str(path), "local": True, "fetched": False}
+    locations = [row.get("locator") for row in parsed.get("rows", []) if row.get("locator")]
+    return str(path), {"attachment": str(path), "local": True, "fetched": True, "parser": path.suffix.lower(),
+                       "candidate_issues": parsed.get("issues", []),
+                       "rows": len(parsed["rows"]), "locations": locations[:50],
+                       "location_count": len(locations), "locations_truncated": len(locations) > 50,
                        "sample": [row.get("conclusion", "")[:60] for row in parsed["rows"][:5]]}
 
 
 def parse_qa_json(path: Path) -> dict:
     """QA JSON：一个问题 + 一个回答（文本 + 附件链接）；问题映射矩阵键由确认后的 mapping 完成。"""
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(_unicode_text(path))
     items = data.get("items") if isinstance(data, dict) else data
     if not isinstance(items, list):
         raise ValueError("QA JSON 需为对象列表或 {\"items\": [...]}")
@@ -325,8 +352,14 @@ PARSERS = {".xlsx": parse_xlsx, ".docx": parse_docx, ".pdf": parse_pdf,
 def parse_source(path: Path, module: str) -> dict:
     parser = PARSERS.get(path.suffix.lower())
     if parser is None:
-        raise ValueError(f"不支持的来源格式 {path.suffix}；先用文件专用工具转为受支持格式并保留原位置")
-    extracted = parser(path)
+        extracted = {"rows": [], "issues": [{"code": "candidate_reader_unavailable",
+                      "suffix": path.suffix.lower(), "blocking": True}]}
+    else:
+        try:
+            extracted = parser(path)
+        except Exception as exc:
+            extracted = {"rows": [], "issues": [{"code": "candidate_parse_failed",
+                          "error_type": type(exc).__name__, "blocking": True}]}
     return {"schema": "dy-research-source/v1", "module": module,
             "source_file": path.name, "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "records": extracted["rows"], "worksheets": extracted.get("worksheets", []),
@@ -341,15 +374,54 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("--module", required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--force", action="store_true", help="显式创建新的解析轮次并保留历史")
     args = parser.parse_args()
-    if args.output.resolve() == args.source.resolve():
-        parser.error("来源文件只读；输出不能覆盖来源")
+    if not args.workspace.is_dir():
+        parser.error("工作区必须是已存在的目录")
     result = parse_source(args.source, args.module)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"module": args.module, "source_subitems": result["coverage"]["source_subitems"],
-                      "issues": len(result["issues"]), "worksheets": len(result["worksheets"])}, ensure_ascii=False))
+    attachments = []
+    archived_attachments = {}
+    for record in result["records"]:
+        for reference in record.get("detail_refs", []):
+            attachment = reference.get("attachment")
+            if not (reference.get("local") or reference.get("fetched")) or not attachment:
+                if attachment:
+                    attachments.append({"name": Path(urlsplit(attachment).path).name or "remote-reference",
+                                        "status": "not_local", "path": None})
+                continue
+            source = Path(attachment)
+            identity = source.resolve()
+            candidate_issues = reference.pop("candidate_issues", [])
+            if identity not in archived_attachments:
+                archived = archive_source(args.workspace, source, args.module, force=args.force,
+                                          candidates={"issues": candidate_issues})
+                archived_attachments[identity] = archived
+                child_issues = json.loads((args.workspace / archived["path"] / "issues.json").read_text(encoding="utf-8"))
+                result["issues"].extend({**issue, "source_component": "attachment_archive",
+                                         "attachment": source.name,
+                                         "source_sha256": archived["source_sha256"]}
+                                        for issue in child_issues if issue.get("blocking", True))
+            else:
+                archived = archived_attachments[identity]
+            reference.update({"attachment": source.name, "archive_path": archived["path"],
+                              "source_sha256": archived["source_sha256"], "status": archived["status"]})
+            reference.pop("sample", None)
+            attachments.append({"name": source.name, "status": archived["status"],
+                                "path": archived["path"], "issues": archived["coverage"]["unresolved"]})
+    # 同一附件可被多个 QA 引用，但同一阻塞缺口只进入汇总一次。
+    unique_issues = {}
+    for issue in result["issues"]:
+        unique_issues.setdefault(json.dumps(issue, ensure_ascii=False, sort_keys=True), issue)
+    result["issues"] = list(unique_issues.values())
+    source_archive = archive_source(args.workspace, args.source, args.module, force=args.force,
+                                    candidates=result)
+    print(json.dumps({"module": args.module, "status": source_archive["status"],
+                      "path": source_archive["path"], "source_sha256": source_archive["source_sha256"],
+                      "source_subitems": result["coverage"]["source_subitems"],
+                      "issues": source_archive["coverage"]["unresolved"],
+                      "worksheets": len(result["worksheets"]), "attachments": attachments},
+                     ensure_ascii=False))
 
 
 if __name__ == "__main__":

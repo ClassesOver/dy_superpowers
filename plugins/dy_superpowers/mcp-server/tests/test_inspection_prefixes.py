@@ -10,8 +10,9 @@ from dy_superpowers_mcp.reports import _render_report
 @pytest.mark.parametrize('module,order,item,expected', [
     ('expense', '1', '01', r'EXP\-001\-01'),
     ('expense', '28', '03', r'EXP\-028\-03'),
-    ('general-ledger', 'EXP-1-001', '01', r'GL\-001\-01'),
-    ('general-ledger', 'EXP-10-032', '02', r'GL\-032\-02'),
+    ('general-ledger', 'GL-1-001', '01', r'GL\-001\-01'),
+    ('general-ledger', 'GL-10-032', '02', r'GL\-032\-02'),
+    ('general-ledger', 'GL-8-026-02', '01', r'GL\-026\-02\-01'),
 ])
 def test_business_report_uses_domain_prefix_and_keeps_original_keys(module, order, item, expected):
     record = {'module': module, 'check_order': order, 'research_id': item,
@@ -35,6 +36,6 @@ def test_all_current_matrix_keys_have_unique_business_identifiers():
     for module in ('expense', 'general-ledger'):
         for order, item in _matrix(module)[1]:
             labels.append(_check_label(module, {'check_order': order, 'research_id': item}))
-    assert len(labels) == 172
+    assert len(labels) == 174
     assert len(labels) == len(set(labels))
-    assert all(label.startswith(('EXP-', 'GL-')) and ' + ' not in label for label in labels)
+    assert all(label.startswith(('GL-', 'EXP-')) and ' + ' not in label for label in labels)

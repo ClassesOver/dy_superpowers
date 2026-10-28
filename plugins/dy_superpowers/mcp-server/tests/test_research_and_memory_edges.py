@@ -9,7 +9,7 @@ PLUGIN_ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(PLUGIN_ROOT / "mcp-server/src"))
 
 import server
-from dy_superpowers_mcp.research import ResearchIntegrityError, read_record, write_record
+from dy_superpowers_mcp.research import ResearchIntegrityError, read_module_records, read_record, write_record
 
 
 def disable_telemetry(monkeypatch, codex_home: Path):
@@ -122,3 +122,26 @@ def test_read_record_with_scope_and_scope_id_reports_integrity_error_on_corrupte
 
     with pytest.raises(ResearchIntegrityError):
         read_record(workspace, "test-expense", "EXP-1-001", "01", scope="公司A/本期", scope_id="scope-1")
+
+
+def test_read_record_normalizes_scope_when_scope_id_is_also_supplied(tmp_path):
+    workspace = tmp_path / "project"
+    write_record(workspace, research_arguments(scope="公司A / 本期"))
+    saved = read_record(workspace, "test-expense", "EXP-1-001", "01")
+
+    record = read_record(workspace, "test-expense", "EXP-1-001", "01",
+                          scope="公司A/本期", scope_id=saved["scope_id"])
+
+    assert record["conclusion"] == "费用模块本期上线"
+
+
+def test_read_module_records_normalizes_scope_when_scope_id_is_also_supplied(tmp_path):
+    workspace = tmp_path / "project"
+    write_record(workspace, research_arguments(scope="公司A / 本期"))
+    saved = read_record(workspace, "test-expense", "EXP-1-001", "01")
+
+    records, more = read_module_records(workspace, "test-expense", scope="公司A/本期",
+                                        scope_id=saved["scope_id"])
+
+    assert not more
+    assert len(records) == 1 and records[0]["conclusion"] == "费用模块本期上线"
