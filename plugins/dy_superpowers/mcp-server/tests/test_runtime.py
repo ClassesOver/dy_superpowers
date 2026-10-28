@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,32 @@ def test_research_record_write_requires_confirmation(workspace):
     result = call_tool("dy_research_record_write", arguments, workspace)
     assert "error" in result
     assert not (workspace / ".dy_superpowers/modules/expense/research.md").exists()
+
+
+def test_research_write_uses_feishu_sender_and_system_time(workspace, monkeypatch):
+    sender_id = "ou_test_sender"
+    monkeypatch.setenv("FEISHU_CODEX_BOT_SENDER_USER_ID", sender_id)
+    arguments = research_arguments(trace_id="research-metadata-runtime",
+                                   confirmed_by="伪造确认人", confirmed_at="2020-01-01")
+    arguments.pop("confirmed_by")
+    arguments.pop("confirmed_at")
+    saved = call_tool("dy_research_record_write", arguments, workspace)
+    assert "error" not in saved
+
+    read = call_tool(
+        "dy_module_memory_read",
+        {"trace_id": "research-metadata-read", "module": "expense", "check_order": "1", "research_id": "01"},
+        workspace,
+    )
+    record = json.loads(read["result"]["content"][0]["text"])["records"][0]
+    assert record["status"] == "confirmed"
+    assert record["confirmed_by"] == sender_id
+    confirmed_at = datetime.fromisoformat(record["confirmed_at"])
+    assert confirmed_at.tzinfo is not None
+    assert confirmed_at.year >= 2026
+    required = server.TOOL_REGISTRY["dy_research_record_write"][1]["required"]
+    assert "confirmed_by" not in required
+    assert "confirmed_at" not in required
 
 
 def test_research_record_write_rejects_invalid_key_and_date(workspace):

@@ -100,6 +100,46 @@ def test_expense_guidance_routes_qa_and_preserves_material_boundary():
     assert "模板示例" in text and "历史观察" in text
 
 
+def test_module_routes_load_research_guides_before_inspection_matrices():
+    skill = SKILL.read_text(encoding="utf-8")
+    source_section = skill.split("## 调研来源", 1)[1].split("## 费用内置 QA", 1)[0]
+
+    assert (
+        "费用模块：先读取 `references/expense-research-guide.md`，"
+        "再读取 `../expense-inspection/references/inspection-matrix.md`"
+    ) in source_section
+    assert (
+        "总账模块：先读取 `references/general-ledger-research-guide.md`，"
+        "再读取 `../general-ledger-inspection/references/inspection-matrix.md`"
+    ) in source_section
+    assert "先按用户文字和附件内容识别模块" in source_section
+    assert "不能先向用户提出通用项目问题" in source_section
+    assert source_section.index("费用模块：先读取") < source_section.index("读取指南后再从模块指南")
+
+
+def test_research_memory_progress_routes_by_scope_and_fixed_threshold():
+    skill = SKILL.read_text(encoding="utf-8")
+
+    assert "dy_research_progress" in skill
+    assert "dy_research_unanswered_export" in skill
+    assert "小于 70%" in skill
+    assert "大于或等于 70%" in skill
+    assert "每轮只问一个最小缺口" in skill
+    assert "unanswered-questions.xlsx" in skill
+    assert "不能把不同公司、院区、业务或期间合并计算" in skill
+    assert "调研 Skill 不主动触发巡检 Skill" in skill
+
+
+def test_module_materials_cannot_skip_their_builtin_qa_guides():
+    skill = SKILL.read_text(encoding="utf-8")
+
+    assert "费用、报销、费用政策、费用项目或 `EXP-`" in skill
+    assert "必须先读 `references/expense-research-guide.md`" in skill
+    assert "总账、凭证、制证、期间或 `GL-`" in skill
+    assert "必须先读 `references/general-ledger-research-guide.md`" in skill
+    assert "未读取对应调研指南前不得开始提问" in skill
+
+
 def test_expense_source_generic_carrier_subitem_has_exact_matrix_mapping():
     text = (ROOT / "skills/module-research/references/expense-research-guide.md").read_text(encoding="utf-8")
     matrix = _expense_matrix_subitems()
@@ -131,6 +171,30 @@ def test_research_candidate_ledger_output_is_grouped_and_scannable():
     assert "按配置组分节" in skill
     assert "先展示待确认与待业务签认项" in skill
     assert "逐条使用短标签换行展示" in skill
+
+
+def test_pending_source_items_are_confirmed_individually_before_completion():
+    skill = SKILL.read_text(encoding="utf-8")
+
+    assert "每一条待确认结论" in skill
+    assert "每一条待确认结论都要有对应的业务回答" in skill
+    assert "未逐条确认不得报告完整导入" in skill
+
+
+def test_explicit_wiki_request_continues_through_build_and_sync_after_confirmation():
+    skill = SKILL.read_text(encoding="utf-8")
+
+    assert "用户明确要求写入 Wiki" in skill
+    assert "dy_project_configure" in skill
+    assert "dy_wiki_build" in skill
+    assert "dy_wiki_sync" in skill
+    assert "确认结论写入记忆并回读成功后" in skill
+    assert "不重复询问是否保存" in skill
+    assert "本次明确要求写入 Wiki 即作为外发确认" in skill
+    assert "构建预览后，Wiki 外发同步仍须单独确认" not in skill
+    assert "不追问确认人或日期" in skill
+    assert "FEISHU_CODEX_BOT_SENDER_USER_ID" in skill
+    assert "系统时间" in skill
 
 
 

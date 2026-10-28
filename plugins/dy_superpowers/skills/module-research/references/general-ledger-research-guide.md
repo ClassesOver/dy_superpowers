@@ -838,7 +838,7 @@
 如有明细，请按“附件：模板名称”提供文件；助手会完整解析文件并回链工作表/单元格。
 ```
 
-回答整理为以下字段后，必须先向用户展示候选结论、适用范围、证据和待补充项，并询问是否确认保存：`module`、`check_order`、`research_id`、`config_item`、`conclusion`、`scope`、`evidence_ref`、`confirmed_by`、`confirmed_at`。用户未明确确认前，只保留候选结论或待办，不调用 `dy_research_record_write`，不得标记为 `confirmed`。用户明确确认后，才调用 `dy_research_record_write(trace_id, ..., confirmed=true)`；附件定位写入 `evidence_ref`，包含脱敏文件名、工作表/页码和行列范围；多个来源以分号分隔，不另传未定义字段。已有记录沿用 `scope_id` 并传入最新 `expected_revision`，再用 `dy_module_memory_read` 按相同检查键和 `scope_id` 回读，核对附件定位没有丢失。
+回答整理为以下字段后，必须先向用户展示候选结论、适用范围、证据和待补充项，并询问是否确认保存：`module`、`check_order`、`research_id`、`config_item`、`conclusion`、`scope`、`evidence_ref`。用户未明确确认前，只保留候选结论或待办，不调用 `dy_research_record_write`，不得标记为 `confirmed`。用户明确确认后，才调用 `dy_research_record_write(trace_id, ..., confirmed=true)`；MCP 自动将当前 `FEISHU_CODEX_BOT_SENDER_USER_ID` 与系统时间写入记录元数据。附件定位写入 `evidence_ref`，包含脱敏文件名、工作表/页码和行列范围；多个来源以分号分隔，不另传未定义字段。已有记录沿用 `scope_id` 并传入最新 `expected_revision`，再用 `dy_module_memory_read` 按相同检查键和 `scope_id` 回读，核对附件定位没有丢失。
 
 ### 从调研结论构建 Wiki
 

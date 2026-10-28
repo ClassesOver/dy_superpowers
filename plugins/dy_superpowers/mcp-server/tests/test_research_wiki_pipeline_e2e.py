@@ -96,7 +96,8 @@ def _gitlab_mock(monkeypatch, state):
 async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
     workspace = tmp_path / "project"
     workspace.mkdir()
-    env = {"CODEX_HOME": str(tmp_path / "codex"), "DY_WORKSPACE_ROOT": str(workspace)}
+    env = {"CODEX_HOME": str(tmp_path / "codex"), "DY_WORKSPACE_ROOT": str(workspace),
+           "FEISHU_CODEX_BOT_SENDER_USER_ID": "ou-e2e-sender"}
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     config = json.loads((PLUGIN / ".mcp.json").read_text())["mcpServers"]["dy-superpowers-odoo"]
@@ -145,8 +146,7 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
             research = {"module": "expense", "check_order": candidate["check_order"],
                         "research_id": candidate["research_id"], "config_item": "应用安装",
                         "scope": candidate["scope"], "conclusion": candidate["conclusion"],
-                        "evidence_ref": f"{source.name}#Q1；附件：{attachment}",
-                        "confirmed_by": "E2E QA 答复人", "confirmed_at": "2026-10-24"}
+                        "evidence_ref": f"{source.name}#Q1；附件：{attachment}"}
             assert await call("dy_research_record_write", {**research, "confirmed": False}, expect_error=True) is None
             saved = json.loads(await call("dy_research_record_write", {**research, "confirmed": True}))
             record = json.loads(await call("dy_module_memory_read",
@@ -197,7 +197,8 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
             assert source.name in re.sub(r"\\(.)", r"\1", topic_content)
             assert Path(attachment).name in re.sub(r"\\(.)", r"\1", topic_content)
             assert str(tmp_path) not in re.sub(r"\\(.)", r"\1", topic_content)
-            assert research["confirmed_by"] in topic_content
+            assert "ou-e2e-sender" in topic_content
+            assert "本次记录操作人/写入时间" in topic_content
 
             # 6) GitLab 发布：确认门禁 → 清单页 + 共享首页注册表 → 二次同步幂等。
             #    同进程调用以便注入 mock GitLab（跨进程 monkeypatch 无效）；协议层已由
