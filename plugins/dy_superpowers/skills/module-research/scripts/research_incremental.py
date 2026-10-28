@@ -22,7 +22,7 @@ sys.path.insert(0, str(SCRIPTS.parents[2] / "mcp-server" / "src"))
 from research_sources import parse_source  # noqa: E402
 from dy_superpowers_mcp.memory import validate_module  # noqa: E402
 from dy_superpowers_mcp.research import _scope_text, read_module_records  # noqa: E402
-from dy_superpowers_mcp.storage import atomic_write  # noqa: E402
+from dy_superpowers_mcp.storage import atomic_write, record_lock  # noqa: E402
 
 # 只剥离行首“01｜”子项编号；SUBITEM 正则匹配整行，不能直接用于去前缀。
 SUBITEM_PREFIX = re.compile(r"^\s*\d{1,3}\s*[｜|．.、]\s*")
@@ -30,6 +30,31 @@ SUBITEM_PREFIX = re.compile(r"^\s*\d{1,3}\s*[｜|．.、]\s*")
 
 def _strip_subitem(conclusion: str) -> str:
     return SUBITEM_PREFIX.sub("", conclusion or "", count=1).strip()
+
+
+def _evidence_ref(row: dict) -> str:
+    """保留附件文件名及解析器提供的页/表/单元格定位，避免只回链整份附件。"""
+    base = (row.get("suggested_evidence") or "").strip()
+    locations = []
+    for ref in row.get("detail_refs") or []:
+        for locator in ref.get("locations") or []:
+            if not isinstance(locator, dict):
+                continue
+            parts = []
+            for key in ("sheet", "page", "line", "table_row", "cell"):
+                if locator.get(key) not in (None, ""):
+                    parts.append(f"{key}={locator[key]}")
+            if parts:
+                locations.append("/".join(parts))
+    if locations:
+        suffix = "；定位：" + ",".join(dict.fromkeys(locations))
+        truncated = sum(max(0, (ref.get("location_count") or len(ref.get("locations") or []))
+                            - len(ref.get("locations") or []))
+                        for ref in row.get("detail_refs") or [] if ref.get("locations_truncated"))
+        if truncated:
+            suffix += f"；另有{truncated}条附件定位未展开"
+        return base + suffix if base else suffix.removeprefix("；")
+    return base
 
 MATRIX_MODULES = {"expense", "general-ledger"}
 SOURCE_HINTS = {
@@ -133,7 +158,7 @@ def _matches_source(current: dict, row: dict) -> bool:
     """分类与回读登记使用同一组结论、状态、依据和配置项比较。"""
     return (current["conclusion"] == _strip_subitem(row.get("conclusion") or "")
             and current["status"] == "confirmed"
-            and current.get("evidence_ref", "") == (row.get("suggested_evidence") or "")
+            and current.get("evidence_ref", "") == _evidence_ref(row)
             and current["config_item"] == (row.get("config_item") or ""))
 
 
@@ -169,7 +194,7 @@ def classify(workspace: Path, module: str, candidates: list[dict], *, default_sc
         conclusion = _strip_subitem(row.get("conclusion") or "")
         entry = {"check_order": order, "research_id": research_id,
                  "config_item": row.get("config_item") or "", "scope": scope,
-                 "conclusion": conclusion, "evidence_ref": row.get("suggested_evidence") or "",
+                 "conclusion": conclusion, "evidence_ref": _evidence_ref(row),
                  "locator": row.get("locator")}
         matched = next((r for r in current if _scope_text(r["scope"]) == _scope_text(scope)), None)
         if matched is None:
@@ -243,12 +268,13 @@ def record_import(workspace: Path, module: str, source_name: str, source_sha256:
             problems.append({**removed, "reason": "来源移除项尚未由业务确认停用为 retired，不能推进台账；不自动停用"})
     if problems:
         return {"recorded": False, "problems": problems}
-    ledger = load_ledger(workspace, module)
-    ledger.append({"source_name": source_name, "source_sha256": source_sha256,
-                   "imported_at": datetime.now(timezone.utc).isoformat(), "keys": keys})
     path = ledger_path(workspace, module)
     path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(path, json.dumps(ledger, ensure_ascii=False, indent=2) + "\n")
+    with record_lock(path):
+        ledger = load_ledger(workspace, module)
+        ledger.append({"source_name": source_name, "source_sha256": source_sha256,
+                       "imported_at": datetime.now(timezone.utc).isoformat(), "keys": keys})
+        atomic_write(path, json.dumps(ledger, ensure_ascii=False, indent=2) + "\n")
     return {"recorded": True, "keys": len(keys)}
 
 

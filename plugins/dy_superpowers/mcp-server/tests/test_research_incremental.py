@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,47 @@ def test_first_import_all_new_then_record(tmp_path):
     assert recorded["recorded"] and recorded["keys"] == 2
     ledger = json.loads(ri.ledger_path(workspace, "expense").read_text(encoding="utf-8"))
     assert len(ledger) == 1 and ledger[0]["source_name"] == "v1.txt" and len(ledger[0]["keys"]) == 2
+
+
+def test_concurrent_import_registration_preserves_both_ledger_entries(tmp_path, monkeypatch):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    barrier = threading.Barrier(2)
+    load = ri.load_ledger
+
+    def synchronized_load(*args):
+        ledger = load(*args)
+        try:
+            barrier.wait(timeout=0.2)
+        except threading.BrokenBarrierError:
+            pass
+        return ledger
+
+    monkeypatch.setattr(ri, "load_ledger", synchronized_load)
+    results = []
+    workers = [threading.Thread(target=lambda name=name: results.append(
+        ri.record_import(workspace, "expense", name, name, []))) for name in ("a.txt", "b.txt")]
+
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=2)
+
+    ledger = json.loads(ri.ledger_path(workspace, "expense").read_text(encoding="utf-8"))
+    assert len(results) == 2 and all(result["recorded"] for result in results)
+    assert {entry["source_name"] for entry in ledger} == {"a.txt", "b.txt"}
+
+
+def test_evidence_reference_discloses_truncated_attachment_locations():
+    row = {"detail_refs": [{
+        "locations": [{"sheet": "明细", "cell": f"A{index}"} for index in range(1, 51)],
+        "location_count": 51,
+        "locations_truncated": True,
+    }]}
+
+    evidence = ri._evidence_ref(row)
+
+    assert "另有1条附件定位未展开" in evidence
 
 
 def test_reimport_same_source_is_noop(tmp_path):
@@ -154,7 +196,7 @@ def test_pending_source_template_is_blocked_instead_of_classified_as_new(tmp_pat
     workspace = tmp_path / "ws"
     workspace.mkdir()
     candidate = {
-        "check_order": "EXP-1-001", "research_id": "01", "config_item": "应用安装",
+        "check_order": "GL-1-001", "research_id": "01", "config_item": "应用安装",
         "conclusion": "基础应用本期必需【待确认】", "applicability": "适用于所有本期公司",
         "contains_pending_questions": True,
         "locator": {"sheet": "总账调研清单", "cell": "G4"},
@@ -171,7 +213,7 @@ def test_checklist_applicability_is_not_used_as_record_scope(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
     candidate = {
-        "check_order": "EXP-1-001", "research_id": "01", "config_item": "应用安装",
+        "check_order": "GL-1-001", "research_id": "01", "config_item": "应用安装",
         "conclusion": "基础应用本期必需。", "applicability": "适用于所有本期总账公司。",
         "contains_pending_questions": False,
         "locator": {"sheet": "总账调研清单", "cell": "G4"},
@@ -239,6 +281,7 @@ def test_qa_json_parse_attachments_and_incremental_flow(tmp_path, capsys, monkey
     assert link_row["detail_refs"][0]["fetched"] is False
     assert local_row["detail_refs"][0]["fetched"] is True
     assert local_row["detail_refs"][0]["rows"] == 1
+    assert local_row["detail_refs"][0]["locations"] == [{"line": 2}]
     assert any(i["code"] == "attachment_rejected" for i in parsed["issues"])
 
     # 无映射：全部阻塞，不得猜测检查键
@@ -257,6 +300,7 @@ def test_qa_json_parse_attachments_and_incremental_flow(tmp_path, capsys, monkey
     assert [item["research_id"] for item in result["new"]] == ["01", "01"]
     assert result["new"][0]["evidence_ref"].startswith("https://gitlab.example.com")
     assert "attachment.txt" in result["new"][1]["evidence_ref"]
+    assert "line=2" in result["new"][1]["evidence_ref"]
 
     _write_all(workspace, result["new"])
     recorded = ri.record_import(workspace, "expense", qa.name, parsed["source_sha256"],

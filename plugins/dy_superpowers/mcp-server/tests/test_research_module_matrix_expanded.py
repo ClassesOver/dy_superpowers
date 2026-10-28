@@ -19,7 +19,7 @@ from dy_superpowers_mcp.memory import module_memory_path
 
 
 PLUGIN = Path(__file__).parents[2]
-EXPECTED_COUNTS = {"expense": 92, "general-ledger": 81}
+EXPECTED_COUNTS = {"expense": 92, "general-ledger": 82}
 
 
 @cache

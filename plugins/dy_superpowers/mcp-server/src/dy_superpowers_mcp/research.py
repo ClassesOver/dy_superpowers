@@ -349,8 +349,10 @@ def read_record(workspace: str | Path, module: str, check_order: str, research_i
     path = module_memory_path(workspace, module)
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     candidates = list(_matching(text, module, check_order, research_id)) if scope is not None and scope_id is not None else None
+    normalized_scope = _scope_text(scope) if scope is not None else None
     matches = ([(match, value) for match, value in candidates
-                if value is not None and value.get("scope") == scope and _scope_id(value) == scope_id]
+                if value is not None and _scope_text(value.get("scope", "")) == normalized_scope
+                and _scope_id(value) == scope_id]
                if candidates is not None else
                list(_matching(text, module, check_order, research_id, scope, scope_id)))
     if candidates is not None and not matches:
@@ -358,7 +360,8 @@ def read_record(workspace: str | Path, module: str, check_order: str, research_i
         if corrupted:
             # 损坏块与单参路径同样抛完整性错误，提示修复而不是误报缺失。
             _validate_block(corrupted[0].group(0), None)
-        if any(value is not None and (value.get("scope") == scope or _scope_id(value) == scope_id)
+        if any(value is not None and (_scope_text(value.get("scope", "")) == normalized_scope
+                                     or _scope_id(value) == scope_id)
                for _, value in candidates):
             raise ValueError("scope 与 scope_id 不匹配")
     if len(matches) > 1:
@@ -395,11 +398,13 @@ def read_module_records(workspace: str | Path, module: str, *, offset: int = 0, 
         records.append({**value, "history": _read_history(path.parent, value.get("history", [])),
                         "scope_id": _scope_id(value), "revision": _revision(block.text)})
     if scope is not None or scope_id is not None:
+        normalized_scope = _scope_text(scope) if scope is not None else None
         filtered = [record for record in records
-                    if (scope is None or record["scope"] == scope)
+                    if (scope is None or _scope_text(record.get("scope", "")) == normalized_scope)
                     and (scope_id is None or record["scope_id"] == scope_id)]
         if not filtered and scope is not None and scope_id is not None and any(
-            record["scope"] == scope or record["scope_id"] == scope_id for record in records
+            _scope_text(record.get("scope", "")) == normalized_scope or record["scope_id"] == scope_id
+            for record in records
         ):
             raise ValueError("scope 与 scope_id 不匹配")
         records = filtered

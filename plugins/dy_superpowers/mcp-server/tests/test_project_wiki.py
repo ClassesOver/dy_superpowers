@@ -43,7 +43,7 @@ def run(tool, args, ws):
     return server.execute_tool(tool, {"trace_id": "project-wiki", **args}, ws)
 
 
-@pytest.mark.parametrize(("module", "order"), [("expense", "1"), ("general-ledger", "EXP-1-001")])
+@pytest.mark.parametrize(("module", "order"), [("expense", "1"), ("general-ledger", "GL-1-001")])
 def test_topic_page_retains_check_identifier(tmp_path, module, order):
     workspace = _workspace(tmp_path, [_record(module=module, check_order=order)])
     pages = build_bundle(workspace)["pages"]

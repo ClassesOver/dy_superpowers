@@ -64,9 +64,11 @@ def _check_label(module: str, record: dict) -> str:
     """统一业务编号；原始键仍留在机器数据中以关联调研和 trace。"""
     order = str(record.get("check_order", ""))
     item = str(record.get("research_id", ""))
-    pattern = r"(\d+)" if module == "expense" else r"EXP-\d+-(\d+)"
+    pattern = r"(\d+)" if module == "expense" else r"GL-\d+-(\d+(?:-\d+)*)"
     match = re.fullmatch(pattern, order)
     if module in _CHECK_PREFIXES and match and re.fullmatch(r"\d+", item):
+        if module == "general-ledger":
+            return f"GL-{match[1]}-{int(item):02d}"
         return f"{_CHECK_PREFIXES[module]}-{int(match[1]):03d}-{int(item):02d}"
     return f"{order} + {item}"
 
@@ -234,8 +236,20 @@ def save_report(workspace: str | Path, module: str, report: dict, validation: di
                                   generated_at=validation.get("validated_at", ""))  # 先渲染，失败时不落盘任何交付物
     if path.is_symlink() or pdf_path.is_symlink():
         raise ValueError("巡检报告文件不允许使用符号链接")
-    _write_new_file(path, content)
-    _write_new_bytes(pdf_path, pdf_bytes)
+    markdown_written = False
+    pdf_written = False
+    try:
+        _write_new_file(path, content)
+        markdown_written = True
+        _write_new_bytes(pdf_path, pdf_bytes)
+        pdf_written = True
+    except Exception:
+        # 报告是 Markdown/PDF 成对交付物；失败时清理本次调用已创建的文件。
+        if markdown_written:
+            path.unlink(missing_ok=True)
+        if pdf_written:
+            pdf_path.unlink(missing_ok=True)
+        raise
     return report_id, path, pdf_path
 
 

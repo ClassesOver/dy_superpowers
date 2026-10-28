@@ -196,13 +196,13 @@ def test_updating_revision_string_does_not_make_old_evidence_current(tmp_path, r
 
 
 def test_general_ledger_uses_its_own_original_check_numbers(tmp_path, report):
-    write_record(tmp_path, dict(module='general-ledger', check_order='EXP-1-001', research_id='01',
+    write_record(tmp_path, dict(module='general-ledger', check_order='GL-1-001', research_id='01',
                                scope='公司A/本期', conclusion='总账本期必需', confirmed=True,
                                config_item='应用安装', confirmed_by='顾问', confirmed_at='2026-10-21'))
-    research = read_record(tmp_path, 'general-ledger', 'EXP-1-001', '01')
+    research = read_record(tmp_path, 'general-ledger', 'GL-1-001', '01')
     matrix = Path(__file__).parents[2] / 'skills/general-ledger-inspection/references/inspection-matrix.md'
     criterion = next(line.split('|')[2].strip() for line in matrix.read_text().splitlines() if line.startswith('| 01｜'))
-    key = {**report['expected_checks'][0], 'module': 'general-ledger', 'check_order': 'EXP-1-001', 'scope_id': research['scope_id']}
+    key = {**report['expected_checks'][0], 'module': 'general-ledger', 'check_order': 'GL-1-001', 'scope_id': research['scope_id']}
     record = {**report['records'][0], **key, 'research_revision': research['revision'],
               'acceptance_standard': criterion, 'matrix_revision': hashlib.sha256(matrix.read_bytes()).hexdigest(),
               'verified_at': datetime.now(timezone.utc).isoformat()}

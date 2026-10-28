@@ -13,7 +13,7 @@ description: 在巡检 Odoo 12 HRP 总账交付、科目、账簿、凭证、期
 
 ## 适用范围
 
-- 模块标识 `general-ledger`，调用上下文 `skill=general-ledger-inspection`；检查键原样取自 [总账清单](references/inspection-matrix.md)，如 `EXP-1-001 + 01`。
+- 模块标识 `general-ledger`，调用上下文 `skill=general-ledger-inspection`；检查键原样取自 [总账清单](references/inspection-matrix.md)，如 `GL-1-001 + 01`。
 - 当前支持确认调研、矩阵键校验及 `dy_inspection_*` 正式报告闭环。
 - 依次核对应用与主数据、科目和辅助、岗位与凭证、期间和账簿、财务/预算映射、报表与现金流、月末/年末结转和通用转账、打印归档。预算、机构专项及后期能力按实际制度和交付范围裁剪。
 - 凭证平衡、借贷方向、科目/辅助范围、公司隔离、期间控制、财务/预算关联、报表取数、现金流分类、结转顺序和防重均须对应业务证据；不适用只能豁免相应子项，不能免掉适用的财务结果核验。

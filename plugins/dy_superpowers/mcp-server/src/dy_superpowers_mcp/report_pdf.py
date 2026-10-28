@@ -11,7 +11,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from .reports import _category_index, _text
+from .reports import _category_index, _check_label, _text
 
 _MODULE_NAMES = {"expense": "费用", "general-ledger": "总账"}
 _STATUSES = ("通过", "部分通过", "不通过", "不适用", "待确认", "未检查", "未知")
@@ -123,7 +123,7 @@ def render_report_pdf(module: str, report_id: str, report: dict, validation: dic
             for record in items:
                 metadata = category_index.get(record.get("check_order", ""), {})
                 parts.append("<tr>"
-                             + f"<td>{_esc(record.get('check_order', ''))} + {record.get('research_id', '')}</td>"
+                             + f"<td>{_esc(_check_label(module, record))}</td>"
                              + f"<td>{_esc(metadata.get('item', '—'))}</td><td>{_esc(metadata.get('priority', '—'))}</td>"
                              + f"<td>{_result_span(record.get('result', '未知'))}</td>"
                              + f"<td>{_esc(record.get('reason', '') or '—')}</td></tr>")
@@ -136,7 +136,7 @@ def render_report_pdf(module: str, report_id: str, report: dict, validation: dic
     for record in records:
         if record.get("result") in {"不通过", "部分通过", "待确认", "未检查", "未知"}:
             reason = _text(record.get("reason", "")).strip() or "未提供原因"
-            blockers.setdefault(reason, []).append(f"{record.get('check_order', '')}+{record.get('research_id', '')}")
+            blockers.setdefault(reason, []).append(_check_label(module, record))
     if blockers:
         parts.append("<ol>")
         parts.extend(f"<li><b>待处理（影响 {len(ids)} 项）</b>：{_esc(reason)}</li>" for reason, ids in blockers.items())

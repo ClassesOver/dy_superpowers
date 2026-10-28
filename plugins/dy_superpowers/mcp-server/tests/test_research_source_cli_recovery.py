@@ -31,7 +31,7 @@ def test_blank_template_rows_do_not_become_missing_required_issues(tmp_path):
     from openpyxl import Workbook
     book = Workbook(); sheet = book.active
     sheet.append(['检查编号', '配置项', '调研结论'])
-    sheet.append(['EXP-1-001', '应用安装', '01｜本期必需'])
+    sheet.append(['GL-1-001', '应用安装', '01｜本期必需'])
     sheet.cell(8, 3).number_format = '@'
     path = tmp_path / '空模板.xlsx'; book.save(path)
     parsed = sources.parse_source(path, 'general-ledger')
@@ -63,7 +63,7 @@ def test_formula_candidate_keeps_cached_text_after_required_field_validation(tmp
     from openpyxl import Workbook
     book = Workbook(); sheet = book.active
     sheet.append(['检查编号', '配置项', '调研结论'])
-    sheet.append(['EXP-1-001', '应用安装', '="01｜缓存确认结论"'])
+    sheet.append(['GL-1-001', '应用安装', '="01｜缓存确认结论"'])
     path = tmp_path / '有缓存.xlsx'; book.save(path)
     with zipfile.ZipFile(path) as package:
         parts = {name: package.read(name) for name in package.namelist()}

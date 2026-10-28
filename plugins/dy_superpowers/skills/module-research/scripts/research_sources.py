@@ -308,9 +308,11 @@ def _attachment(value: str, issues: list, base_dir: Path) -> tuple[str, dict | N
     except Exception as exc:  # 损坏文件会抛各类异常；保留引用并记录问题，不中断整批解析。
         issues.append({"code": "attachment_parse_failed", "reason": type(exc).__name__})
         return str(path), {"attachment": str(path), "local": True, "fetched": False}
+    locations = [row.get("locator") for row in parsed.get("rows", []) if row.get("locator")]
     return str(path), {"attachment": str(path), "local": True, "fetched": True, "parser": path.suffix.lower(),
                        "candidate_issues": parsed.get("issues", []),
-                       "rows": len(parsed["rows"]),
+                       "rows": len(parsed["rows"]), "locations": locations[:50],
+                       "location_count": len(locations), "locations_truncated": len(locations) > 50,
                        "sample": [row.get("conclusion", "")[:60] for row in parsed["rows"][:5]]}
 
 

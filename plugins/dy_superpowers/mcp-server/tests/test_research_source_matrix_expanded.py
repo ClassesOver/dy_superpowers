@@ -44,7 +44,7 @@ def make_document(path):
         from openpyxl import Workbook
         book = Workbook()
         book.active.append(['检查编号', '配置项', '调研结论'])
-        book.active.append(['EXP-1-001', '应用安装', '01｜总账基础应用本期必需'])
+        book.active.append(['GL-1-001', '应用安装', '01｜总账基础应用本期必需'])
         book.save(path)
     elif path.suffix == '.docx':
         from docx import Document
@@ -140,7 +140,7 @@ def test_cli_xlsx_candidate_and_document_gaps_keep_hidden_merged_content(tmp_pat
     from openpyxl import Workbook
     book = Workbook(); sheet = book.active; sheet.title = '主表'
     sheet.append(['检查编号', '配置项', '调研结论'])
-    sheet.append(['EXP-1-001', '应用安装', '01｜本期基础应用必需'])
+    sheet.append(['GL-1-001', '应用安装', '01｜本期基础应用必需'])
     sheet.append([None, None, '02｜扩展应用待确认'])
     sheet.merge_cells('A2:A3'); sheet.merge_cells('B2:B3')
     sheet['C4'] = '=C2'; sheet.row_dimensions[3].hidden = True
@@ -150,7 +150,7 @@ def test_cli_xlsx_candidate_and_document_gaps_keep_hidden_merged_content(tmp_pat
     assert result['status'] == 'partial'
     assert {'formula_without_cache', 'formula_cache_missing', 'hidden_sheet'} <= {x['code'] for x in data['issues']}
     rows = data['candidates']['records']
-    assert [(r['check_order'], r['research_id']) for r in rows] == [('EXP-1-001', '01'), ('EXP-1-001', '02')]
+    assert [(r['check_order'], r['research_id']) for r in rows] == [('GL-1-001', '01'), ('GL-1-001', '02')]
     assert rows[1]['hidden'] is True
     assert '隐藏尾部' in json.dumps(data['content'], ensure_ascii=False)
     assert data['coverage']['unresolved'] == result['issues']
@@ -161,7 +161,7 @@ def test_cli_xlsx_candidate_and_document_gaps_keep_hidden_merged_content(tmp_pat
 def test_cli_blank_required_xlsx_field_blocks_complete(tmp_path, missing_column):
     from openpyxl import Workbook
     book = Workbook(); book.active.append(['检查编号', '配置项', '调研结论'])
-    row = ['EXP-1-001', '应用安装', '01｜本期基础应用必需']; row[missing_column] = None
+    row = ['GL-1-001', '应用安装', '01｜本期基础应用必需']; row[missing_column] = None
     book.active.append(row); source = tmp_path / '缺关键字段.xlsx'; book.save(source)
     result, data = parsed(tmp_path, source)
     assert result['status'] == 'partial'
