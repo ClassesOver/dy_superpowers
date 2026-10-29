@@ -59,6 +59,10 @@ def test_stdio_scope_optional_routing_and_generic_export(tmp_path, module, total
         async with stdio_client(_parameters(workspace, tmp_path / "codex")) as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
+                tool_map = {tool.name: tool for tool in (await session.list_tools()).tools}
+                progress_schema = tool_map["dy_research_progress"].model_dump(by_alias=True)["inputSchema"]
+                assert "intent" not in progress_schema["required"]
+                assert progress_schema["properties"]["intent"]["enum"] == ["research", "progress", "export", "import", "confirm"]
 
                 async def call(name, **arguments):
                     response = await session.call_tool(name, dict(trace_id="optional-scope", module=module, **arguments))

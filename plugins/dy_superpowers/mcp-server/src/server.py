@@ -563,9 +563,18 @@ def _progress_records(workspace, module, scope, scope_id):
 def _handle_research_progress(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     try:
         module = validate_module(arguments['module'])
+        intent = arguments.get('intent')
+        if intent is not None and intent not in ('research', 'progress', 'export', 'import', 'confirm'):
+            raise ValueError('intent 必须为 research、progress、export、import 或 confirm')
         scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
         records = _progress_records(workspace, module, scope, scope_id)
         result = calculate_routing_progress(module, records, scope=scope, scope_id=scope_id)
+        result['intent'] = intent
+        result['next_action'] = 'classify_intent' if intent is None else {
+            'progress': 'report_progress', 'export': 'export_checklist', 'import': 'confirm_source',
+            'confirm': 'save_confirmed',
+            'research': 'ask_missing' if result['route'] == 'interactive' else 'offer_checklist',
+        }[intent]
     except ValueError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'research.progress', 'operation': 'calculate_progress', 'tool': name, 'status': 'ok',
@@ -574,7 +583,8 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
              'confirmed_count': result['confirmed_count'], 'confirmed_percentage': result['confirmed_percentage'],
              'partial_count': result['partial_count'], 'unknown_count': result['unknown_count'],
              'unanswered_count': result['unanswered_count'],
-             'percentage': result['percentage'], 'route': result['route'], 'span_id': span_id}
+             'percentage': result['percentage'], 'route': result['route'],
+             'intent': intent or 'unset', 'next_action': result['next_action'], 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
     return result
@@ -767,15 +777,17 @@ TOOL_REGISTRY = {
         _handle_module_memory_read,
     ),
     'dy_research_progress': (
-        '分别计算已确认回答与完整完成进度，优先展示progress_summary。confirmed_count含完整、局部及完整性未知的已确认子项；answered/percentage仅指完整完成，不能把0个完整项说成没有回答。无范围无记忆走清单，唯一范围自动复用；多范围分别展示scope_progress，不合并计数、不要求前置范围补问。分流仍按完整完成比例：低于70%走清单，达到70%走互动问答。',
+        '调研发问前先调用。必须由模型按本轮意图传intent，再按next_action执行：progress仅报告；export导出清单；import核对本轮已填来源；confirm完成当前已明确批准的候选保存；research按完整完成比例低于70%走清单、达到70%才补问业务。未传intent时next_action=classify_intent，先识别意图并重新调用，不得直接行动。历史待办不构成import，非当前确认批次的“确认”不构成confirm。分别展示progress_summary的已确认回答与完整完成，后者决定route。范围可省略，唯一范围自动复用，多范围分别展示scope_progress，不合并、不先问范围。本工具只读，next_action本身不代表授权。',
         {'type': 'object', 'required': ['trace_id', 'module'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
+                        'intent': {'type': 'string', 'enum': ['research', 'progress', 'export', 'import', 'confirm'],
+                                   'description': '必填：模型识别当前请求，开始/继续调研research；只查进度progress；明确要清单export；本轮导入/核对已填来源import；回应当前明确确认/保存批次confirm。'},
                         'scope': {'type': 'string'}, 'scope_id': {'type': 'string'}}},
         _handle_research_progress,
     ),
     'dy_research_unanswered_export': (
-        '用户明确确认后导出模块调研Excel；首表为按指南排序的完整调研问题清单，含已有记忆及状态，后附指南和已归档文件中的动态附件页。范围可省略，多范围答案分别标注；按模块、日期和流水命名，不覆盖旧文件。question_count为未回答项数。',
+        '导出模块调研Excel；用户本轮明确要求输出/下载问题清单即为导出授权，直接传confirmed=true，无需再次询问，也不以范围或70%阈值阻塞；仅说开始调研不算授权。首表为按指南排序的完整调研问题清单，含已有记忆及状态，后附动态附件页。范围可省略，多范围答案分别标注；按模块、日期和流水命名，不覆盖旧文件。question_count为尚未完整项数。',
         {'type': 'object', 'required': ['trace_id', 'module', 'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},

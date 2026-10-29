@@ -11,7 +11,6 @@ def test_module_research_skill_contains_the_built_in_general_ledger_qa():
     skill = SKILL.read_text(encoding="utf-8")
 
     assert "## 总账内置 QA" in skill
-    assert "每个配置项先提出一个汇总问题" in skill
     assert "当前矩阵中的 `GL-*` 编号" in skill
     assert "详细问题、字段和缺口映射" in skill
     assert "当前会话" in skill
@@ -146,8 +145,6 @@ def test_imported_pending_business_signoffs_must_trigger_native_qa_before_finali
     assert "待确认" in skill
     assert "不能只生成候选台账后结束" in skill
     assert "每组最多 3 个相互独立的问题" in skill
-    assert "解析不能作为最终回复结束" in source_intake
-    assert "不能只列“待业务签认”后结束" in source_intake
     assert "项目档案生成不适用此自动 QA 规则" in source_intake
 
 

@@ -35,6 +35,8 @@ EVENT_FIELDS = {
     "memory_content", "research_content", "query", "content_truncated",
     "workflow_id", "call_id", "otel_trace_id", "otel_span_id", "category",
     "check_key", "scope_id", "revision", "research_status", "trace_context", "valid", "error_count", "expected_count", "report_id",
+    "intent", "next_action", "route", "percentage", "scope_mode", "answered", "total",
+    "confirmed_count", "confirmed_percentage", "partial_count", "unknown_count", "unanswered_count",
 }
 SECRET_PREFIX = (
     r"(?P<prefix>(?P<key_quote>[\"']?)(?:password|passwd|token|secret|api[_-]?key|credential|confirmed[_ -]?by|"

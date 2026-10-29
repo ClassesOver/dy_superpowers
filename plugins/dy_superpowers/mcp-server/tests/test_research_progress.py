@@ -120,6 +120,59 @@ def test_confirmed_coverage_above_70_percent_does_not_override_completion_routin
     assert progress["route"] == "excel"
 
 
+@pytest.mark.parametrize("answered", [0, 58])
+@pytest.mark.parametrize("intent,expected_action", [
+    ("progress", "report_progress"),
+    ("export", "export_checklist"),
+    ("import", "confirm_source"),
+    ("confirm", "save_confirmed"),
+    ("research", None),
+])
+def test_mcp_current_intent_selects_action_without_changing_threshold(
+        tmp_path, monkeypatch, answered, intent, expected_action):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    if answered:
+        _save_records(workspace, "general-ledger", "site-a", 0, answered)
+
+    result, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "intent-route", "module": "general-ledger", "intent": intent}, workspace)
+
+    assert error is None
+    assert result["intent"] == intent
+    assert result["route"] == ("interactive" if answered else "excel")
+    assert result["next_action"] == (expected_action or (
+        "ask_missing" if answered else "offer_checklist"))
+    event = next(event for event in server.TraceStore(workspace).read("intent-route")
+                 if event["event"] == "research.progress")
+    assert event["intent"] == intent
+    assert event["next_action"] == result["next_action"]
+    assert event["route"] == result["route"]
+    assert event["percentage"] == result["percentage"]
+    assert not (workspace / ".dy_superpowers/research").exists()
+    if not answered:
+        assert not (workspace / ".dy_superpowers").exists()
+
+
+def test_mcp_legacy_progress_call_requires_intent_classification_before_action(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    result, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "legacy-route", "module": "expense"}, tmp_path / "project")
+
+    assert error is None
+    assert result["intent"] is None
+    assert result["next_action"] == "classify_intent"
+
+
+def test_mcp_progress_rejects_unknown_intent(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    result, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "invalid-intent", "module": "expense", "intent": "guess"}, tmp_path)
+
+    assert result is None and error["code"] == -32602
+
+
 def test_scope_ambiguity_is_rejected_instead_of_combining_companies():
     records = _records("expense", "site-a", 1) + _records("expense", "site-b", 1)
     with pytest.raises(ValueError, match="适用范围"):
