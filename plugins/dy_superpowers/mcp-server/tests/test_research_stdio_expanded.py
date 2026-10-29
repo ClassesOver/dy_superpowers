@@ -98,6 +98,86 @@ def test_stdio_scope_optional_routing_and_generic_export(tmp_path, module, total
 
 
 @pytest.mark.parametrize("module", ["expense", "general-ledger"])
+def test_stdio_partial_save_with_unknown_scope_resumes_without_completing_research(tmp_path, module):
+    """范围未补齐不阻塞局部落盘，也不能增加完整存储度或放行巡检。"""
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    codex_home = tmp_path / "codex"
+    trace_id = "partial-save"
+    scope = "范围待补充；确认批次：partial-save/1"
+    item = _guide_items(module)[0]
+    saved = {}
+    payload = dict(module=module, check_order=item["check_order"], research_id=item["research_id"],
+                   config_item=item["config_item"], scope=scope,
+                   conclusion="仅测试：用户已确认需要此项功能，其他要素待补充。",
+                   evidence_ref="测试会话：业务确认及后续保存授权", research_complete=False)
+
+    async def call(session, name, **arguments):
+        response = await session.call_tool(name, {"trace_id": trace_id, **arguments})
+        assert not response.model_dump(by_alias=True).get("isError", False), response
+        return json.loads(response.content[0].text)
+
+    async def first_session():
+        async with stdio_client(_parameters(workspace, codex_home)) as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                with pytest.raises(MCPError, match="明确确认"):
+                    await call(session, "dy_research_record_write", **payload, confirmed=False)
+                assert not (workspace / ".dy_superpowers/modules").exists()
+                saved.update(await call(session, "dy_research_record_write", **payload, confirmed=True))
+                read = await call(session, "dy_module_memory_read", module=module,
+                                  check_order=item["check_order"], research_id=item["research_id"],
+                                  scope_id=saved["scope_id"])
+                assert read["records"][0]["conclusion"] == payload["conclusion"]
+                assert read["records"][0]["scope"] == scope
+                assert read["records"][0]["research_complete"] is False
+                progress = await call(session, "dy_research_progress", module=module,
+                                      scope_id=saved["scope_id"])
+                assert progress["answered"] == 0 and progress["route"] == "excel"
+
+                report = _uninspected_report(module, saved["scope_id"])
+                record = next(record for record in report["records"]
+                              if (record["check_order"], record["research_id"])
+                              == (item["check_order"], item["research_id"]))
+                record.update(result="通过", research_revision=saved["revision"],
+                              evidence_refs=[{"kind": "document", "reference": "测试附件#功能需求"}])
+                checked = await call(session, "dy_inspection_validate", report=report)
+                assert checked["valid"] is False
+                assert any("尚未完整" in error["message"] for error in checked["errors"])
+
+    async def resumed_session():
+        async with stdio_client(_parameters(workspace, codex_home)) as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await session.initialize()
+                read = await call(session, "dy_module_memory_read", module=module,
+                                  check_order=item["check_order"], research_id=item["research_id"],
+                                  scope_id=saved["scope_id"])
+                current = read["records"][0]
+                assert current["revision"] == saved["revision"]
+                assert current["research_complete"] is False
+                other = await call(session, "dy_research_record_write", **{
+                    **payload, "scope": "范围待补充；确认批次：partial-save/2",
+                    "conclusion": "另一批次：用户已确认不需要此项功能。", "confirmed": True})
+                assert other["scope_id"] != saved["scope_id"]
+                updated = await call(session, "dy_research_record_write", **{
+                    **payload, "scope": "虚构甲院/报销/2026年", "scope_id": saved["scope_id"],
+                    "expected_revision": current["revision"], "confirmed": True})
+                assert updated["scope_id"] == saved["scope_id"]
+                final = await call(session, "dy_module_memory_read", module=module)
+                assert len(final["records"]) == 2
+                repaired_scope = next(row for row in final["records"] if row["scope_id"] == saved["scope_id"])
+                assert repaired_scope["history"][0]["scope"] == scope
+                assert repaired_scope["scope"] == "虚构甲院/报销/2026年"
+                assert repaired_scope["research_complete"] is False
+
+    async def exercise():
+        await first_session()
+        await resumed_session()
+
+    asyncio.run(asyncio.wait_for(exercise(), timeout=30))
+
+
+@pytest.mark.parametrize("module", ["expense", "general-ledger"])
 def test_stdio_research_resume_report_and_workspace_isolation(tmp_path, module):
     workspace = tmp_path / "project-a"
     other = tmp_path / "project-b"
