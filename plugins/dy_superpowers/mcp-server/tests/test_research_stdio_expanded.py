@@ -59,6 +59,10 @@ def test_stdio_scope_optional_routing_and_generic_export(tmp_path, module, total
         async with stdio_client(_parameters(workspace, tmp_path / "codex")) as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
+                tool_map = {tool.name: tool for tool in (await session.list_tools()).tools}
+                progress_schema = tool_map["dy_research_progress"].model_dump(by_alias=True)["inputSchema"]
+                assert "intent" not in progress_schema["required"]
+                assert progress_schema["properties"]["intent"]["enum"] == ["research", "progress", "export", "import", "confirm"]
 
                 async def call(name, **arguments):
                     response = await session.call_tool(name, dict(trace_id="optional-scope", module=module, **arguments))
@@ -89,7 +93,8 @@ def test_stdio_scope_optional_routing_and_generic_export(tmp_path, module, total
                 workbook = load_workbook(workspace / exported["path"], read_only=True)
                 try:
                     rows = list(workbook.active.iter_rows(min_row=2, values_only=True))
-                    assert len(rows) == total and all(row[5:9] == (None,) * 4 for row in rows)
+                    assert len(rows) == total and all(row[9] is None for row in rows)
+                    assert '虚构甲院/本期' in rows[0][7] and '虚构乙院/本期' in rows[0][7]
                 finally:
                     workbook.close()
                 assert path.read_bytes() == before
@@ -134,6 +139,10 @@ def test_stdio_partial_save_with_unknown_scope_resumes_without_completing_resear
                 progress = await call(session, "dy_research_progress", module=module,
                                       scope_id=saved["scope_id"])
                 assert progress["answered"] == 0 and progress["route"] == "excel"
+                assert progress["confirmed_count"] == 1 and progress["partial_count"] == 1
+                assert progress["unknown_count"] == 0
+                assert progress["unanswered_count"] == progress["total"] - 1
+                assert f"1/{progress['total']}" in progress["progress_summary"]
 
                 report = _uninspected_report(module, saved["scope_id"])
                 record = next(record for record in report["records"]

@@ -1,6 +1,6 @@
 {
   "name": "dy_superpowers",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "面向 Odoo 12 项目的 HRP 项目交付助手。",
   "author": {
     "name": "dy_superpowers 维护者"

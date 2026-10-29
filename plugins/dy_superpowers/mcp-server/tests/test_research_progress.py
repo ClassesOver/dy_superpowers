@@ -18,6 +18,7 @@ def _records(module, scope_id, answered):
     return [
         {"module": module, "check_order": item["check_order"], "research_id": item["research_id"],
          "scope": "中心院区", "scope_id": scope_id, "status": "confirmed", "research_complete": True}
+        | {"conclusion": "仅测试：已确认要素齐备"}
         for item in _guide_items(module)[:answered]
     ]
 
@@ -46,11 +47,130 @@ def test_partial_confirmed_record_does_not_count_as_answered():
     assert progress["items"][0]["research_id"] == records[0]["research_id"]
 
 
+def test_five_confirmed_partial_gl_answers_remain_visible_without_claiming_completion():
+    records = _records("general-ledger", "site-a", 5)
+    for record in records:
+        record["research_complete"] = False
+
+    progress = calculate_routing_progress("general-ledger", records)
+
+    assert progress["confirmed_count"] == 5
+    assert progress["confirmed_percentage"] == pytest.approx(5 / 82 * 100)
+    assert progress["partial_count"] == 5
+    assert progress["unknown_count"] == 0
+    assert progress["unanswered_count"] == 77
+    assert (progress["answered"], progress["percentage"], progress["route"]) == (0, 0, "excel")
+    assert "5/82" in progress["progress_summary"]
+    assert "6.1%" in progress["progress_summary"]
+    assert "0/82" in progress["progress_summary"]
+
+
+def test_progress_separates_complete_partial_unknown_and_unanswered_subitems():
+    records = _records("general-ledger", "site-a", 5)
+    records[1]["research_complete"] = False
+    records[2].pop("research_complete")
+    records[3]["status"] = "retired"
+    records[4]["check_order"] = "legacy"
+    records.append(dict(records[0]))
+
+    progress = calculate_progress("general-ledger", records, scope_id="site-a")
+
+    assert progress["confirmed_count"] == 3
+    assert progress["answered"] == 1
+    assert progress["partial_count"] == 1
+    assert progress["unknown_count"] == 1
+    assert progress["unanswered_count"] == 79
+    assert len(progress["completeness_unknown"]) == 1
+    assert len(progress["unmapped_records"]) == 1
+
+
+def test_multiple_scopes_report_confirmed_answers_without_combining_or_hiding_them():
+    records = _records("general-ledger", "site-a", 5) + _records("general-ledger", "site-b", 2)
+    for record in records[:5]:
+        record["research_complete"] = False
+
+    progress = calculate_routing_progress("general-ledger", records)
+
+    assert progress["scope_mode"] == "multiple"
+    assert progress["confirmed_count"] == 0
+    assert [(row["scope_id"], row["confirmed_count"], row["partial_count"], row["answered"])
+            for row in progress["scope_progress"]] == [("site-a", 5, 5, 0), ("site-b", 2, 0, 2)]
+    assert all("progress_summary" in row for row in progress["scope_progress"])
+    assert "未选定范围" in progress["progress_summary"]
+    assert "0/82" not in progress["progress_summary"]
+
+
 def test_below_70_percent_exports_but_at_or_above_70_uses_interactive_questions():
     below = calculate_progress("general-ledger", _records("general-ledger", "site-a", 57), scope_id="site-a")
     above = calculate_progress("general-ledger", _records("general-ledger", "site-a", 58), scope_id="site-a")
     assert below["total"] == 82 and below["route"] == "excel"
     assert above["percentage"] >= 70 and above["route"] == "interactive"
+
+
+def test_confirmed_coverage_above_70_percent_does_not_override_completion_routing():
+    records = _records("general-ledger", "site-a", 58)
+    for record in records:
+        record["research_complete"] = False
+
+    progress = calculate_progress("general-ledger", records, scope_id="site-a")
+
+    assert progress["confirmed_count"] == 58
+    assert progress["confirmed_percentage"] == pytest.approx(58 / 82 * 100)
+    assert progress["answered"] == 0 and progress["percentage"] == 0
+    assert progress["route"] == "excel"
+
+
+@pytest.mark.parametrize("answered", [0, 58])
+@pytest.mark.parametrize("intent,expected_action", [
+    ("progress", "report_progress"),
+    ("export", "export_checklist"),
+    ("import", "confirm_source"),
+    ("confirm", "save_confirmed"),
+    ("research", None),
+])
+def test_mcp_current_intent_selects_action_without_changing_threshold(
+        tmp_path, monkeypatch, answered, intent, expected_action):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    if answered:
+        _save_records(workspace, "general-ledger", "site-a", 0, answered)
+
+    result, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "intent-route", "module": "general-ledger", "intent": intent}, workspace)
+
+    assert error is None
+    assert result["intent"] == intent
+    assert result["route"] == ("interactive" if answered else "excel")
+    assert result["next_action"] == (expected_action or (
+        "ask_missing" if answered else "offer_checklist"))
+    event = next(event for event in server.TraceStore(workspace).read("intent-route")
+                 if event["event"] == "research.progress")
+    assert event["intent"] == intent
+    assert event["next_action"] == result["next_action"]
+    assert event["route"] == result["route"]
+    assert event["percentage"] == result["percentage"]
+    assert not (workspace / ".dy_superpowers/research").exists()
+    if not answered:
+        assert not (workspace / ".dy_superpowers").exists()
+
+
+def test_mcp_legacy_progress_call_requires_intent_classification_before_action(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    result, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "legacy-route", "module": "expense"}, tmp_path / "project")
+
+    assert error is None
+    assert result["intent"] is None
+    assert result["next_action"] == "classify_intent"
+
+
+def test_mcp_progress_rejects_unknown_intent(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    result, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "invalid-intent", "module": "expense", "intent": "guess"}, tmp_path)
+
+    assert result is None and error["code"] == -32602
 
 
 def test_scope_ambiguity_is_rejected_instead_of_combining_companies():
@@ -89,19 +209,24 @@ def test_export_requires_confirmation_and_never_overwrites_or_follows_symlinks(t
     result = export_unanswered_template(tmp_path, "expense", "trace-1", records=[], scope="中心院区", confirmed=True)
     output = Path(result["path"])
     actual_output = tmp_path / output
-    assert output == Path(".dy_superpowers/research/expense/unanswered-questions.xlsx")
+    assert output.parent == Path(".dy_superpowers/research/expense")
+    assert output.name.startswith("费用调研清单") and output.name.endswith("01.xlsx")
     assert actual_output.is_file()
-    with pytest.raises(FileExistsError):
-        export_unanswered_template(tmp_path, "expense", "trace-2", records=[], scope="中心院区", confirmed=True)
+    original = actual_output.read_bytes()
+    next_result = export_unanswered_template(tmp_path, "expense", "trace-2", records=[], scope="中心院区", confirmed=True)
+    assert next_result["path"] != result["path"]
+    assert actual_output.read_bytes() == original
 
 
-def test_export_contains_only_unanswered_rows_and_refuses_directory_symlinks(tmp_path):
+def test_export_keeps_answered_rows_and_refuses_directory_symlinks(tmp_path):
     records = _records("expense", "site-a", 64)
     result = export_unanswered_template(tmp_path, "expense", "trace-1", records=records,
                                         scope="中心院区", scope_id="site-a", confirmed=True)
     from openpyxl import load_workbook
     workbook = load_workbook(tmp_path / result["path"], read_only=True)
-    assert workbook.active.max_row == 29
+    assert workbook.active.max_row == 93
+    assert workbook.active["H2"].value.endswith(records[0]["conclusion"])
+    workbook.close()
 
     import shutil
     shutil.rmtree(tmp_path / ".dy_superpowers")
@@ -140,6 +265,37 @@ def test_mcp_tools_calculate_scoped_progress_and_require_export_confirmation(tmp
     assert exported["question_count"] == 91
 
 
+def test_mcp_progress_preserves_partial_answers_and_tracks_explicit_completion_revision(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    payload = {"module": "general-ledger", "check_order": "GL-1-001", "research_id": "02",
+               "config_item": "其他扩展应用", "conclusion": "本期不需要其他总账扩展应用",
+               "scope": "测试院/本期", "confirmed_by": "test", "confirmed_at": "2026-01-01",
+               "confirmed": True, "scope_id": "site-a", "research_complete": False}
+    write_record(tmp_path, payload)
+    path = tmp_path / ".dy_superpowers/modules/general-ledger/research.md"
+    before = path.read_bytes()
+
+    partial, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "partial-count", "module": "general-ledger"}, tmp_path)
+
+    assert error is None
+    assert (partial["confirmed_count"], partial["partial_count"], partial["answered"]) == (1, 1, 0)
+    assert "1/82" in partial["progress_summary"]
+    assert path.read_bytes() == before
+    read, error = server.execute_tool("dy_module_memory_read", {
+        "trace_id": "partial-count", "module": "general-ledger", "scope_id": "site-a"}, tmp_path)
+    assert error is None
+    record = read["records"][0]
+    write_record(tmp_path, {**payload, "research_complete": True, "expected_revision": record["revision"]})
+
+    complete, error = server.execute_tool("dy_research_progress", {
+        "trace_id": "partial-count", "module": "general-ledger"}, tmp_path)
+
+    assert error is None
+    assert (complete["confirmed_count"], complete["partial_count"], complete["answered"]) == (1, 0, 1)
+    assert complete["unanswered_count"] == 81
+
+
 @pytest.mark.parametrize("module,total", [("expense", 92), ("general-ledger", 82)])
 def test_mcp_progress_without_scope_routes_empty_memory_to_excel(tmp_path, monkeypatch, module, total):
     workspace = tmp_path / "project"
@@ -150,6 +306,8 @@ def test_mcp_progress_without_scope_routes_empty_memory_to_excel(tmp_path, monke
     assert error is None
     assert result["route"] == "excel"
     assert (result["answered"], result["total"], result["percentage"]) == (0, total, 0)
+    assert (result["confirmed_count"], result["confirmed_percentage"], result["partial_count"],
+            result["unknown_count"], result["unanswered_count"]) == (0, 0, 0, 0, total)
     assert result["scope"] is None and result["scope_id"] is None
     assert result["scope_mode"] == "unscoped"
     assert len(result["items"]) == total
@@ -211,7 +369,8 @@ def test_mcp_unselected_scopes_report_separate_progress_and_export_full_template
     with closing(load_workbook(workspace / exported["path"], read_only=True)) as workbook:
         rows = list(workbook.active.iter_rows(min_row=2, values_only=True))
         assert len(rows) == 92
-        assert all(row[5:9] == (None, None, None, None) for row in rows)
+        assert '中心院区' in rows[0][7] and '第三院区' in rows[0][7]
+        assert all(row[9] is None for row in rows)
     assert all(path.read_bytes() == content for path, content in memory_before.items())
 
     selected, error = server.execute_tool("dy_research_progress", {
@@ -241,8 +400,9 @@ def test_mcp_export_without_scope_preserves_confirmation_and_reuses_single_scope
     assert exported["scope_id"] == ("site-a" if answered else None)
     with closing(load_workbook(workspace / exported["path"], read_only=True)) as workbook:
         rows = list(workbook.active.iter_rows(min_row=2, values_only=True))
-        assert len(rows) == question_count
-        assert all(row[5] == ("中心院区" if answered else None) for row in rows)
+        assert len(rows) == 92
+        assert bool(rows[0][7]) == bool(answered)
+        assert all(row[9] is None for row in rows)
 
 
 def test_mcp_export_by_scope_id_keeps_known_scope_label(tmp_path, monkeypatch):
@@ -256,7 +416,7 @@ def test_mcp_export_by_scope_id_keeps_known_scope_label(tmp_path, monkeypatch):
 
     assert error is None
     with closing(load_workbook(tmp_path / exported["path"], read_only=True)) as workbook:
-        assert workbook.active["F2"].value == "中心院区"
+        assert '中心院区' in workbook.active["H2"].value
 
 
 def test_mcp_export_by_new_scope_id_keeps_explicit_binding_without_inventing_label(tmp_path, monkeypatch):
@@ -270,7 +430,7 @@ def test_mcp_export_by_new_scope_id_keeps_explicit_binding_without_inventing_lab
     assert error is None
     assert exported["scope_id"] == "site-new" and exported["scope"] is None
     with closing(load_workbook(tmp_path / exported["path"], read_only=True)) as workbook:
-        assert workbook.active["F2"].value == "site-new"
+        assert workbook.active["H2"].value is None
 
 
 @pytest.mark.parametrize("tool", ["dy_research_progress", "dy_research_unanswered_export"])

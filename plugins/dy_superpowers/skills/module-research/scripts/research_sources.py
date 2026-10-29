@@ -63,13 +63,13 @@ def _row(order, item, conclusion, locator, applicability="", evidence="", detail
             "detail_refs": detail_refs or [], "hidden": hidden, **_semantics(conclusion)}
 
 
-def parse_xlsx(path: Path) -> dict:
+def parse_xlsx(path: Path, module: str | None = None) -> dict:
     from openpyxl import load_workbook
 
     workbook = load_workbook(path, data_only=False)
     cached = load_workbook(path, data_only=True)
     worksheets, issues, tables = [], [], []  # tables: (表头标签, 行集合)
-    unanswered, pending_locations = [], []
+    unanswered, pending_locations, attachment_sheets = [], [], {}
     for ws in workbook:
         for cells in ws:
             for cell in cells:
@@ -83,6 +83,19 @@ def parse_xlsx(path: Path) -> dict:
                            "hidden_rows": sum(bool(v.hidden) for v in ws.row_dimensions.values())})
         if ws.sheet_state != "visible":
             issues.append({"code": "hidden_sheet", "sheet": ws.title})
+        if ws.title != "调研问题清单":
+            headers = [_text(ws.cell(1, col).value) for col in range(1, ws.max_column + 1)]
+            rows, example_present = [], False
+            for row_number in range(2, ws.max_row + 1):
+                values = [_json_cell(ws.cell(row_number, col).value) for col in range(1, ws.max_column + 1)]
+                if not any(_text(value) for value in values):
+                    continue
+                if any(_text(value).startswith("示例") for value in values):
+                    example_present = True
+                    continue
+                rows.append(values)
+            attachment_sheets[ws.title] = {"headers": headers, "rows": rows,
+                                           "example_present": example_present}
         header = None
         for row in range(1, min(ws.max_row, 20) + 1):
             names = {_text(c.value): c.column for c in ws[row] if c.value is not None}
@@ -114,9 +127,16 @@ def parse_xlsx(path: Path) -> dict:
             # 只有实际业务行才校验；格式化空行和普通附件模板不是调研行。
             if not any(_text(ws.cell(row, col).value) for col in names.values()):
                 continue
-            value = cell.value
+            new_layout = all(label in names for label in ("配置子项", "调研问题", "已记忆项", "当前状态"))
+            answer_value = _text(ws.cell(row, names.get("答案", 0)).value) if "答案" in names else ""
+            memo_value = _text(ws.cell(row, names["已记忆项"]).value) if new_layout else ""
+            value = answer_value or memo_value or cell.value
+            display_order = _text(structural(row, names[order_label]))
+            internal_order = display_order
+            if module == "expense" and re.fullmatch(r"EXP-\d{3}", display_order):
+                internal_order = str(int(display_order[-3:]))
             if conclusion_label == '答案' and not _text(value):
-                unanswered.append({'check_order': _text(structural(row, names[order_label])),
+                unanswered.append({'check_order': internal_order,
                                    'research_id': _text(structural(row, names.get('调研子项'))),
                                    'locator': {'sheet': ws.title, 'cell': cell.coordinate}})
                 continue
@@ -136,19 +156,56 @@ def parse_xlsx(path: Path) -> dict:
             if missing:
                 continue
             hidden = ws.sheet_state != "visible" or bool(ws.row_dimensions[row].hidden)
-            table_rows.append(_row(structural(row, names[order_label]), structural(row, names["配置项"]),
-                                   _text(value), {"sheet": ws.title, "cell": cell.coordinate},
+            if new_layout and not answer_value and memo_value:
+                scoped_values = []
+                scope_ids = {}
+                memo_cell = ws.cell(row, names["已记忆项"])
+                if memo_cell.comment:
+                    try:
+                        metadata = json.loads(memo_cell.comment.text)
+                        if not isinstance(metadata, list) or any(not isinstance(entry, dict) for entry in metadata):
+                            raise ValueError("范围元数据应为对象列表")
+                        for entry in metadata:
+                            scope_ids.setdefault(entry.get("scope", ""), []).append(entry)
+                    except (ValueError, TypeError):
+                        issues.append({"code": "memory_scope_metadata_invalid", "sheet": ws.title,
+                                       "cell": memo_cell.coordinate})
+                matches = list(re.finditer(r"(?m)^【([^】]+)】", memo_value))
+                for index, match in enumerate(matches):
+                    end = matches[index + 1].start() if index + 1 < len(matches) else len(memo_value)
+                    scope_value = match.group(1)
+                    entries = scope_ids.get(scope_value, [])
+                    metadata = entries.pop(0) if entries else {}
+                    scoped_values.append((scope_value, metadata.get("scope_id", ""),
+                                          memo_value[match.end():end].strip(), metadata.get("research_complete")))
+                if not matches:
+                    scoped_values = [("", "", memo_value, None)]
+            else:
+                scoped_values = [("", "", _text(value), None)]
+            for scope_value, scope_id_value, conclusion_value, complete in scoped_values:
+                if not conclusion_value:
+                    continue
+                table_rows.append(_row(internal_order, structural(row, names["配置项"]),
+                                   conclusion_value, {"sheet": ws.title, "cell": cell.coordinate},
                                    structural(row, names.get("适用条件与不适用边界", 0)) or "",
                                    structural(row, names.get("建议材料 / 验证依据", 0)) or "", hidden=hidden))
-            record = table_rows[-1]
-            if '调研子项' in names:
-                record['research_id'] = _text(structural(row, names['调研子项']))
-            if conclusion_label == '答案':
-                record['scope_fields'] = {label: _text(structural(row, names.get(label)))
-                                          for label in ('适用公司/院区', '适用业务范围', '上线阶段/期间')}
-                record['applicability'] = '；'.join(f'{label}：{value}' for label, value in record['scope_fields'].items() if value)
-                record['suggested_evidence'] = _text(structural(row, names.get('依据/来源')))
-                record['attachment_materials'] = _text(structural(row, names.get('附件/补充材料')))
+                record = table_rows[-1]
+                if '调研子项' in names:
+                    record['research_id'] = _text(structural(row, names['调研子项']))
+                if new_layout:
+                    record["config_subitem"] = _text(structural(row, names.get("配置子项")))
+                    record["research_question"] = _text(structural(row, names.get("调研问题")))
+                    record["scope"] = scope_value
+                    record["scope_id"] = scope_id_value
+                    record["research_complete"] = complete if isinstance(complete, bool) else \
+                        _text(structural(row, names.get("当前状态"))) == "已确认"
+                if conclusion_label == '答案':
+                    record['scope_fields'] = {label: _text(structural(row, names.get(label)))
+                                              for label in ('适用公司/院区', '适用业务范围', '上线阶段/期间')}
+                    record['applicability'] = '；'.join(f'{label}：{v}' for label, v in record['scope_fields'].items() if v)
+                    record['suggested_evidence'] = _text(structural(row, names.get('依据/来源')))
+                    record['attachment_materials'] = _text(structural(row, names.get('附件/补充材料')))
+                    record['can_write_confirmed'] = False
         tables.append((conclusion_label, table_rows))
     workbook.close()
     cached.close()
@@ -158,7 +215,14 @@ def parse_xlsx(path: Path) -> dict:
         issues.append({"code": "multiple_conclusion_tables", "count": len(tables),
                        "selected": "全部结论表", "skipped": 0})
     return {"rows": rows, "worksheets": worksheets, "issues": issues,
-            'unanswered': unanswered, 'pending_locations': pending_locations}
+            'unanswered': unanswered, 'pending_locations': pending_locations,
+            "attachment_sheets": attachment_sheets}
+
+
+def _json_cell(value):
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
 
 
 def parse_docx(path: Path) -> dict:
@@ -377,7 +441,7 @@ def parse_source(path: Path, module: str) -> dict:
                       "suffix": path.suffix.lower(), "blocking": True}]}
     else:
         try:
-            extracted = parser(path)
+            extracted = parser(path, module) if parser is parse_xlsx else parser(path)
         except Exception as exc:
             extracted = {"rows": [], "issues": [{"code": "candidate_parse_failed",
                           "error_type": type(exc).__name__, "blocking": True}]}
@@ -387,6 +451,7 @@ def parse_source(path: Path, module: str) -> dict:
             "issues": extracted.get("issues", []),
             'unanswered': extracted.get('unanswered', []),
             'pending_locations': extracted.get('pending_locations', []),
+            'attachment_sheets': extracted.get('attachment_sheets', {}),
             "coverage": {"source_subitems": len(extracted["rows"]),
                          'source_pending_cells': len(extracted.get('pending_locations', [])),
                          "contains_pending_questions": sum(r["contains_pending_questions"] for r in extracted["rows"]),
