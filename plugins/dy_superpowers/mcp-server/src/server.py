@@ -571,6 +571,9 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
     event = {'event': 'research.progress', 'operation': 'calculate_progress', 'tool': name, 'status': 'ok',
              'module': module, 'scope_id': result['scope_id'], 'scope_mode': result['scope_mode'],
              'answered': result['answered'], 'total': result['total'],
+             'confirmed_count': result['confirmed_count'], 'confirmed_percentage': result['confirmed_percentage'],
+             'partial_count': result['partial_count'], 'unknown_count': result['unknown_count'],
+             'unanswered_count': result['unanswered_count'],
              'percentage': result['percentage'], 'route': result['route'], 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
@@ -764,7 +767,7 @@ TOOL_REGISTRY = {
         _handle_module_memory_read,
     ),
     'dy_research_progress': (
-        '计算模块调研存储度并直接分流：无范围无记忆按0%走清单，唯一已有范围自动复用；多个范围分别返回scope_progress并走通用清单，不合并答案、不要求前置范围补问。低于70%走清单，达到70%走互动问答。',
+        '分别计算已确认回答与完整完成进度，优先展示progress_summary。confirmed_count含完整、局部及完整性未知的已确认子项；answered/percentage仅指完整完成，不能把0个完整项说成没有回答。无范围无记忆走清单，唯一范围自动复用；多范围分别展示scope_progress，不合并计数、不要求前置范围补问。分流仍按完整完成比例：低于70%走清单，达到70%走互动问答。',
         {'type': 'object', 'required': ['trace_id', 'module'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
@@ -772,7 +775,7 @@ TOOL_REGISTRY = {
         _handle_research_progress,
     ),
     'dy_research_unanswered_export': (
-        '用户明确确认后导出模块未回答问题的Excel；范围可省略，唯一已有范围自动复用，无记录或多范围未选择时导出完整通用清单、范围栏留空，不合并答案，不覆盖已有文件。',
+        '用户明确确认后导出模块调研Excel；首表为按指南排序的完整调研问题清单，含已有记忆及状态，后附指南和已归档文件中的动态附件页。范围可省略，多范围答案分别标注；按模块、日期和流水命名，不覆盖旧文件。question_count为未回答项数。',
         {'type': 'object', 'required': ['trace_id', 'module', 'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
@@ -886,7 +889,7 @@ TOOL_REGISTRY = {
                         'confirmed': {'type': 'boolean'},
                         'expected_revision': {'type': 'string', 'description': '已有记录必须提供读取版本；冲突时重新读取并确认。'},
                         'scope_id': {'type': 'string', 'description': '稳定范围标识；首次可省略，后续沿用读取值。'},
-                        'research_complete': {'type': 'boolean', 'description': '调研要素和验收依据是否完整；局部确认事实填写 false。'},
+                        'research_complete': {'type': 'boolean', 'description': '按本子项适用要素、范围及必要依据独立判断是否完整；实际缺口仍在时填写false。同组其他子项未答或尚未现场巡检不代表本项不完整。'},
                         'status': {'type': 'string', 'enum': ['confirmed', 'retired']},
                         'retirement_reason': {'type': 'string'},
                         'repair': {'type': 'boolean', 'description': '损坏记录经核实并确认后显式修复。'}}},

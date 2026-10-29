@@ -33,19 +33,16 @@ def test_export_filled_return_preserves_key_scope_evidence_and_unanswered(tmp_pa
     path = tmp_path / result['path']
     book = load_workbook(path)
     sheet = book.active
-    sheet['G2'] = '预算会计'
-    sheet['H2'] = '2026年上线'
-    sheet['I2'] = '本期启用预算会计'
-    sheet['J2'] = '业务访谈记录'
+    sheet['J2'] = '中心院区2026年上线预算会计；依据：业务访谈记录'
     sheet['K2'] = '附件一'
     book.save(path)
     parsed = sources.parse_source(path, 'general-ledger')
     assert len(parsed['records']) == 1
     record = parsed['records'][0]
-    assert record['research_id'] == str(sheet['C2'].value)
+    assert record['research_id'] == str(sheet['D2'].value)
     assert record['check_order'] == sheet['B2'].value
-    assert record['scope_fields'] == {'适用公司/院区': '中心院区', '适用业务范围': '预算会计', '上线阶段/期间': '2026年上线'}
-    assert record['suggested_evidence'] == '业务访谈记录'
+    assert record['conclusion'] == sheet['J2'].value
+    assert record['scope_fields'] == {'适用公司/院区': '', '适用业务范围': '', '上线阶段/期间': ''}
     assert record['attachment_materials'] == '附件一'
     assert record['can_write_confirmed'] is False
     assert len(parsed['unanswered']) == result['question_count'] - 1
