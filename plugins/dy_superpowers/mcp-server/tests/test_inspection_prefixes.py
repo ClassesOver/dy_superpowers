@@ -1,41 +1,34 @@
-"""业务展示编号分域，机器数据继续使用既有检查键。"""
+"""报告保留当前模板问题与原始编号，模块间身份不冲突。"""
 import json
-
 import pytest
-
-from dy_superpowers_mcp.inspection import _matrix
+from dy_superpowers_mcp.qa_templates import load_template
 from dy_superpowers_mcp.reports import _render_report
+from dy_superpowers_mcp.inspection import validate_inspection
+from template_qa_helpers import make_report
 
 
-@pytest.mark.parametrize('module,order,item,expected', [
-    ('expense', '1', '01', r'EXP\-001\-01'),
-    ('expense', '28', '03', r'EXP\-028\-03'),
-    ('general-ledger', 'GL-1-001', '01', r'GL\-001\-01'),
-    ('general-ledger', 'GL-10-032', '02', r'GL\-032\-02'),
-    ('general-ledger', 'GL-8-026-02', '01', r'GL\-026\-02\-01'),
-])
-def test_business_report_uses_domain_prefix_and_keeps_original_keys(module, order, item, expected):
-    record = {'module': module, 'check_order': order, 'research_id': item,
-              'result': '待确认', 'reason': '待补充范围', 'scope_id': 'scope-a', 'environment': 'UAT'}
-    report = {'expected_checks': [record.copy()], 'records': [record]}
-    validation = {'gate': '待确认', 'valid': True, 'validated_at': '2026-10-26T00:00:00+00:00',
-                  'matrix_revisions': {module: 'a' * 64}}
-    text = _render_report(module, 'test-report', report, validation)
-    prose, machine = text.split('## 完整检查数据（机器可读）')
-    assert f'### {expected}｜待确认' in prose
-    assert f'| {expected} |' in prose
-    data = json.loads(machine.split('```json\n')[1].rsplit('```', 1)[0])
-    assert data == report
-    assert record['check_order'] == order
+@pytest.mark.parametrize('module',['expense','general-ledger'])
+def test_business_report_keeps_original_question_ids_and_machine_data(tmp_path,module):
+    report=make_report(tmp_path,module)
+    validation=validate_inspection(tmp_path,report)
+    assert validation['valid'],validation['errors']
+    text=_render_report(module,'test-report',report,validation)
+    prose,machine=text.split('## 机器可读数据')
+    data=json.loads(machine.split('```json\n')[1].rsplit('```',1)[0])
+    assert data==report
+    assert '优先级' not in prose
+    assert len(data['records'])==len(load_template(module)['questions'])
+    assert all(q['question_id'] in json.dumps(data) for q in load_template(module)['questions'])
 
 
-def test_all_current_matrix_keys_have_unique_business_identifiers():
-    from dy_superpowers_mcp.reports import _check_label
-
-    labels = []
-    for module in ('expense', 'general-ledger'):
-        for order, item in _matrix(module)[1]:
-            labels.append(_check_label(module, {'check_order': order, 'research_id': item}))
-    assert len(labels) == 174
-    assert len(labels) == len(set(labels))
-    assert all(label.startswith(('GL-', 'EXP-')) and ' + ' not in label for label in labels)
+def test_grouped_questions_keep_current_identity_without_duplicate_subitems(tmp_path):
+    report=make_report(tmp_path,'general-ledger')
+    text=_render_report('general-ledger','duplicate',report,validate_inspection(tmp_path,report))
+    template=load_template('general-ledger')
+    group=next(q for q in template['questions'] if q['check_order']=='GL-8-024')
+    assert group['question_id']=='GL-8-024'
+    assert group['question'] in text
+    assert 'GL-8-024:01' not in text and 'GL-8-024:02' not in text
+    templates=[load_template(module) for module in ('expense','general-ledger')]
+    ids=[q['question_id'] for template in templates for q in template['questions']]
+    assert len(ids)==len(set(ids))==sum(len(t['questions']) for t in templates)

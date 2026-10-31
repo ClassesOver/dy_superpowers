@@ -17,7 +17,9 @@ from mcp.shared.exceptions import MCPError
 
 PLUGIN = Path(__file__).parents[2]
 sys.path.insert(0, str(PLUGIN / "mcp-server/src"))
-from dy_superpowers_mcp.inspection import _matrix
+from dy_superpowers_mcp.qa_templates import load_template
+from dy_superpowers_mcp.qa_store import read_qa
+from template_qa_helpers import make_report
 
 DOMAINS = {
     "expense": {
@@ -70,19 +72,17 @@ def _parameters(workspace, connection):
     )
 
 
-def _report(module, environment, *, scope_id="e2e-scope", result="未检查", reason="端到端测试未执行业务验收"):
-    revision, standards = _matrix(module)
-    expected, records = [], []
-    for index, ((order, item_id), standard) in enumerate(sorted(standards.items())):
-        key = dict(module=module, check_order=order, research_id=item_id,
-                   scope_id=scope_id, environment=environment)
-        expected.append(key)
-        records.append({**key, "record_id": f"e2e-{index}", "research_revision": "",
-                        "matrix_revision": revision, "acceptance_standard": standard,
-                        "verification_method": "真实 MCP 协议测试；不代替岗位及业务样例验收",
-                        "verified_at": datetime.now(timezone.utc).isoformat(),
-                        "result": result, "reason": reason, "evidence_refs": []})
-    return {"expected_checks": expected, "excluded_checks": [], "records": records}
+def _report(module, environment, *, workspace, scope_id=None, result='未检查', reason='端到端测试未执行业务验收'):
+    state = read_qa(workspace, module, scope_id) if scope_id else read_qa(workspace, module)
+    report = make_report(workspace, module, state=state, environment=environment) if state['records'] else {
+        'basis': dict(module=module, scope_id=scope_id or 'e2e-scope', environment=environment,
+                      template_revision=state['template_revision'], answer_version='no-confirmed-answers'),
+        'expected_checks': [dict(question_id=q['question_id']) for q in state['questions']],
+        'records': []}
+    if not state['records']:
+        # 真实只读模式在没有确认QA时只报告阻塞，不伪造可发布依据。
+        return report
+    return report
 
 
 def _save_summary(workspace, data):
@@ -173,32 +173,30 @@ async def _workflow(workspace, module, connection, *, live=False):
                     except MCPError as exc:
                         summary["gaps"].append({"model": model, "reason": "远端读取失败或权限不足",
                                                 "error_code": exc.code})
-                report = _report(module, "E2E-READONLY", result="待确认",
+                report = _report(module, connection.get("DY_ODOO_ENVIRONMENT", connection["DB_NAME"]), workspace=workspace, result="待确认",
                                  reason="仅确认模型及最小字段可查询；公司范围、业务制度和岗位验收未确认")
                 validation = await call("dy_inspection_validate", report=report)
-                assert validation["valid"] and validation["gate"] == "待确认"
+                assert not validation["valid"] and validation["gate"] != "通过"
                 summary["business_gate"] = validation["gate"]
                 assert not (workspace / ".dy_superpowers/modules").exists()
+                summary.update(protocol_ok=True, remote_writes=False)
+                _save_summary(workspace, summary)
+                return summary
             else:
-                key = _report(module, "E2E-FIXTURE")["expected_checks"][0]
-                research = {"module": module, "check_order": key["check_order"],
-                            "research_id": key["research_id"], "config_item": "仅测试：基础应用",
-                            "conclusion": "仅测试夹具：该子项核验基础模块；不构成真实项目调研结论",
-                            "scope": "隔离端到端测试夹具", "scope_id": key["scope_id"],
-                            "confirmed_by": "测试夹具", "confirmed_at": datetime.now(timezone.utc).isoformat(),
-                            "research_complete": True}
+                template = load_template(module)
+                question = template['questions'][0]
+                research = dict(module=module, template_revision=template['revision'], scope='隔离端到端测试夹具',
+                    batch_id='e2e-first', answers=[dict(question_id=question['question_id'], answer='本期基础应用按清单配置',
+                        research_complete=False, expected_revision=None)])
                 with pytest.raises(MCPError) as denied:
-                    await call("dy_research_record_write", **research, confirmed=False)
+                    await call('dy_research_answers_save', **research, confirmed=False)
                 assert denied.value.code == -32602
-                saved = await call("dy_research_record_write", **research, confirmed=True)
-                record = (await call("dy_module_memory_read", module=module,
-                                     check_order=key["check_order"], research_id=key["research_id"],
-                                     scope_id=key["scope_id"]))["records"][0]
-                assert saved["revision"] == record["revision"]
-                context = {"skill": f"{module}-inspection", "module": module,
-                           "check_order": key["check_order"], "research_id": key["research_id"],
-                           "scope_id": key["scope_id"], "revision": record["revision"],
-                           "environment": key["environment"]}
+                saved = await call('dy_research_answers_save', **research, confirmed=True)
+                state = await call('dy_module_memory_read', module=module, scope_id=saved['scope_id'])
+                record = state['records'][0]
+                context = dict(skill=f'{module}-inspection', module=module, question_id=question['question_id'],
+                    scope_id=state['scope_id'], template_revision=state['template_revision'],
+                    answer_version=state['answer_version'], answer_revision=record['revision'], environment='e2e-db')
                 await call("dy_odoo_module_info", module=spec["addon"], trace_context=context)
                 metadata = await call("dy_odoo_model_fields", model=spec["model"], trace_context=context)
                 assert "company_id" in metadata
@@ -211,27 +209,18 @@ async def _workflow(workspace, module, connection, *, live=False):
                 assert absent == []
                 await call("dy_odoo_record_read", model=spec["model"], ids=[rows[0]["id"]],
                            fields=["id"], trace_context=context)
-                report = _report(module, "E2E-FIXTURE")
-                item = report["records"][0]
-                item.update(result="通过", reason="仅测试：模拟基础模块证据链完整",
-                            research_revision=record["revision"], verified_at=datetime.now(timezone.utc).isoformat(),
-                            evidence_refs=[{"kind": "odoo", "reference": "e2e:module-installed",
-                                            "trace_id": trace_id, "model": "ir.module.module"}])
-                validation = await call("dy_inspection_validate", report=report)
-                assert validation["valid"] and validation["gate"] == "待确认"
-                missing = deepcopy(report)
-                missing["records"].pop()
-                assert not (await call("dy_inspection_validate", report=missing))["valid"]
-                forged = deepcopy(report)
-                forged["records"][0]["evidence_refs"][0]["trace_id"] = "e2e-no-evidence"
-                assert not (await call("dy_inspection_validate", report=forged))["valid"]
-                scoped = deepcopy(report)
-                scoped["expected_checks"] = [report["expected_checks"][0]]
-                scoped["excluded_checks"] = [{**entry, "reason": "仅测试报告窄范围，不代表业务范围排除"}
-                                             for entry in report["expected_checks"][1:]]
-                scoped["records"] = [item]
-                assert (await call("dy_inspection_validate", report=scoped))["gate"] == "通过"
-                summary["business_gate"] = validation["gate"]
+                report = _report(module, 'e2e-db', workspace=workspace, scope_id=saved['scope_id'])
+                prepared = await call('dy_inspection_prepare', module=module, scope_id=saved['scope_id'])
+                report['basis'] = prepared['basis']
+                validation = await call('dy_inspection_validate', report=report)
+                assert validation['valid'] and validation['gate'] == '待确认'
+                missing = deepcopy(report); missing['records'].pop()
+                assert not (await call('dy_inspection_validate', report=missing))['valid']
+                forged = deepcopy(report); forged['basis']['environment'] = 'PROD'
+                assert not (await call('dy_inspection_validate', report=forged))['valid']
+                scoped = deepcopy(report); scoped['expected_checks'] = scoped['expected_checks'][:1]; scoped['records'] = scoped['records'][:1]
+                assert not (await call('dy_inspection_validate', report=scoped))['valid']
+                summary['business_gate'] = validation['gate']
 
             with pytest.raises(MCPError) as denied:
                 await call("dy_inspection_report_save", confirmed=False, report=report)
@@ -240,21 +229,22 @@ async def _workflow(workspace, module, connection, *, live=False):
             loaded = await call("dy_inspection_report_read", module=module, report_id=artifact["report_id"])
             path = (workspace / artifact["path"]).resolve()
             assert path.is_relative_to((workspace / ".dy_superpowers/reports").resolve())
-            assert path.read_text(encoding="utf-8") == loaded
-            assert "待确认" in loaded and "完整检查数据" in loaded
+            saved_content = path.read_text(encoding="utf-8")
+            assert saved_content.split('\n## 机器可读数据\n', 1)[0].rstrip() + '\n' == loaded
+            assert "待确认" in loaded and "机器可读数据" not in loaded
             summary.update(report_path=artifact["path"], expected_count=len(report["expected_checks"]))
             second_artifact = await call("dy_inspection_report_save", confirmed=True, report=report)
             assert second_artifact["report_id"] != artifact["report_id"]
-            assert path.read_text(encoding="utf-8") == loaded
+            assert path.read_text(encoding="utf-8") == saved_content
 
             if not live:
-                await call("dy_research_record_write", **{**research, "conclusion": "仅测试夹具：调研已修订"},
-                           expected_revision=record["revision"], confirmed=True)
-                stale = await call("dy_inspection_validate", report=report)
-                assert not stale["valid"]
-                assert any("调研修订已变化" in entry["message"] for entry in stale["errors"])
+                updated = {**research, 'scope_id': saved['scope_id'], 'batch_id': 'e2e-second',
+                    'answers': [{**research['answers'][0], 'answer': '修订后的配置清单', 'expected_revision': record['revision']}]}
+                await call('dy_research_answers_save', **updated, confirmed=True)
+                stale = await call('dy_inspection_validate', report=report)
+                assert not stale['valid']
                 with pytest.raises(MCPError):
-                    await call("dy_inspection_report_save", confirmed=True, report=report)
+                    await call('dy_inspection_report_save', confirmed=True, report=report)
             events = await call("dy_trace_read")
             assert events and any(event.get("event") == "inspection.report.save" for event in events)
             serialized = json.dumps(events, ensure_ascii=False)
@@ -287,9 +277,13 @@ def test_inspection_skill_e2e_mock(tmp_path, module):
             else:
                 assert params["service"] == "object" and params["method"] == "execute_kw"
                 _, _, _, model, method, args, kwargs = params["args"]
-                assert method in {"search_read", "fields_get"}
+                assert method in {"search_read", "read", "fields_get"}
                 if method == "fields_get":
                     result = {"id": {"type": "integer"}, "company_id": {"type": "many2one", "relation": "res.company"}}
+                elif method == 'read':
+                    assert len(args) == 1 and isinstance(args[0], list)
+                    result = [{key: row[key] for key in set(kwargs['fields']) | {'id'}}
+                              for row in sample_rows if row['id'] in args[0]]
                 elif model == "ir.module.module":
                     rows = installed
                     for term in args[0]:

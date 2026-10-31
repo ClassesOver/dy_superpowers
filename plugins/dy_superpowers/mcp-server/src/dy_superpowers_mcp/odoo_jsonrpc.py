@@ -17,6 +17,13 @@ class OdooConfigurationError(ValueError):
 class OdooRPCError(RuntimeError):
     """远程连接、认证或 Odoo 调用失败，消息不包含远端正文。"""
 
+    def __init__(self, message, *, category=None, request_id=None):
+        super().__init__(message)
+        allowed = {'权限拒绝', '认证拒绝', '业务校验失败', '业务操作被拒绝', '记录不存在或不可访问', '服务端错误'}
+        self.diagnostic = ({'category': category, 'request_id': request_id}
+                           if isinstance(category, str) and category in allowed
+                           and type(request_id) is int and request_id > 0 else None)
+
 
 @dataclass(frozen=True)
 class OdooSettings:
@@ -44,7 +51,7 @@ class OdooSettings:
 
 
 class OdooReadClient:
-    """只暴露 search_read，连接参数来自环境变量。"""
+    """受限的查询、精确读取和元数据接口，连接参数来自环境变量。"""
 
     def __init__(self, settings: OdooSettings, session_factory=None) -> None:
         base = settings.url.rstrip("/")
@@ -97,7 +104,18 @@ class OdooReadClient:
                 raise OdooRPCError("Odoo JSON-RPC 返回格式无效")
             if "error" in payload:
                 # 错误响应优先判定：部分错误响应不回显请求 id，不能误报为格式无效。
-                raise OdooRPCError("Odoo JSON-RPC 调用失败")
+                error = payload['error']
+                data = error.get('data') if isinstance(error, dict) else None
+                name = data.get('name') if isinstance(data, dict) else None
+                categories = {'odoo.exceptions.AccessError': '权限拒绝',
+                              'odoo.exceptions.AccessDenied': '认证拒绝',
+                              'odoo.exceptions.ValidationError': '业务校验失败',
+                              'odoo.exceptions.UserError': '业务操作被拒绝',
+                              'odoo.exceptions.MissingError': '记录不存在或不可访问'}
+                category = categories.get(name, '服务端错误') if isinstance(name, str) else '服务端错误'
+                # 只输出本地类别和本地生成的请求编号，不回显远端消息、类名或 traceback。
+                raise OdooRPCError(f"Odoo JSON-RPC 调用失败：{category}（请求 {request_id}）",
+                                   category=category, request_id=request_id)
             if payload.get("id") != request_id or "result" not in payload:
                 raise OdooRPCError("Odoo JSON-RPC 返回格式无效")
             return payload["result"]
@@ -117,8 +135,7 @@ class OdooReadClient:
                     *, context: dict[str, bool] | None = None) -> list[dict[str, Any]]:
         options = {"fields": fields, "limit": limit, "offset": offset}
         if context is not None:
-            if not isinstance(context, dict) or set(context) - {"active_test"} or any(type(value) is not bool for value in context.values()):
-                raise OdooConfigurationError("context 仅支持布尔型 active_test")
+            _validate_search_context(model, context)
             options["context"] = context
         try:
             result = self._execute_kw(model, "search_read", [domain], options)
@@ -131,11 +148,16 @@ class OdooReadClient:
         return result
 
     def read_records(self, model: str, ids: list[int], fields: list[str]) -> list[dict[str, Any]]:
-        return self.search_read(model, [["id", "in", ids]], fields, min(len(ids), 100))
+        result = self._execute_kw(model, "read", [ids], {"fields": fields})
+        if (not isinstance(result, list)
+                or any(not isinstance(row, dict) or type(row.get('id')) is not int or row['id'] not in ids for row in result)
+                or len({row['id'] for row in result}) != len(result)):
+            raise OdooRPCError("Odoo 返回格式无效")
+        return result
 
     def fields_get(self, model: str) -> dict[str, Any]:
         try:
-            result = self._execute_kw(model, "fields_get", [], {"attributes": ["string", "type", "required", "readonly", "relation", "store"]})
+            result = self._execute_kw(model, "fields_get", [], {"attributes": ["string", "type", "required", "readonly", "relation", "store", "selection"]})
         except OdooRPCError:
             raise
         except Exception as exc:
@@ -157,6 +179,12 @@ class OdooReadClient:
         return self.search_read("ir.module.module", domain, ["name", "shortdesc", "latest_version", "state", "dependencies_id"], 100, offset)
 
 
+def _validate_search_context(model: str, context: Any) -> None:
+    allowed = {'active_test', 'view_company'} if model == 'res.company' else {'active_test'}
+    if not isinstance(context, dict) or set(context) - allowed or any(type(value) is not bool for value in context.values()):
+        raise OdooConfigurationError('context 仅支持布尔型 active_test；res.company 另支持布尔型 view_company')
+
+
 def validate_read_arguments(arguments: dict[str, Any]) -> tuple[str, list[Any], list[str], int, int, dict[str, bool]]:
     method = arguments.get("method", "search_read")
     if method != "search_read":
@@ -174,8 +202,7 @@ def validate_read_arguments(arguments: dict[str, Any]) -> tuple[str, list[Any], 
     if set(kwargs) - {"fields", "limit", "offset", "context"}:
         raise OdooConfigurationError("kwargs 仅支持 fields/limit/offset/context")
     context = kwargs.get("context", {})
-    if not isinstance(context, dict) or set(context) - {"active_test"} or any(type(value) is not bool for value in context.values()):
-        raise OdooConfigurationError("context 仅支持布尔型 active_test")
+    _validate_search_context(model, context)
     fields = kwargs.get("fields", [])
     if not isinstance(fields, list) or not all(isinstance(field, str) and field for field in fields):
         raise OdooConfigurationError("kwargs.fields 必须是字符串列表")

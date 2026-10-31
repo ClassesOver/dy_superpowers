@@ -14,7 +14,7 @@ from .storage import atomic_write, record_lock
 from .trace import redact
 
 ROOT = '.dy_superpowers-parsed'
-PARSER_VERSION = 'dy-document-extract/v3'
+PARSER_VERSION = 'dy-document-extract/v4'
 _HASH = re.compile(r'^[a-f0-9]{64}$')
 _PRIVATE = re.compile(r'(?<!\d)(?:1[3-9]\d{9}|\d{17}[\dXx])(?!\d)')
 
@@ -45,7 +45,23 @@ def _read(path: Path, default):
         raise ValueError('解析索引或清单损坏，须核对后恢复') from exc
 
 
-def _clean(value, redactions: list, locator=''):
+def _archive_reference(workspace, value):
+    """仅保留本工作区已生成且摘要匹配的结构化归档引用。"""
+    path = value.get('archive_path')
+    digest = value.get('source_sha256')
+    if workspace is None or not isinstance(path, str) or not isinstance(digest, str) or not _HASH.fullmatch(digest):
+        return False
+    pattern = rf'{re.escape(ROOT)}/{digest}/runs/\d{{8}}T\d{{12}}Z-[a-f0-9]{{8}}'
+    if not re.fullmatch(pattern, path):
+        return False
+    try:
+        manifest = _read(_safe(workspace, path, 'manifest.json'), {})
+        return manifest.get('source_sha256') == digest
+    except (ValueError, OSError):
+        return False
+
+
+def _clean(value, redactions: list, locator='', *, workspace=None):
     if isinstance(value, str):
         safe = _PRIVATE.sub('[REDACTED]', redact(value))
         if safe != value:
@@ -53,17 +69,19 @@ def _clean(value, redactions: list, locator=''):
                                'blocking': False})
         return safe
     if isinstance(value, list):
-        return [_clean(item, redactions, f'{locator}/{i}') for i, item in enumerate(value)]
+        return [_clean(item, redactions, f'{locator}/{i}', workspace=workspace) for i, item in enumerate(value)]
     if isinstance(value, dict):
         result = {}
         sensitive = redact(value)
         for key, item in value.items():
-            if sensitive.get(key) != item and sensitive.get(key) == '[REDACTED]':
+            if key in ('archive_path', 'source_sha256') and _archive_reference(workspace, value):
+                result[key] = item
+            elif sensitive.get(key) != item and sensitive.get(key) == '[REDACTED]':
                 redactions.append({'code': 'sensitive_content_redacted', 'locator': f'{locator}/{key}',
                                    'blocking': False})
                 result[key] = '[REDACTED]'
             else:
-                result[key] = _clean(item, redactions, f'{locator}/{key}')
+                result[key] = _clean(item, redactions, f'{locator}/{key}', workspace=workspace)
         return result
     return value
 
@@ -218,7 +236,7 @@ def archive_source(workspace: Path, source: Path, module: str, *, force=False,
             asset_path.write_bytes(data)
             assets.append(_clean({key: value for key, value in asset.items() if key != 'data'}, redactions)
                           | {'path': asset_path.relative_to(run).as_posix(), 'redacted': redacted})
-        clean_candidates = _clean(candidates or {}, redactions)
+        clean_candidates = _clean(candidates or {}, redactions, workspace=workspace)
         candidate_issues = clean_candidates.get('issues', []) if isinstance(clean_candidates, dict) else []
         if isinstance(candidate_issues, list):
             issues.extend({**issue, 'source_component': 'candidate_parser'}

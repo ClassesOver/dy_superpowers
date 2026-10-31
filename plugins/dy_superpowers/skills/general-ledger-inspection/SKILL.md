@@ -1,49 +1,22 @@
 ---
 name: general-ledger-inspection
-description: 在巡检 Odoo 12 HRP 总账交付、科目、账簿、凭证、期间、预算会计、报表、结转、转账或岗位权限时使用。
+description: 在巡检 Odoo 12 HRP 总账交付、配置、岗位权限、业务流程或会计衔接时使用。
 ---
 
 # 总账模块巡检
 
-## 目标与输入
+读取当前业务范围的最新确认答卷及附件，利用现有知识检索和Odoo只读工具，核对当前系统是否满足答卷要求。连接由MCP从当前环境变量取得，不向用户重复索要。
 
-依据当前领域清单和确认调研，逐子项检查当前工作区单一项目的总账交付状态，输出有范围、版本和证据的中文报告。
+当前总账模板提供问题范围，同范围最新确认答案和绑定附件定义业务要求。模块标识general-ledger，完整覆盖当前模板的全部question_id，分母取自prepare返回的expected_checks，原分组和编号用于展示，内部唯一question_id不改造或补号。不使用静态巡检矩阵，是否对齐须由工具检索当前系统取证后判断。
 
-执行前读取 [巡检通用流程](../../references/inspection-workflow.md)；输入包括项目和环境、实际 Odoo 版本/定制模块、公司/账套、会计制度、财务/预算范围、期间、岗位、报表及交付批次。缺失内容按通用流程补充，不从模板或文件名猜测。
+按[通用流程](../../references/inspection-workflow.md)执行“最新答卷 → 环境连接 → 提取要求 → 知识检索 → 系统查询 → 对齐比较”，报告遵循[校验合同](../../docs/inspection-validation.md)。dy_odoo_environment_info核对环境变量配置，prepare省略environment自动复用；不打印连接配置或凭据。公司或日期缺失只阻塞依赖分支，独立检查继续。
 
-## 适用范围
+调用dy_module_memory_read默认新QA，再dy_inspection_prepare(module, scope_id, environment)，以返回basis和全部expected_checks准备核验。局部答案、缺附件或漂移保留待确认/未检查。缺口交module-research，携带真实question_id、版本和事实，批次确认保存后回读，仅恢复对应分支。
 
-- 模块标识 `general-ledger`，调用上下文 `skill=general-ledger-inspection`；检查键原样取自 [总账清单](references/inspection-matrix.md)，如 `GL-1-001 + 01`。
-- 当前支持确认调研、矩阵键校验及 `dy_inspection_*` 正式报告闭环。
-- 依次核对应用与主数据、科目和辅助、岗位与凭证、期间和账簿、财务/预算映射、报表与现金流、月末/年末结转和通用转账、打印归档。预算、机构专项及后期能力按实际制度和交付范围裁剪。
-- 凭证平衡、借贷方向、科目/辅助范围、公司隔离、期间控制、财务/预算关联、报表取数、现金流分类、结转顺序和防重均须对应业务证据；不适用只能豁免相应子项，不能免掉适用的财务结果核验。
+[源码与查询](references/source-queries.md)仅技术配方。先用dy_knowledge_search/read理解相关模块、模型和规则，再核对实际安装模块与字段，按当前答卷的预期值逐项查询比较。公司隔离、岗位、金额日期边界、预算、凭证、支付制证须对应业务效果证据，配置存在不能证明操作成功，无法验证保留材料/人工缺口。
 
-## 执行流程
+从答案与附件提取requirements，按通用流程填写verification_target；附件source_refs保留当前确认绑定的reference和sha256，摘要不一致先重新确认，不能沿用旧证据。prepare返回的detail_checks逐项保留，未核验不省略。配置项用当前系统取证，调研附件不自证对齐。逐项记录预期、实值、范围及分页完整性，结构校验不证明业务语义完整。
 
-1. 按通用流程确认范围，读取清单全部检查键，再关联同范围的确认调研；按 P0、P1、P2 排序本轮工作。
-2. 纳入本轮可验证子项，其余逐键列入排除清单并说明原因；每个纳入子项保留完整验收标准，依据确认结论选择分支。
-3. 读取 [总账源码与查询](references/source-queries.md)，先核对模块/字段，再按实际公司、科目结构、期间及状态取只读证据。
-4. 区分配置观察与业务验收，逐子项记录结果、证据限制和阻塞；按通用流程校验、展示、确认保存并回读报告。
+先dy_inspection_validate，展示当前模板全部问题的覆盖、门禁与边界，用户确认保存后dy_inspection_report_save(confirmed=true)，再dy_inspection_report_read。未知项不能删除凑通过，不适用须完整答案和真实依据。模板、答案版本或附件变化重新prepare；旧报告仅历史read，不能新验证放行或冒称补PDF通过。
 
-## 调研衔接
-
-调研缺失、过期、冲突或不足以选定验收分支时，按通用流程调用 `module-research`。传原 `trace_id`、检查键、阻塞原因、完整验收标准和已知事实；保存确认结论后按同键及 `scope_id` 回读，只恢复有效 `confirmed` 子项。其他独立子项继续执行。
-
-总账补充调研按 [总账调研 QA 与附件模板](../module-research/references/general-ledger-research-guide.md) 执行。该参考页的提取指引要素用于判断结论是否足以驱动本检查项，附件模板用于收集结构化证据；模板示例不属于项目事实，附件观察也不能替代业务确认。巡检报告引用确认后的检查键、适用范围和验收标准，不把附件全文或未确认字段发布到 Wiki。
-
-## 源码对照
-
-[总账源码与查询](references/source-queries.md) 维护技术模块、模型、字段和查询范围。尤其核对记录归属与候选公司计算字段、分类账共享范围、持久状态与临时向导、经常性凭证与期末结转。源码只作线索，以实际安装版本和元数据复核。
-
-## 结果与报告
-
-按通用流程和 [巡检校验合同](../../docs/inspection-validation.md) 留存结果；报告覆盖每个声明范围的纳入及排除子项。门禁、覆盖度和未验证业务分开说明；部分范围通过不得表述为总账模块整体交付通过。
-
-报告至少给出项目/环境、适用范围、逐子项调研与验收依据、结果与证据、异常影响、阻塞事项、下一步和门禁。调研、矩阵、范围或环境变化后，相关旧结果重新验证。项目事实经确认写入工作区，不能写回领域清单。
-
-## 参考资料
-
-- [总账清单](references/inspection-matrix.md)：检查键、调研问题及验收标准。
-- [总账源码与查询](references/source-queries.md)：执行只读配方前读取。
-- [巡检通用流程](../../references/inspection-workflow.md)：执行、调研、证据、报告及复查合同。
-- [来源驱动巡检](../../references/inspection-source-validation.md)：已有调研材料、映射差异及端到端测试。
+trace_context复用basis（含服务生成的connection_fingerprint），补question_id、answer_revision及必要的requirement_id；内部标识不展示。Odoo证据须本工作区成功tool.end和对应odoo.read。巡检只用只读工具，不调用配置或模块变更。详见[来源核对](../../references/inspection-source-validation.md)。

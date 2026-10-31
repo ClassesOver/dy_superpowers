@@ -150,7 +150,7 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
             assert await call("dy_research_record_write", {**research, "confirmed": False}, expect_error=True) is None
             saved = json.loads(await call("dy_research_record_write", {**research, "confirmed": True}))
             record = json.loads(await call("dy_module_memory_read",
-                                           {"module": "expense", "check_order": "1", "research_id": "01",
+                                           {"legacy": True, "module": "expense", "check_order": "1", "research_id": "01",
                                             "scope_id": saved["scope_id"]}))["records"][0]
             assert record["status"] == "confirmed" and record["revision"] == saved["revision"]
             assert record["evidence_ref"] == research["evidence_ref"]

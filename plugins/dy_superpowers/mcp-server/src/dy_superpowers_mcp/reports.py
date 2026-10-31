@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import copy
 import json
-import html
 import os
 import re
 import secrets
@@ -11,10 +11,10 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .qa_store import publication_lock
+
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _MODULE_NAMES = {"expense": "费用", "general-ledger": "总账"}
-_CHECK_PREFIXES = {"expense": "EXP", "general-ledger": "GL"}
-_STATUSES = ("通过", "部分通过", "不通过", "不适用", "待确认", "未检查", "未知")
 _MARKDOWN_SPECIAL = set(r"\`*_{}[]<>()#+-.!|")
 
 
@@ -28,143 +28,25 @@ def _markdown_text(value: object) -> str:
     return "".join("\\" + char if char in _MARKDOWN_SPECIAL else char for char in _text(value))
 
 
-def _cell(value: object) -> str:
-    return _markdown_text(value)
-
-
 def _code_fence(value: str) -> str:
     longest = max((len(run) for run in re.findall(r"`+", value)), default=0)
     return "`" * max(3, longest + 1)
 
 
-def _category_index(module: str) -> dict[str, dict[str, str]]:
-    matrix = Path(__file__).parents[3] / "skills" / f"{module}-inspection" / "references" / "inspection-matrix.md"
-    if not matrix.is_file():
-        return {}
-    result = {}
-    lines = matrix.read_text(encoding="utf-8").splitlines()
-    for index, line in enumerate(lines):
-        heading = re.match(r"^## 检查顺序 (.+)$", line)
-        if not heading:
-            continue
-        order = heading.group(1).strip()
-        for candidate in lines[index + 1:]:
-            if candidate.startswith("## "):
-                break
-            if not candidate.startswith("|") or "---" in candidate:
-                continue
-            cells = [html.unescape(cell.strip()).replace("<br>", " ") for cell in candidate.strip().strip("|").split("|")]
-            if len(cells) >= 4 and cells[0] not in {"配置分类", "配置类别"}:
-                result[order] = {"category": cells[0], "item": cells[1], "priority": cells[3]}
-                break
-    return result
-
-
-def _check_label(module: str, record: dict) -> str:
-    """统一业务编号；原始键仍留在机器数据中以关联调研和 trace。"""
-    order = str(record.get("check_order", ""))
-    item = str(record.get("research_id", ""))
-    pattern = r"(\d+)" if module == "expense" else r"GL-\d+-(\d+(?:-\d+)*)"
-    match = re.fullmatch(pattern, order)
-    if module in _CHECK_PREFIXES and match and re.fullmatch(r"\d+", item):
-        if module == "general-ledger":
-            return f"GL-{match[1]}-{int(item):02d}"
-        return f"{_CHECK_PREFIXES[module]}-{int(match[1]):03d}-{int(item):02d}"
-    return f"{order} + {item}"
-
-
-def _render_report(module: str, report_id: str, report: dict, validation: dict) -> str:
-    module_name = _MODULE_NAMES.get(module, module)
-    records = [record for record in report.get("records", []) if isinstance(record, dict)]
-    expected = report.get("expected_checks", [])
-    excluded = report.get("excluded_checks", [])
-    counts = {status: sum(record.get("result") == status for record in records) for status in _STATUSES}
-    blockers = {}
-    for record in records:
-        if record.get("result") in {"不通过", "部分通过", "待确认", "未检查", "未知"}:
-            reason = record.get("reason", "").strip() or "未提供原因"
-            blockers.setdefault(reason, []).append(_check_label(module, record))
-
-    project = report.get("project_context", {})
-    if not isinstance(project, dict):
-        project = {}
-    envs = sorted({item.get("environment", "") for item in expected if isinstance(item, dict) and item.get("environment")})
-    companies = project.get("companies") or project.get("company_scope") or []
-    company_text = "、".join(map(str, companies)) if isinstance(companies, list) else str(companies)
-    if not company_text:
-        company_text = "范围待确认" if project.get("company_scope_confirmed") is False else "未提供"
-    evidence_summary = report.get("evidence_summary")
-    summary = evidence_summary.get("summary") if isinstance(evidence_summary, dict) else None
-    if not isinstance(summary, str) or not summary.strip():
-        summary = "按下方检查明细及证据判断；未确认事项不视为通过。"
-    coverage = validation.get("coverage") if isinstance(validation.get("coverage"), dict) else {}
-    inspected = sum(item.get("inspected", 0) for item in coverage.values())
-    matrix_size = sum(item.get("matrix", 0) for item in coverage.values())
-    partial_note = ""
-    if matrix_size and inspected < matrix_size:
-        partial_note = (f" 本轮为部分范围巡检（纳入 {inspected}/{matrix_size} 个矩阵子项），"
-                        "门禁仅代表纳入项，不代表整模块交付通过。")
-    sections = [
-        f"# {module_name}模块巡检报告", "",
-        "## 一页结论", "",
-        f"**交付结论：{validation['gate']}。** "
-        + ("当前仍有检查项待确认或未完成，暂不能作为交付通过依据。" if validation["gate"] == "待确认" else "")
-        + partial_note, "",
-        f"- 巡检范围：{module_name}模块；{len(expected)} 项纳入检查，{len(excluded)} 项按范围排除。",
-        f"- 项目范围：公司/组织 {_markdown_text(company_text)}；环境 {_markdown_text('、'.join(envs) or '未提供')}。",
-        "- 检查结果：" + "；".join(f"{status} {count} 项" for status, count in counts.items() if count) + ("。" if any(counts.values()) else "暂无结果。"),
-        f"- 当前判断：{_markdown_text(summary)}",
-        "", "## 阻塞事项与下一步", "",
-    ]
-    if blockers:
-        for index, (reason, check_ids) in enumerate(blockers.items(), 1):
-            sections.append(f"{index}. **待处理（影响 {len(check_ids)} 项）**：{_markdown_text(reason)}")
-            sections.append("   - 涉及项请见下方按业务分类的检查明细。")
-    else:
-        sections.append("当前没有待处理的阻塞事项。")
-    steps = report.get("next_steps", [])
-    if steps:
-        sections.extend(["", "**建议下一步**"])
-        sections.extend(f"{index}. {_markdown_text(step)}" for index, step in enumerate(steps, 1))
-    if blockers:
-        sections.extend(["", "责任人和计划完成日期：待项目负责人指定。"])
-
-    category_index = _category_index(module)
-    grouped = {}
-    for record in records:
-        metadata = category_index.get(record.get("check_order", ""), {})
-        category = _markdown_text(metadata.get("category", "其他检查"))
-        grouped.setdefault(category, []).append((record, metadata))
-    sections.extend(["", "## 巡检明细（按业务分类）", ""])
-    for category, items in grouped.items():
-        sections.extend([f"### {category}", "", "| 检查项 | 配置项 | 优先级 | 结果 | 说明/待办 |", "| --- | --- | --- | --- | --- |"])
-        for record, metadata in items:
-            label = _check_label(module, record)
-            reason = record.get("reason", "") or "—"
-            sections.append("| " + " | ".join(_cell(value) for value in (
-                label, metadata.get("item", "—"), metadata.get("priority", "—"), record.get("result", "未知"), reason,
-            )) + " |")
-        sections.append("")
-    sections.extend(["## 检查依据与证据", ""])
-    for record in records:
-        label = _check_label(module, record)
-        sections.extend([
-            f"### {_markdown_text(label)}｜{_markdown_text(record.get('result', '未知'))}", "",
-            f"- 验收要求：{_markdown_text(record.get('acceptance_standard', '未提供'))}",
-            f"- 验证方式：{_markdown_text(record.get('verification_method', '未提供'))}",
-            f"- 说明：{_markdown_text(record.get('reason', '未提供'))}",
-            f"- 证据引用：{_markdown_text(json.dumps(record.get('evidence_refs', []), ensure_ascii=False))}", "",
-        ])
-    machine_data = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True)
-    fence = _code_fence(machine_data)
-    sections.extend(["## 技术追溯", "", f"- 报告编号：`{report_id}`", f"- 校验时间：{validation['validated_at']}",
-                     f"- 矩阵版本：`{json.dumps(validation['matrix_revisions'], ensure_ascii=False, sort_keys=True)}`",
-                     f"- 结构校验：{'通过' if validation.get('valid') else '失败'}；门禁：{validation['gate']}。",
-                     "- 业务编号使用 EXP（费用）或 GL（总账）前缀；原始检查键保留在下方 JSON，供调研和证据回链。",
-                     "- 完整原始检查数据见下方 JSON；用于复核、迁移和自动处理。", "",
-                     "## 完整检查数据（机器可读）", "", f"{fence}json",
-                     machine_data, fence, ""])
-    return "\n".join(sections)
+def _business_refs(refs: list) -> str:
+    labels = []
+    for ref in refs:
+        kind = ref.get('kind')
+        if kind == 'answer':
+            label = '已确认调研答案'
+        elif kind == 'odoo':
+            label = '当前系统只读核验（详见核验方式与原因）'
+        else:
+            name = Path(ref.get('reference', '')).name
+            label = ('人工签认材料：' if kind == 'manual' else '材料：') + name
+        if label not in labels:
+            labels.append(label)
+    return '；'.join(labels) or '尚无核验材料'
 
 
 def _write_new_file(path: Path, content: str) -> None:
@@ -224,6 +106,9 @@ def save_report(workspace: str | Path, module: str, report: dict, validation: di
     """保存固定结构交付物：业务 PDF 与含机器可读数据的 Markdown 同目录同名。"""
     if validation.get("valid") is not True:
         raise ValueError("巡检报告校验未通过，不能保存")
+    from .qa_store import read_qa
+    report = copy.deepcopy(report)
+    report['scope'] = read_qa(workspace, module, report['basis']['scope_id'])['scope']
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     report_id = f"{timestamp}-{secrets.token_hex(3)}"
     path = report_path(workspace, module, report_id)
@@ -234,26 +119,33 @@ def save_report(workspace: str | Path, module: str, report: dict, validation: di
 
     pdf_bytes = render_report_pdf(module, report_id, report, validation,
                                   generated_at=validation.get("validated_at", ""))  # 先渲染，失败时不落盘任何交付物
-    if path.is_symlink() or pdf_path.is_symlink():
-        raise ValueError("巡检报告文件不允许使用符号链接")
-    markdown_written = False
-    pdf_written = False
-    try:
-        _write_new_file(path, content)
-        markdown_written = True
-        _write_new_bytes(pdf_path, pdf_bytes)
-        pdf_written = True
-    except Exception:
-        # 报告是 Markdown/PDF 成对交付物；失败时清理本次调用已创建的文件。
-        if markdown_written:
-            path.unlink(missing_ok=True)
-        if pdf_written:
-            pdf_path.unlink(missing_ok=True)
-        raise
+    from .inspection import validate_inspection
+    with publication_lock(workspace, module):
+        current = validate_inspection(Path(workspace), report)
+        if not current.get('valid') or current.get('basis', {}).get('module') != module:
+            raise ValueError('巡检报告依据或版本已变化，最终校验失败，不能保存')
+        path = report_path(workspace, module, report_id)
+        pdf_path = path.with_suffix('.pdf')
+        if path.is_symlink() or pdf_path.is_symlink():
+            raise ValueError("巡检报告文件不允许使用符号链接")
+        markdown_written = False
+        pdf_written = False
+        try:
+            _write_new_file(path, content)
+            markdown_written = True
+            _write_new_bytes(pdf_path, pdf_bytes)
+            pdf_written = True
+        except Exception:
+            # 报告是 Markdown/PDF 成对交付物；失败时清理本次调用已创建的文件。
+            if markdown_written:
+                path.unlink(missing_ok=True)
+            if pdf_written:
+                pdf_path.unlink(missing_ok=True)
+            raise
     return report_id, path, pdf_path
 
 
-def read_report(workspace: str | Path, module: str, report_id: str) -> str:
+def _read_raw_report(workspace: str | Path, module: str, report_id: str) -> str:
     path = report_path(workspace, module, report_id)
     if path.is_symlink():
         raise ValueError("巡检报告文件不允许使用符号链接")
@@ -262,11 +154,19 @@ def read_report(workspace: str | Path, module: str, report_id: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def read_report(workspace: str | Path, module: str, report_id: str) -> str:
+    """默认仅返回业务正文，内部关联数据只供重导和追溯。"""
+    content = _read_raw_report(workspace, module, report_id)
+    if '\n## 机器可读数据\n' not in content:
+        return content
+    return content.split('\n## 机器可读数据\n', 1)[0].rstrip() + '\n'
+
+
 def export_report_pdf(workspace: str | Path, module: str, report_id: str) -> tuple[Path, bool]:
     """从已存 Markdown 报告的机器可读数据重导出业务 PDF；已有 PDF 不覆盖。"""
     import json as _json
 
-    content = read_report(workspace, module, report_id)
+    content = _read_raw_report(workspace, module, report_id)
     blocks = re.findall(r"\n(`{3,})json\n(.*?)\n\1", content, re.DOTALL)
     if not blocks:
         raise ValueError("报告缺少机器可读 JSON 数据，无法重导出 PDF")
@@ -276,9 +176,8 @@ def export_report_pdf(workspace: str | Path, module: str, report_id: str) -> tup
         raise ValueError("报告机器可读数据损坏，无法重导出 PDF") from exc
     if not isinstance(report, dict):
         raise ValueError("报告机器可读数据损坏，无法重导出 PDF")
-    modules = {item.get("module") for item in report.get("expected_checks", [])
-               if isinstance(item, dict) and isinstance(item.get("module"), str)}
-    if modules != {module}:
+    basis = report.get('basis')
+    if not isinstance(basis, dict) or not isinstance(basis.get('module'), str) or basis['module'] != module:
         raise ValueError("报告数据与模块不匹配，无法重导出 PDF")
     saved_times = re.findall(r"^- 校验时间：([^\r\n]*)\r?$", content, re.MULTILINE)
     if len(saved_times) != 1:
@@ -295,13 +194,51 @@ def export_report_pdf(workspace: str | Path, module: str, report_id: str) -> tup
 
     validation = validate_inspection(Path(workspace), report)
     if not validation.get("valid"):
-        raise ValueError("报告数据按当前矩阵重新校验未通过（矩阵或调研状态已变化），不能重导出 PDF")
+        raise ValueError("报告不符合当前模板 QA 合同（旧格式、版本或材料已变化），不能重导出 PDF")
     validation["validated_at"] = saved_time
     pdf_path = report_path(workspace, module, report_id).with_suffix(".pdf")
     if pdf_path.is_symlink():
         raise ValueError("巡检报告文件不允许使用符号链接")
     if pdf_path.is_file():
-        return pdf_path, False
-    _write_new_bytes(pdf_path, render_report_pdf(module, report_id, report, validation,
-                                              generated_at=saved_time))
+        with publication_lock(workspace, module):
+            if not validate_inspection(Path(workspace), report).get('valid'):
+                raise ValueError('报告依据或版本已变化，最终校验失败，不能重导出 PDF')
+            return pdf_path, False
+    pdf_bytes = render_report_pdf(module, report_id, report, validation, generated_at=saved_time)
+    with publication_lock(workspace, module):
+        if not validate_inspection(Path(workspace), report).get('valid'):
+            raise ValueError('报告依据或版本已变化，最终校验失败，不能重导出 PDF')
+        pdf_path = report_path(workspace, module, report_id).with_suffix('.pdf')
+        if pdf_path.is_symlink():
+            raise ValueError('巡检报告文件不允许使用符号链接')
+        if pdf_path.is_file():
+            return pdf_path, False
+        _write_new_bytes(pdf_path, pdf_bytes)
     return pdf_path, True
+
+
+def _render_report(module: str, report_id: str, report: dict, validation: dict) -> str:
+    from .qa_templates import load_template
+    questions = {q['question_id']: q for q in load_template(module)['questions']}
+    lines = [f'# {_MODULE_NAMES.get(module, module)}模块巡检报告', '',
+        f'- 报告编号：{report_id}', f'- 校验时间：{validation["validated_at"]}',
+        f'- 门禁：{validation["gate"]}', f'- 范围：{_markdown_text(report.get("scope", "未提供业务范围"))}',
+        f'- 模板覆盖：{len(report["records"])}/{len(questions)} 提取点；未检查项仍保留。', '',
+        '## 未验证边界', validation['limitations'], '', '## 模板问题与业务要求']
+    group = None
+    for record in report['records']:
+        q = questions[record['question_id']]
+        if q['check_order'] != group:
+            group = q['check_order']
+            lines += ['', f'### {_markdown_text(q["research_id"])} {_markdown_text(q["config_item"])}']
+        lines += ['', f'#### {_markdown_text(q["question"])}',
+            f'- 结果：{record["result"]}',
+            f'- 核验方式：{_markdown_text(record["verification_method"])}；原因：{_markdown_text(record["reason"])}']
+        for requirement in record['requirements']:
+            lines += [f'- 业务要求：{_markdown_text(requirement["text"])}；结果：{requirement["result"]}',
+                '- 答案/附件依据：' + _markdown_text(_business_refs(requirement['source_refs'])),
+                '- 证据：' + _markdown_text(_business_refs(requirement['evidence_refs']))]
+    payload = json.dumps(report, ensure_ascii=False, indent=2)
+    fence = _code_fence(payload)
+    lines += ['', '## 机器可读数据', fence + 'json', payload, fence, '']
+    return '\n'.join(lines)
