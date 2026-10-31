@@ -15,6 +15,14 @@ from contextlib import nullcontext
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+if __name__ == '__main__':
+    try:
+        import mcp
+    except ModuleNotFoundError as exc:
+        if exc.name == 'mcp':
+            raise SystemExit('缺少 MCP SDK，请使用插件锁定的 uv 环境安装依赖。') from exc
+        raise
+
 from dy_superpowers_mcp import TraceStore, WorkspaceMemory
 from dy_superpowers_mcp.memory import WRITABLE_MEMORY_FILES, list_notes, module_memory_files, module_memory_path, read_note, validate_module, write_note
 from dy_superpowers_mcp.trace import TRACE_CODE_PATTERN, TRACE_CONTEXT_FIELDS, TRACE_ID_PATTERN
@@ -22,13 +30,16 @@ from dy_superpowers_mcp.telemetry import current_trace_context, initialize_telem
 from dy_superpowers_mcp.odoo_jsonrpc import OdooConfigurationError, OdooReadClient, OdooRPCError, OdooSettings, validate_read_arguments
 from dy_superpowers_mcp.wiki_sync import sync_wiki
 from dy_superpowers_mcp.project_wiki import configure_project, stage_wiki
-from dy_superpowers_mcp.knowledge import module_info as knowledge_module_info, search as knowledge_search
+from dy_superpowers_mcp.knowledge import module_info as knowledge_module_info, search as knowledge_search, read as knowledge_read
+from dy_superpowers_mcp.configuration import CONFIGURATION_SCHEMAS, write_configuration
+from dy_superpowers_mcp.odoo_capabilities import SCHEMAS as ODOO_CAPABILITY_SCHEMAS, DESCRIPTIONS as ODOO_CAPABILITY_DESCRIPTIONS
+from dy_superpowers_mcp import odoo_discovery, odoo_imports, odoo_operations, odoo_planning
 from dy_superpowers_mcp.research import read_module_records, read_record, record_summary, write_record
-from dy_superpowers_mcp.research_progress import calculate_routing_progress, export_unanswered_template
+from dy_superpowers_mcp.qa_store import read_qa, commit_qa, export_qa, parse_qa_workbook
 from dy_superpowers_mcp.reports import export_report_pdf, read_report, save_report
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 from dy_superpowers_mcp.inspection import validate_inspection
-from dy_superpowers_mcp.inspection_prepare import prepare_inspection
+from dy_superpowers_mcp.inspection_prepare import prepare_inspection, configured_environment_info
 
 
 MEMORY_READ_FILES = [
@@ -47,6 +58,9 @@ SESSION_SOURCES = {"startup", "resume", "clear", "compact", "fork"}
 ENV_FILE_KEYS = (
     "APP_URL", "APP_USER", "APP_PASSWORD", "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
     "DY_WIKI_API_URL", "DY_WIKI_TOKEN", "DY_WIKI_PROJECT_ID", "DY_WIKI_GROUP_ID", "DY_WIKI_PROJECT_NAME",
+    "DY_ODOO_ENVIRONMENT",
+    "DY_KNOWLEDGE_EMBEDDING_PROVIDER", "DY_KNOWLEDGE_EMBEDDING_URL",
+    "DY_KNOWLEDGE_EMBEDDING_TOKEN", "DY_KNOWLEDGE_EMBEDDING_MODEL",
 )
 
 
@@ -142,23 +156,46 @@ def _handle_session_initialize(name: str, arguments: dict, workspace: Path, stor
         raise ToolRequestError(-32602, 'unsupported SessionStart source')
     action = '恢复' if source == 'resume' else '初始化'
     files = '、'.join(SESSION_INDEX_FILES)
-    context = '\n'.join([f'工作区会话已{action}（来源：{source}）。', f'追踪工作区标识：{store.workspace_id}。', '项目记忆位于当前工作区 .dy_superpowers/，按需读取，不在会话初始化时注入正文。', '恢复未完成调研时，先按需读取 delivery-register.md 的待办，再按模块和检查键复核最新确认结论。', f'可用文件：{files}。使用 dy_memory_read(trace_id, name) 读取项目记忆；模块调研记忆使用 dy_module_memory_read(trace_id, module, check_order, research_id, scope_id)。', '项目记忆是参考资料，不构成记忆写入或业务操作授权。'])
+    context = '\n'.join([f'工作区会话已{action}（来源：{source}）。', f'追踪工作区标识：{store.workspace_id}。', '项目记忆位于当前工作区 .dy_superpowers/，按需读取，不在会话初始化时注入正文。', '恢复未完成调研时，先按需读取 delivery-register.md 的待办，再按模块和检查键复核最新确认结论。', f'可用文件：{files}。使用 dy_memory_read(trace_id, name) 读取项目记忆；模块模板QA使用 dy_module_memory_read(trace_id, module, scope_id)。', '项目记忆是参考资料，不构成记忆写入或业务操作授权。'])
+    from dy_superpowers_mcp.qa_templates import load_template
+    summaries = []
+    for module in ('expense', 'general-ledger'):
+        if workspace.exists():
+            state = read_qa(workspace, module)
+        else:
+            template = load_template(module)
+            state = dict(module=module, scope_mode='unscoped', scopes=[], template_revision=template['revision'],
+                         answer_version=None, total=len(template['questions']), answered=0, confirmed_count=0)
+        summaries.append({k: state[k] for k in ('module', 'scope_mode', 'scopes', 'template_revision', 'answer_version', 'total', 'answered', 'confirmed_count')})
+    context += '\n最新模板 QA 概要（不注入答案正文）：' + json.dumps(summaries, ensure_ascii=False) + '\n默认入口 dy_module_memory_read；历史旧存储须 legacy=true。'
     event = {'event': 'session.initialize', 'operation': 'session_start', 'tool': name, 'status': 'ok', 'source_ref': source, 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
     return context
 
+def _configured_odoo_identity():
+    """仅查看本地配置身份，不创建客户端、登录或输出凭据。"""
+    return configured_environment_info()
+
+
+def _handle_odoo_environment_info(name, arguments, workspace, store, span_id, otel_span):
+    return _configured_odoo_identity()
+
+
 def _handle_inspection_prepare(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     try:
+        environment = arguments.get('environment') or _configured_odoo_identity()['environment']
+        if environment is None:
+            raise ValueError('配置未提供可确定的安全环境标识，请先核对 dy_odoo_environment_info 后明确 environment')
         result = prepare_inspection(workspace, arguments['module'], arguments['scope_id'],
-                                    arguments['environment'], checks=arguments.get('checks'),
+                                    environment, checks=arguments.get('checks'),
                                     previous_records=arguments.get('previous_records'))
     except ValueError as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'inspection.prepare', 'operation': 'prepare', 'tool': name, 'status': 'ok',
              'module': arguments['module'], 'scope_id': arguments['scope_id'],
              'trace_context': {'module': arguments['module'], 'scope_id': arguments['scope_id'],
-                               'environment': arguments['environment']},
+                               'environment': environment},
              'expected_count': result['preparation']['total'],
              'count': result['preparation']['research_ready'],
              'result_count': result['preparation']['blocked'], 'span_id': span_id}
@@ -183,14 +220,10 @@ def _handle_inspection_report_save(name: str, arguments: dict, workspace: Path, 
     report = arguments.get('report')
     if not isinstance(report, dict):
         raise ToolRequestError(-32602, 'report 必须是对象')
-    modules = {item.get('module') for item in report.get('expected_checks', [])
-               if isinstance(item, dict) and isinstance(item.get('module'), str)}
-    if len(modules) != 1:
-        raise ToolRequestError(-32602, '一个报告只能包含一个模块')
-    module = next(iter(modules))
     result = validate_inspection(workspace, report)
     if not result['valid']:
         raise ToolRequestError(-32602, '巡检报告校验失败: ' + json.dumps(result['errors'], ensure_ascii=False))
+    module = report['basis']['module']
     try:
         report_id, path, pdf_path = save_report(workspace, module, report, result)
     except ValueError as exc:
@@ -404,6 +437,11 @@ def _handle_memory_write(name: str, arguments: dict, workspace: Path, store: Tra
 def _handle_odoo_record_search(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     try:
         model, domain, fields, limit, offset, context = validate_read_arguments(arguments)
+        from dy_superpowers_mcp.odoo_comparison import validate_comparison, compare_records
+        try:
+            validate_comparison(arguments.get('comparison'), fields, limit=limit, offset=offset)
+        except ValueError as exc:
+            raise ToolRequestError(-32602, str(exc)) from exc
         query_event = {'event': 'odoo.query', 'operation': 'search_read', 'tool': name, 'status': 'running',
                        'model': model, 'domain': domain, 'domain_term_count': len(domain),
                        'field_count': len(fields), 'limit': limit, 'offset': offset,
@@ -419,6 +457,7 @@ def _handle_odoo_record_search(name: str, arguments: dict, workspace: Path, stor
         _clear_odoo_client()
         raise ToolRequestError(-32603, str(exc)) from exc
     event = {'event': 'odoo.read', 'operation': 'search_read', 'tool': name, 'status': 'ok', 'model': model,
+             **compare_records(arguments.get('comparison'), result),
              'count': len(result), 'result_count': len(result), 'field_count': len(fields),
              'domain_term_count': len(domain), 'limit': limit, 'offset': offset, 'domain': domain,
              'active_test': context.get('active_test', True),
@@ -437,10 +476,16 @@ def _handle_odoo_record_read(name: str, arguments: dict, workspace: Path, store:
                 raise ToolRequestError(-32602, 'ids 必须是 1 到 100 个正整数')
             if not isinstance(fields, list) or not all((isinstance(item, str) and item for item in fields)):
                 raise ToolRequestError(-32602, 'fields 必须是字符串列表')
+            from dy_superpowers_mcp.odoo_comparison import validate_comparison, compare_records
+            try:
+                validate_comparison(arguments.get('comparison'), fields)
+            except ValueError as exc:
+                raise ToolRequestError(-32602, str(exc)) from exc
             result = client.read_records(arguments['model'], ids, fields)
             operation = 'record_read'
             model = arguments['model']
-            metadata = {'requested_count': len(ids), 'field_count': len(fields)}
+            metadata = {'requested_count': len(ids), 'field_count': len(fields),
+                        **compare_records(arguments.get('comparison'), result)}
         elif name == 'dy_odoo_model_fields':
             result = client.fields_get(arguments['model'])
             operation = 'model_fields'
@@ -470,14 +515,109 @@ def _handle_odoo_record_read(name: str, arguments: dict, workspace: Path, store:
         _clear_odoo_client()
         raise ToolRequestError(-32603, str(exc)) from exc
 
+def _handle_odoo_capability(name, arguments, workspace, store, span_id, otel_span):
+    try:
+        return _run_odoo_capability(name, arguments, workspace, store, span_id, otel_span)
+    except OdooConfigurationError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    except OdooRPCError as exc:
+        _clear_odoo_client()
+        raise ToolRequestError(-32603, '系统查询失败，请核对连接与权限；不返回远端正文') from exc
+
+
+def _run_odoo_capability(name, arguments, workspace, store, span_id, otel_span):
+    class AuditedClient:
+        def __init__(self, client):
+            self.client = client
+
+        def __getattr__(self, key):
+            return getattr(self.client, key)
+
+        def search_read(self, model, domain, fields, limit, offset=0, **kwargs):
+            metadata = dict(operation='search_read', tool=name, model=model, domain=domain,
+                            field_count=len(fields), domain_term_count=len(domain), limit=limit,
+                            offset=offset, span_id=span_id, trace_context=arguments.get('trace_context', {}))
+            event = dict(metadata, event='odoo.query', status='running')
+            append_trace(store, arguments['trace_id'], event)
+            record_otel_event(otel_span, event)
+            rows = self.client.search_read(model, domain, fields, limit, offset, **kwargs)
+            event = dict(metadata, event='odoo.read', status='ok', count=len(rows), result_count=len(rows))
+            append_trace(store, arguments['trace_id'], event)
+            record_otel_event(otel_span, event)
+            return rows
+
+        def module_records(self, module=None, installed_only=False, offset=0):
+            domain = [['name', '=', module]] if module else []
+            if installed_only:
+                domain.append(['state', '=', 'installed'])
+            return self.search_read('ir.module.module', domain, ['name', 'state', 'latest_version'], 100, offset)
+
+    factory = lambda: AuditedClient(_odoo_client(workspace))
+    if name == 'dy_odoo_analyze_requirements':
+        return odoo_planning.analyze(arguments['description'])
+    if name == 'dy_odoo_design_solution':
+        return odoo_planning.design(arguments['requirements'], arguments.get('user_answers'))
+    if name == 'dy_odoo_validate_plan':
+        return odoo_planning.validate(arguments['plan'], TOOL_SCHEMAS)
+    if name == 'dy_odoo_diagnostics_health_check':
+        return odoo_discovery.health_check(factory)
+    if name in {'dy_odoo_module_install', 'dy_odoo_module_upgrade', 'dy_odoo_module_uninstall'}:
+        result = odoo_operations.module_operation(workspace, name.rsplit('_', 1)[1], arguments, factory)
+        if result.get('status') == 'attempted':
+            _clear_odoo_client()
+        return result
+    if name == 'dy_odoo_record_delete':
+        return odoo_operations.delete_record(arguments)
+    if name == 'dy_odoo_import_execute':
+        return odoo_imports.execute(workspace, factory, arguments)
+    client = factory()
+    if name == 'dy_knowledge_community_gaps':
+        return odoo_discovery.community_gaps(workspace, client, arguments['module'], arguments['scope_id'])
+    if name == 'dy_odoo_import_template':
+        return odoo_imports.template(client, arguments)
+    if name == 'dy_odoo_import_preview':
+        return odoo_imports.preview(client, arguments)
+    if name == 'dy_odoo_record_execute':
+        return odoo_operations.execute_read(client, arguments)
+    return odoo_discovery.discover(client, name.removeprefix('dy_odoo_'), arguments)
+
+
 def _handle_knowledge_module_info(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
-    return knowledge_module_info(arguments.get('module', ''))
+    try:
+        return knowledge_module_info(arguments.get('module', ''))
+    except ValueError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
 
 def _handle_knowledge_search(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     query = arguments.get('query')
     if not isinstance(query, str) or not query.strip():
         raise ToolRequestError(-32602, 'query 必须是非空文本')
-    return knowledge_search(query)
+    try:
+        return knowledge_search(query, **{key: arguments[key] for key in ('module', 'knowledge_type', 'limit', 'retrieval_mode') if key in arguments})
+    except ValueError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+
+def _handle_knowledge_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    try:
+        return knowledge_read(arguments['reference'], offset=arguments.get('offset', 0), limit=arguments.get('limit', 4000))
+    except ValueError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+
+def _handle_configuration_write(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    operation = 'create' if name == 'dy_odoo_record_create' else 'update'
+    try:
+        result = write_configuration(workspace, operation, arguments)
+    except OdooConfigurationError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    except OdooRPCError as exc:
+        raise ToolRequestError(-32603, str(exc)) from exc
+    event = {'event': 'odoo.configuration', 'operation': operation, 'tool': name,
+             'status': result.get('execution_status', 'not_executed'),
+             'model': arguments['model'], 'target_id': result.get('record_id'),
+             'field_count': len(arguments['values']), 'span_id': span_id}
+    append_trace(store, arguments['trace_id'], event)
+    record_otel_event(otel_span, event)
+    return result
 
 def _handle_research_record_write(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     record_arguments = dict(arguments)
@@ -504,7 +644,25 @@ def _handle_research_record_write(name: str, arguments: dict, workspace: Path, s
     record_otel_event(otel_span, event)
     return result
 
+def _qa_trace_records(records):
+    """调研正文仍可追踪；已确认附件明细只保存在工作区版本与答卷。"""
+    return [{**record, 'attachments': [{key: value for key, value in bound.items() if key != 'details'}
+            for bound in record['attachments']]} for record in records]
+
+
 def _handle_module_memory_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
+    if arguments.get('legacy') is not True:
+        try:
+            legacy_fields = {'check_order', 'research_id', 'checks', 'offset', 'limit', 'scope'} & arguments.keys()
+            if legacy_fields:
+                raise ValueError('新版 QA 按 scope_id/question_ids 读取；旧键、scope文本或分页参数须显式 legacy=true')
+            result = read_qa(workspace, arguments['module'], arguments.get('scope_id'), arguments.get('question_ids'))
+            append_trace(store, arguments['trace_id'], {'event': 'memory.module.read', 'operation': 'qa_read',
+                'tool': name, 'status': 'ok', 'module': arguments['module'], 'scope_id': result['scope_id'],
+                'research_content': _qa_trace_records(result['records']), 'span_id': span_id})
+            return result
+        except ValueError as exc:
+            raise ToolRequestError(-32602, str(exc)) from exc
     try:
         module = validate_module(arguments['module'])
         has_key = arguments.get('check_order') is not None or arguments.get('research_id') is not None
@@ -567,8 +725,10 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
         if intent is not None and intent not in ('research', 'progress', 'export', 'import', 'confirm'):
             raise ValueError('intent 必须为 research、progress、export、import 或 confirm')
         scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
-        records = _progress_records(workspace, module, scope, scope_id)
-        result = calculate_routing_progress(module, records, scope=scope, scope_id=scope_id)
+        result = read_qa(workspace, module, scope_id)
+        if scope is not None and result.get('scope') != scope:
+            raise ValueError('请按最新 QA 选择真实 scope_id')
+        result['unknown_count'] = 0
         result['intent'] = intent
         result['next_action'] = 'classify_intent' if intent is None else {
             'progress': 'report_progress', 'export': 'export_checklist', 'import': 'confirm_source',
@@ -591,26 +751,71 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
 
 def _handle_research_unanswered_export(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     try:
-        module = validate_module(arguments['module'])
-        scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
-        records = _progress_records(workspace, module, scope, scope_id)
-        result = export_unanswered_template(workspace, module, arguments['trace_id'], records=records,
-                                            scope=scope, scope_id=scope_id,
-                                            confirmed=arguments.get('confirmed'))
-    except PermissionError as exc:
+        if 'scope' in arguments:
+            raise ValueError('新版答卷按 scope_id 导出，不接受 scope 文本，请先读取真实范围标识')
+        result = export_qa(workspace, arguments['module'], scope_id=arguments.get('scope_id'),
+                           confirmed=arguments.get('confirmed'))
+    except (PermissionError, ValueError) as exc:
         raise ToolRequestError(-32602, str(exc)) from exc
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
-    event = {'event': 'research.unanswered.export', 'operation': 'export_unanswered_template',
-             'tool': name, 'status': 'ok', 'module': module, 'scope_id': result['scope_id'],
-             'scope_mode': result['scope_mode'],
-             'question_count': result['question_count'], 'path': result['path'], 'span_id': span_id}
-    append_trace(store, arguments['trace_id'], event)
-    record_otel_event(otel_span, event)
     return result
+
+
+def _handle_research_answers_save(name, arguments, workspace, store, span_id, otel_span):
+    try:
+        result = commit_qa(workspace, arguments['module'], scope=arguments['scope'],
+            scope_id=arguments.get('scope_id'), template_revision=arguments['template_revision'],
+            answers=arguments['answers'], batch_id=arguments['batch_id'], confirmed=arguments['confirmed'],
+            confirmed_by=os.environ.get('FEISHU_CODEX_BOT_SENDER_USER_ID', '').strip() or '当前会话用户')
+    except (ValueError, PermissionError) as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    append_trace(store, arguments['trace_id'], {'event': 'research.write', 'operation': 'qa_batch',
+        'tool': name, 'status': 'ok', 'module': arguments['module'], 'scope_id': result['scope_id'],
+        'research_content': _qa_trace_records(result['records']), 'span_id': span_id})
+    return result
+
+
+def _handle_research_answers_import(name, arguments, workspace, store, span_id, otel_span):
+    try:
+        return parse_qa_workbook(workspace, arguments['path'])
+    except (ValueError, OSError) as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
 
 # 工具名、说明、schema 和处理器在此唯一注册。
 TOOL_REGISTRY = {
+    'dy_odoo_environment_info': (
+        '只读查看本地已配置环境身份，不登录或访问Odoo。仅返回稳定environment、非密database标识与configured，不返回URL、用户、密码或令牌；不猜dev/prod。',
+        {'type': 'object', 'additionalProperties': False, 'required': ['trace_id'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': TRACE_ID_PATTERN.pattern}}},
+        _handle_odoo_environment_info,
+    ),
+    'dy_research_answers_save': (
+        '确认后批次保存当前模板问题答案；答案整项替换，其他问题保留，返回同步版本答卷路径。',
+        {'type': 'object', 'additionalProperties': False,
+         'required': ['trace_id', 'module', 'scope', 'template_revision', 'answers', 'batch_id', 'confirmed'],
+         'properties': {'trace_id': {'type': 'string'}, 'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
+             'scope': {'type': 'string', 'minLength': 1, 'maxLength': 500}, 'scope_id': {'type': 'string'},
+             'template_revision': {'type': 'string'}, 'batch_id': {'type': 'string', 'minLength': 1},
+             'confirmed': {'type': 'boolean'}, 'answers': {'type': 'array', 'items': {
+                 'type': 'object', 'additionalProperties': False,
+                 'required': ['question_id', 'answer', 'research_complete', 'expected_revision'],
+                 'properties': {'question_id': {'type': 'string'}, 'answer': {'type': 'string'},
+                     'research_complete': {'type': 'boolean'}, 'expected_revision': {'type': ['string', 'null']},
+                     'attachments': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': False,
+                         'required': ['reference', 'sha256', 'requirements'], 'properties': {
+                             'reference': {'type': 'string'}, 'sha256': {'type': 'string', 'pattern': '^[a-f0-9]{64}$'},
+                             'requirements': {'type': 'array', 'items': {'type': 'string'}},
+                             'details': {'type': 'array', 'description': '经确认且已脱敏的本问题附件模板字段明细，日期时间用 ISO 文本；同引用及摘要省略时保留已有明细，显式空列表清空。',
+                                 'items': {'type': 'object', 'additionalProperties': False, 'required': ['sheet', 'rows'],
+                                     'properties': {'sheet': {'type': 'string'}, 'rows': {'type': 'array',
+                                         'items': {'type': 'object', 'additionalProperties': {'type': ['string', 'number', 'boolean', 'null']}}}}}}}}}}}}}},
+        _handle_research_answers_save,
+    ),
+    'dy_research_answers_import': (
+        '仅解析工作区已登记答卷为候选，不写入记忆，不自动提升完整性。',
+        {'type': 'object', 'additionalProperties': False, 'required': ['trace_id', 'path'],
+         'properties': {'trace_id': {'type': 'string'}, 'path': {'type': 'string', 'minLength': 1}}},
+        _handle_research_answers_import,
+    ),
     'dy_session_initialize': (
         '初始化或恢复当前工作区会话并返回项目记忆索引；需要时使用记忆工具读取完整内容。',
         {'type': 'object',
@@ -620,24 +825,20 @@ TOOL_REGISTRY = {
         _handle_session_initialize,
     ),
     'dy_inspection_prepare': (
-        '只读准备同范围巡检：返回当前调研完整性、矩阵标准、阻塞与补问、上次版本的复查原因。准备就绪不等于验收通过，不执行Odoo查询，不保存或沿用旧结果。',
+        '只读准备同范围模板巡检：返回当前basis、问题投影全量、答案与附件要求、阻塞和补问。准备就绪不等于验收通过，不执行Odoo查询，不保存或沿用旧结果。',
         {'type': 'object', 'additionalProperties': False,
-         'required': ['trace_id', 'module', 'scope_id', 'environment'],
+         'required': ['trace_id', 'module', 'scope_id'],
          'properties': {'trace_id': {'type': 'string', 'pattern': TRACE_ID_PATTERN.pattern},
                         'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
                         'scope_id': {'type': 'string', 'pattern': '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'},
                         'environment': {'type': 'string', 'maxLength': 128, 'pattern': TRACE_CODE_PATTERN.pattern,
-                                        'description': '与证据 trace_context 一致的稳定环境标识，例如 UAT 或 PROD，不是中文显示名。'},
-                        'checks': {'type': 'array', 'minItems': 1, 'maxItems': 100, 'items': {
-                            'type': 'object', 'additionalProperties': False,
-                            'required': ['check_order', 'research_id'],
-                            'properties': {'check_order': {'type': 'string', 'minLength': 1},
-                                           'research_id': {'type': 'string', 'minLength': 1}}}},
+                                        'description': '可省略，使用dy_odoo_environment_info的安全配置身份；显式值须与证据trace_context一致，不能猜dev/prod。'},
+                        'checks': {'type': 'array', 'minItems': 1, 'items': {'type': 'object', 'required': ['question_id'], 'properties': {'question_id': {'type': 'string'}}}},
                         'previous_records': {'type': 'array', 'maxItems': 1000, 'items': {'type': 'object'}}}},
         _handle_inspection_prepare,
     ),
     'dy_inspection_validate': (
-        '校验声明范围内的巡检覆盖、证据引用、当前调研与矩阵版本；不验证证据真实性或授予写入授权。',
+        '校验当前模板覆盖、QA版本、附件及真实证据。配置明确结果须引用同一comparison及当前读取追踪，比较状态须匹配报告结论；不证明自由文本理解完整，不授予写入授权。',
         {'type': 'object',
          'required': ['trace_id', 'report'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'}, 'report': {'type': 'object'}}},
@@ -757,14 +958,16 @@ TOOL_REGISTRY = {
         _handle_memory_read,
     ),
     'dy_module_memory_read': (
-        '读取当前项目指定模块调研记忆；可按检查键、适用范围和版本读取。分页默认 limit=100，最大100；has_more=true 时用返回的 next_offset 继续，保持其他参数不变。无需传 limit=200。不接受任意文件路径。',
+        '读取当前问题投影对应的QA，按scope_id/question_ids过滤，默认返回全量问题与当前确认答案。不接受任意文件路径。',
         {'type': 'object',
          'required': ['trace_id', 'module'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9_-]{0,63}$'},
                         'check_order': {'type': 'string'}, 'research_id': {'type': 'string'},
-                        'view': {'type': 'string', 'enum': ['current', 'summary', 'full'], 'default': 'full',
-                                 'description': '巡检用 current；目录或进度用 summary；仅审阅历史时用 full。旧调用省略保持完整返回。'},
+                        'legacy': {'type': 'boolean', 'default': False},
+                        'question_ids': {'type': 'array', 'items': {'type': 'string'}},
+                        'view': {'type': 'string', 'enum': ['qa', 'current', 'summary', 'full'], 'default': 'qa',
+                                 'description': '默认qa。current/summary/full仅legacy=true历史视图；不指定legacy不会读取旧答案。'},
                         'checks': {'type': 'array', 'minItems': 1, 'maxItems': 100, 'items': {
                             'type': 'object', 'additionalProperties': False,
                             'required': ['check_order', 'research_id'],
@@ -787,7 +990,7 @@ TOOL_REGISTRY = {
         _handle_research_progress,
     ),
     'dy_research_unanswered_export': (
-        '导出模块调研Excel；用户本轮明确要求输出/下载问题清单即为导出授权，直接传confirmed=true，无需再次询问，也不以范围或70%阈值阻塞；仅说开始调研不算授权。首表为按指南排序的完整调研问题清单，含已有记忆及状态，后附动态附件页。范围可省略，多范围答案分别标注；按模块、日期和流水命名，不覆盖旧文件。question_count为尚未完整项数。',
+        '导出当前问卷完整答卷；本轮明确下载即授权confirmed=true，不受70%门槛。按scope_id选择真实范围，省略时唯一范围复用、多范围分别生成登记副本，不能拼接答案。包含问题投影全量、最新确认答案和附件明细，不覆盖原版本或旧下载。scope文本不支持。',
         {'type': 'object', 'required': ['trace_id', 'module', 'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
@@ -816,19 +1019,20 @@ TOOL_REGISTRY = {
         _handle_memory_write,
     ),
     'dy_odoo_record_search': (
-        '按 Odoo Forge 的记录搜索命名执行受限的 search_read 只读查询。',
-        {'type': 'object',
+        '执行受限的 search_read 只读记录查询。筛选用 args=[domain]；字段与分页用 kwargs={fields,limit,offset,context}，不支持 order。',
+        {'type': 'object', 'additionalProperties': False,
          'required': ['trace_id', 'model'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'model': {'type': 'string', 'pattern': '^[a-z0-9_][a-z0-9_.]{0,127}$'},
                         'method': {'type': 'string', 'enum': ['search_read']},
-                        'args': {'type': 'array'},
+                        'args': {'type': 'array', 'description': '仅包含一个 domain 列表，即 [domain]；省略表示无筛选。'},
                         'kwargs': {'type': 'object', 'additionalProperties': False,
                                    'properties': {'fields': {'type': 'array', 'items': {'type': 'string'}},
                                                   'limit': {'type': 'integer', 'minimum': 1, 'maximum': 100},
                                                   'offset': {'type': 'integer', 'minimum': 0},
                                                   'context': {'type': 'object', 'additionalProperties': False,
-                                                              'properties': {'active_test': {'type': 'boolean'}}}}}}},
+                                                              'properties': {'active_test': {'type': 'boolean'},
+                                                                             'view_company': {'type': 'boolean', 'description': '仅限 res.company'}}}}}}},
         _handle_odoo_record_search,
     ),
     'dy_odoo_record_read': (
@@ -876,11 +1080,25 @@ TOOL_REGISTRY = {
         _handle_knowledge_module_info,
     ),
     'dy_knowledge_search': (
-        '按中文或英文关键词搜索本地 HRP/Odoo 模块知识。',
-        {'type': 'object',
+        '检索本地HRP源码及业务摘要；技术名按字面查询，中文短语无源码命中时拆词，先同时匹配全部词，无结果才放宽为任一词。search_strategy/search_terms/query_relaxed说明实际查询。按reference续读，不证明语义正确；不支持模型/字段语义过滤。',
+        {'type': 'object', 'additionalProperties': False,
          'required': ['trace_id', 'query'],
-         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'}, 'query': {'type': 'string'}}},
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'}, 'query': {'type': 'string', 'minLength': 1, 'maxLength': 1024},
+                        'module': {'type': 'string', 'minLength': 1},
+                        'knowledge_type': {'type': 'string', 'enum': ['source', 'summary']},
+                        'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50},
+                        'retrieval_mode': {'type': 'string', 'enum': ['lexical', 'hybrid'], 'default': 'lexical'}}},
         _handle_knowledge_search,
+    ),
+    'dy_knowledge_read': (
+        '按 Knowledge 返回的 reference 分段读取规则或代码；不接受文件路径。',
+        {'type': 'object', 'additionalProperties': False,
+         'required': ['trace_id', 'reference'],
+         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
+                        'reference': {'type': 'string', 'minLength': 1, 'maxLength': 2048},
+                        'offset': {'type': 'integer', 'minimum': 0},
+                        'limit': {'type': 'integer', 'minimum': 1, 'maximum': 16000}}},
+        _handle_knowledge_read,
     ),
     'dy_research_record_write': (
         '在用户确认后追加模块调研结论并保留历史版本。',
@@ -908,6 +1126,20 @@ TOOL_REGISTRY = {
         _handle_research_record_write,
     ),
 }
+for operation, schema in CONFIGURATION_SCHEMAS.items():
+    TOOL_REGISTRY[f'dy_odoo_record_{operation}'] = (
+        '受限 HRP 配置写入；默认关闭。先 dry_run 预览摘要，经用户确认后写入并回读。答卷驱动时须携带完整巡检 trace_context，摘要绑定当前答卷；过期拒绝。不授予批次验收通过。',
+        schema, _handle_configuration_write)
+for name, schema in ODOO_CAPABILITY_SCHEMAS.items():
+    TOOL_REGISTRY[name] = (ODOO_CAPABILITY_DESCRIPTIONS[name], schema, _handle_odoo_capability)
+for name in ('dy_odoo_record_search', 'dy_odoo_record_read'):
+    TOOL_REGISTRY[name][1]['properties']['comparison'] = {
+        'type': 'object', 'additionalProperties': False,
+        'description': '实时精确比较；trace 仅保存预期摘要和比较状态。搜索须 offset=0 且 limit 大于预期数量。',
+        'required': ['expected_count', 'expected_values'],
+        'properties': {'expected_count': {'type': 'integer', 'minimum': 0, 'maximum': 100},
+                       'expected_values': {'type': 'object', 'maxProperties': 100}},
+    }
 for _, schema, _ in TOOL_REGISTRY.values():
     schema['properties']['trace_context'] = {
         'type': 'object', 'description': '可选的巡检关联标识；不包含正文，不代表业务授权或事实验证。',
@@ -930,7 +1162,21 @@ def _dispatch_tool(name, arguments, workspace, store, span_id, otel_span):
         raise ToolRequestError(-32602, "未知工具")
     if next(Draft202012Validator(spec[1]).iter_errors(arguments), None) is not None:
         raise ToolRequestError(-32602, "工具参数不符合 schema，请核对必填字段及类型")
-    with _odoo_lock if name.startswith("dy_odoo_") else nullcontext():
+    if name in {'dy_odoo_record_search', 'dy_odoo_record_read', 'dy_odoo_model_fields',
+                'dy_odoo_module_info', 'dy_odoo_module_list_installed'} or name in ODOO_CAPABILITY_SCHEMAS:
+        identity = configured_environment_info()
+        actual_environment = identity['environment']
+        supplied = arguments.get('trace_context', {}).get('environment')
+        if supplied is not None and supplied != actual_environment:
+            raise ToolRequestError(-32602, 'trace_context.environment 与当前服务实际配置身份不一致')
+        fingerprint = identity['connection_fingerprint']
+        if arguments.get('trace_context', {}).get('connection_fingerprint', fingerprint) != fingerprint:
+            raise ToolRequestError(-32602, '连接身份已变化，请重新准备巡检')
+        if actual_environment is not None:
+            arguments = {**arguments, 'trace_context': {**arguments.get('trace_context', {}),
+                                                       'environment': actual_environment,
+                                                       **({'connection_fingerprint': fingerprint} if fingerprint else {})}}
+    with _odoo_lock if name.startswith("dy_odoo_") or name == 'dy_knowledge_community_gaps' else nullcontext():
         with operation_span(name):
             return spec[2](name, arguments, workspace, store, span_id, otel_span)
 

@@ -1,13 +1,24 @@
-"""HRP/Odoo 项目的本地模块知识索引。
-
-数据来源：鼎医 HRP Odoo 12 源码仓库（dy-expense、dy-finance、dy-acc-center、
-dy-budget、dy-hrfm、dy-base 等）的 __manifest__.py 与模型声明；
-技术名、模型名和依赖为源码事实，工作流描述为通用概括。源码索引详见插件
-references/hrp-source-index.md。线上账套的实际安装状态、字段和定制必须通过
-dy_odoo_* 工具核验；本索引只提供解释和检索线索。
-"""
+"""原生 Zoekt 完整源码检索及独立标记的历史业务摘要；不解析业务依赖。"""
 from __future__ import annotations
+import base64
+from functools import lru_cache
+import hashlib
+import json
+import os
+import platform
+import re
+from pathlib import Path, PurePosixPath
 from typing import Any
+
+from .zoekt_service import ZoektService
+from .semantic import RemoteEmbedder, SemanticIndex, SemanticUnavailable, chunk_text, rrf_merge
+
+INDEX_DIR = Path(__file__).parent / 'data' / 'zoekt'
+BINARY_PATH = Path(__file__).parent / 'data' / 'bin' / 'linux-amd64' / 'zoekt-webserver'
+RUNTIME_ROOT = None
+SEMANTIC_INDEX_PATH = Path(__file__).parent / 'data' / 'semantic.sqlite3'
+SEMANTIC_MODEL_DIR = Path(__file__).parent / 'data' / 'semantic-model'
+LIMITATIONS = '源码按文件策略收录，存在排除项；无结果不证明不存在。不自动解析模型、字段或版本，不证明线上安装状态或工作流；自定义字段、定制 addon 与线上版本须通过 dy_odoo_* 核验。'
 
 MODULES: dict[str, dict[str, Any]] = {
     # ---- 费用巡检域（源码仓库 dy-expense / dy-acc-center / dy-budget / dy-hrfm） ----
@@ -185,23 +196,325 @@ MODULES: dict[str, dict[str, Any]] = {
 }
 
 
-def module_info(module: str) -> dict[str, Any]:
-    info = MODULES.get(module)
-    if info is None:
-        return {"found": False, "module": module, "available": sorted(MODULES)}
-    result = {"found": True, "module": module, "odoo_version": "12.0",
-              "limitations": "源码索引仅供解释；依赖为 manifest 源码声明，不证明线上安装状态或工作流；HRP 自定义字段、定制 addon、实际安装状态和版本必须通过 dy_odoo_* 工具在目标账套核验",
-              **info}
-    if "source_repo" not in info:
-        result["source"] = "Odoo 12 标准模块概念摘要"
+@lru_cache(maxsize=4)
+def _load_service(index: Path, binary: Path, runtime_root: Path | None) -> ZoektService:
+    if platform.system() != 'Linux' or platform.machine() not in {'x86_64', 'amd64'}:
+        raise ValueError('当前 Zoekt 预编译程序仅支持 Linux x86_64，不在安装时编译')
+    try:
+        manifest = json.loads((index / 'bundle.json').read_text(encoding='utf-8'))
+        with binary.open('rb') as stream:
+            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if manifest['status'] != 'verified' or manifest['format'] != 1 or digest != manifest['server_sha256']:
+            raise ValueError('Zoekt 索引或程序校验不符')
+        if not (index / 'SHA256SUMS').is_file():
+            raise ValueError('Zoekt 索引缺少校验清单')
+        return ZoektService(index, binary, runtime_root=runtime_root)
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError('Zoekt 程序或源码索引未正确打包，不能检索源码') from exc
+
+
+def _source_service() -> ZoektService:
+    return _load_service(INDEX_DIR, BINARY_PATH, RUNTIME_ROOT)
+
+
+@lru_cache(maxsize=1)
+def _semantic_service() -> SemanticIndex:
+    """模型必须来自随插件安装的本地产物；运行时不下载。"""
+    provider = os.environ.get('DY_KNOWLEDGE_EMBEDDING_PROVIDER', 'local').strip().lower()
+    if provider == 'remote':
+        endpoint = os.environ.get('DY_KNOWLEDGE_EMBEDDING_URL', '').strip()
+        token = os.environ.get('DY_KNOWLEDGE_EMBEDDING_TOKEN', '')
+        model = os.environ.get('DY_KNOWLEDGE_EMBEDDING_MODEL', '').strip()
+        if not endpoint or not token or not model:
+            raise SemanticUnavailable('远程 embedding 配置不完整')
+        try:
+            return SemanticIndex(SEMANTIC_INDEX_PATH,
+                                 embedder=RemoteEmbedder(endpoint, token, model, timeout=10.0))
+        except SemanticUnavailable:
+            raise
+        except Exception as exc:
+            raise SemanticUnavailable('远程 embedding 初始化失败') from exc
+    if provider != 'local':
+        raise SemanticUnavailable('embedding provider 仅支持 local 或 remote')
+    if not SEMANTIC_MODEL_DIR.is_dir():
+        raise SemanticUnavailable('本地语义模型未安装')
+    try:
+        from fastembed import TextEmbedding
+        # FastEmbed 不同版本对 local_files_only 的签名不同；离线环境变量保证不会静默下载。
+        os.environ.setdefault('HF_HUB_OFFLINE', '1')
+        os.environ.setdefault('FASTEMBED_CACHE_PATH', str(SEMANTIC_MODEL_DIR))
+        embedder = TextEmbedding(model_name='BAAI/bge-small-zh-v1.5', cache_dir=str(SEMANTIC_MODEL_DIR))
+    except Exception as exc:
+        raise SemanticUnavailable('本地语义模型加载失败') from exc
+    return SemanticIndex(SEMANTIC_INDEX_PATH, embedder=embedder)
+
+
+def _quote(pattern: str) -> str:
+    return json.dumps(pattern, ensure_ascii=False)
+
+
+def _literal(text: str) -> str:
+    # Go regexp.QuoteMeta：不使用会额外转义空格的 Python re.escape。
+    return re.sub(r'([\\.+*?()|\[\]{}^$])', r'\\\1', text)
+
+
+def _query_result(service: ZoektService, expression: str, limit: int, *, whole=False) -> dict:
+    reply = service.request('/api/search', {'Q': 'case:no repo:"^hrp$" ' + expression,
+        'Opts': {'MaxDocDisplayCount': limit, 'MaxMatchDisplayCount': 1000,
+                 'ShardMaxMatchCount': 20000, 'TotalMaxMatchCount': 20000,
+                 'MaxWallTime': 2000000000, 'Whole': whole}})
+    result = reply.get('Result')
+    if not isinstance(result, dict) or result.get('Crashes'):
+        raise ValueError('源码检索未成功，不能据此认定无结果')
     return result
 
 
-def search(query: str) -> dict[str, Any]:
-    query = query.strip().lower()
+def _coverage(service: ZoektService) -> dict:
+    return {'backend': 'zoekt', 'status': 'policy_filtered', 'bundle_id': service.bundle_id,
+            'version_match': 'not_checked', 'limitations': LIMITATIONS}
+
+
+def _public_source(service: ZoektService, row: dict) -> dict:
+    path = row['FileName']
+    payload = base64.urlsafe_b64encode(json.dumps(['hrp', path], ensure_ascii=False,
+                                                separators=(',', ':')).encode()).decode().rstrip('=')
+    lines = row.get('LineMatches') or []
+    line = lines[0] if lines else {}
+    snippet = base64.b64decode(line.get('Line') or '').decode('utf-8')
+    parts = PurePosixPath(path).parts
+    return {'module': parts[1] if len(parts) > 2 else None, 'name': path, 'path': path,
+            'models': [], 'knowledge_type': 'source', 'fact_type': 'source_text', 'namespace': 'hrp',
+            'symbol': PurePosixPath(path).name, 'line': line.get('LineNumber'),
+            'summary': (snippet.strip() or path)[:240],
+            'reference': f'zoekt:{service.bundle_id}:{payload}'}
+
+
+def _public_semantic(service: ZoektService, row: dict) -> dict:
+    path = row['path']
+    payload = base64.urlsafe_b64encode(json.dumps(['hrp', path], ensure_ascii=False,
+                                                separators=(',', ':')).encode()).decode().rstrip('=')
+    parts = PurePosixPath(path).parts
+    return {'module': row.get('module') or (parts[1] if len(parts) > 2 else None),
+            'name': path, 'path': path, 'models': [], 'knowledge_type': 'source',
+            'fact_type': 'source_text', 'namespace': 'hrp', 'symbol': PurePosixPath(path).name,
+            'line': row.get('line'), 'summary': row.get('summary') or path,
+            'semantic_score': row.get('semantic_score'),
+            'reference': f'zoekt:{service.bundle_id}:{payload}'}
+
+
+def _rank_sources(service, rows, terms):
+    """仅重排有限候选；综合所有命中行，保留 Zoekt 同分顺序。"""
+    terms = [term.lower() for term in terms]
+
+    def text(line):
+        return base64.b64decode(line.get('Line') or '').decode('utf-8')
+
+    def score(row):
+        path = row['FileName'].lower()
+        content = path + ' ' + ' '.join(text(line) for line in row.get('LineMatches') or []).lower()
+        return ('/i18n/' not in path and not path.endswith(('.po', '.pot')),
+                sum(term in content for term in terms),
+                path.endswith(('.py', '.xml', '.js')))
+
+    sources = []
+    for row in sorted(rows, key=score, reverse=True):
+        lines = row.get('LineMatches') or []
+        if lines:
+            best = max(lines, key=lambda line: sum(term in text(line).lower() for term in terms))
+            row = row | {'LineMatches': [best]}
+        sources.append(_public_source(service, row))
+    return sources
+
+
+def module_info(module: str) -> dict[str, Any]:
+    if not isinstance(module, str) or not re.fullmatch(r'[A-Za-z0-9_]+', module):
+        raise ValueError('module 必须是模块技术名')
+    service = _source_service()
+    result = _query_result(service, 'file:' + _quote('(^|/)' + _literal(module) + '/__manifest__\\.py$'), 10)
+    if result.get('FilesSkipped') or result.get('ShardsSkipped'):
+        raise ValueError('模块源码检索不完整，不能确认模块是否存在，请重试')
+    references = [_public_source(service, row) for row in result.get('Files') or []]
+    info = MODULES.get(module)
+    response = {'found': bool(info or references), 'module': module, 'references': references,
+                'coverage': _coverage(service), 'version_match': 'not_checked',
+                'odoo_version': 'unknown', 'limitations': LIMITATIONS,
+                'semantic_indexing': False, 'indexed_models': None, 'declared_dependencies': None,
+                'indexed_versions': None, 'indexed_odoo_versions': None}
+    if info:
+        response.update(info)
+        response.update(fact_type='curated_interpretation', summary_odoo_version='12.0',
+                        interpretation_fields=list(info))
+        if 'source_repo' not in info:
+            response['source'] = 'Odoo 12 标准模块概念摘要'
+            response.update(odoo_version='12.0', odoo_version_scope='summary')
+    elif references:
+        response.update(name=module, models=[], depends=[], fact_type='source_text')
+    else:
+        response['available'] = sorted(MODULES)
+    return response
+
+
+def _question_terms(query):
+    if (not re.search(r'[\u4e00-\u9fff]', query)
+            or (not re.search(r'问[：:]|如何|哪些|是否|什么|怎么|怎样|[？?]', query)
+                and not re.fullmatch(r'[\u4e00-\u9fffA-Za-z0-9\s，。！、；：（）“”‘’,!;()\-]+', query))):
+        return []
+    import jieba
+    jieba.setLogLevel(40)
+    stop = {'如何', '哪些', '是否', '什么', '怎么', '进行', '设置', '公司', '各', '的', '和', '与',
+            '需要', '目前', '现在', '是否有', '使用', '管理', '相关', '支持', '可以', '通过', '以及'}
+    return list(dict.fromkeys(word.strip() for word in jieba.cut(query, HMM=True)
+                             if len(word.strip()) >= 2 and word not in stop
+                             and re.search(r'[\w\u4e00-\u9fff]', word)))[:12]
+
+
+def search(query: str, module: str | None = None, model: str | None = None,
+           knowledge_type: str | None = None, limit: int = 20,
+           retrieval_mode: str = 'lexical') -> dict[str, Any]:
+    if not isinstance(query, str) or not query.strip() or len(query) > 1024:
+        raise ValueError('query 必须为 1 到 1024 字符的非空文本')
+    if module is not None and (not isinstance(module, str) or not re.fullmatch(r'[A-Za-z0-9_]+', module)):
+        raise ValueError('module 必须是模块技术名')
+    if model is not None or knowledge_type not in (None, 'source', 'summary'):
+        raise ValueError('不再支持模型/字段等语义过滤；请将技术名作为 query，knowledge_type 仅支持 source 或 summary')
+    if retrieval_mode not in ('lexical', 'hybrid'):
+        raise ValueError('retrieval_mode 仅支持 lexical 或 hybrid')
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise ValueError('limit 必须是 1 到 50 的整数')
+    query = query.strip()
     results = []
-    for key, info in MODULES.items():
-        haystack = " ".join([key, info["name"], *info["aliases"], *info["models"]]).lower()
-        if query and query in haystack:
-            results.append({"module": key, "name": info["name"], "models": info["models"]})
-    return {"query": query, "results": results, "count": len(results)}
+    terms, strategy = [query], 'literal'
+    relaxed = False
+    source_count = 0
+    if knowledge_type != 'source':
+        for key, info in MODULES.items():
+            haystack = ' '.join([key, info['name'], *info['aliases'], *info['models']]).lower()
+            if query.lower() in haystack and (module is None or module == key):
+                results.append({'module': key, 'name': info['name'], 'models': info['models'],
+                                'knowledge_type': 'summary', 'fact_type': 'curated_interpretation',
+                                'reference': f'summary:{key}', 'summary': info['workflow'][:240],
+                                'symbol': key, 'namespace': 'hrp' if 'source_repo' in info else 'standard_concept'})
+    total, known = len(results), True
+    coverage = {'backend': 'curated_summary', 'status': 'summary_only', 'limitations': LIMITATIONS}
+    if knowledge_type != 'summary':
+        service = _source_service()
+        expression = _quote(_literal(query))
+        if module is not None:
+            expression += ' file:' + _quote('(^|/)' + _literal(module) + '/')
+        raw = _query_result(service, expression, min(200, limit * 6 + 1))
+        coverage = _coverage(service)
+        total += raw.get('FileCount', 0)
+        known = not (raw.get('FilesSkipped') or raw.get('ShardsSkipped'))
+        source_count = raw.get('FileCount', 0)
+        results.extend(_rank_sources(service, raw.get('Files') or [], terms))
+    fallback = _question_terms(query) if known and (
+        not results or (knowledge_type != 'summary' and not source_count)) else []
+    if fallback:
+        terms, strategy = fallback, 'keywords'
+        literal_summary_count = len(results)
+        if knowledge_type != 'source':
+            for key, info in MODULES.items():
+                haystack = ' '.join([key, info['name'], *info['aliases'], *info['models']]).lower()
+                if (module is None or module == key) and any(term.lower() in haystack for term in terms) and not any(
+                        row['reference'] == f'summary:{key}' for row in results):
+                    results.append({'module': key, 'name': info['name'], 'models': info['models'],
+                                    'knowledge_type': 'summary', 'fact_type': 'curated_interpretation',
+                                    'reference': f'summary:{key}', 'summary': info['workflow'][:240],
+                                    'symbol': key, 'namespace': 'hrp' if 'source_repo' in info else 'standard_concept'})
+        total = len(results)
+        if knowledge_type != 'summary':
+            expression = '(' + ' '.join(_quote(_literal(term)) for term in terms) + ')'
+            if module is not None:
+                expression += ' file:' + _quote('(^|/)' + _literal(module) + '/')
+            raw = _query_result(service, expression, min(200, limit * 6 + 1))
+            if len(terms) > 1 and not raw.get('FileCount') and not (
+                    raw.get('FilesSkipped') or raw.get('ShardsSkipped')):
+                relaxed = True
+                expression = '(' + ' or '.join(_quote(_literal(term)) for term in terms) + ')'
+                if module is not None:
+                    expression += ' file:' + _quote('(^|/)' + _literal(module) + '/')
+                raw = _query_result(service, expression, min(200, limit * 6 + 1))
+            total += raw.get('FileCount', 0)
+            known = not (raw.get('FilesSkipped') or raw.get('ShardsSkipped'))
+            # 关键词泛匹配的摘要置于源码之后；原始短语直接命中的摘要保留。
+            results = (results[:literal_summary_count]
+                       + _rank_sources(service, raw.get('Files') or [], terms)
+                       + results[literal_summary_count:])
+    semantic_status = {'status': 'skipped', 'reason': '仅摘要或字面模式'}
+    if retrieval_mode == 'hybrid' and knowledge_type != 'summary':
+        semantic_status = {'status': 'degraded', 'reason': '未执行'}
+        try:
+            semantic_index = _semantic_service()
+            windows = [piece.text for piece in chunk_text(query, max_chars=1792, overlap_chars=256)] or [query]
+            semantic_rows = []
+            for window in windows:
+                semantic_rows.extend(semantic_index.search(window, module=module, limit=100))
+            # 多窗口只保留每个文件最高分，避免同一文件占满候选。
+            best_by_path = {}
+            for row in semantic_rows:
+                if row['path'] not in best_by_path or row.get('semantic_score', -1) > best_by_path[row['path']].get('semantic_score', -1):
+                    best_by_path[row['path']] = row
+            semantic_rows = sorted(best_by_path.values(), key=lambda row: (-row.get('semantic_score', -1), row['path']))[:100]
+            semantic_rows = [_public_semantic(service, row) for row in semantic_rows]
+            lexical_rows = [row for row in results if row.get('knowledge_type') == 'source']
+            summaries = [row for row in results if row.get('knowledge_type') == 'summary']
+            merged = rrf_merge(lexical_rows, semantic_rows, limit)
+            results = summaries + merged
+            semantic_status = {'status': 'ok', 'reason': None, 'vector_count': len(semantic_rows)}
+        except SemanticUnavailable as exc:
+            semantic_status = {'status': 'degraded', 'reason': str(exc)}
+        except Exception as exc:
+            semantic_status = {'status': 'degraded', 'reason': f'语义检索失败：{type(exc).__name__}'}
+        total = None
+        known = False
+    results = results[:limit]
+    truncated = not known or total > len(results) if total is not None else True
+    response = {'query': query, 'results': results, 'count': len(results), 'total_known': known,
+                'total_count': total if known else None, 'truncated': truncated,
+                'coverage': coverage, 'limitations': LIMITATIONS,
+                'search_strategy': strategy, 'search_terms': terms, 'query_relaxed': relaxed,
+                'retrieval_mode': retrieval_mode, 'semantic': semantic_status}
+    while len(json.dumps(response, ensure_ascii=False).encode()) > 65536 and results:
+        results.pop()
+        response.update(count=len(results), truncated=True)
+    return response
+
+
+def read(reference: str, offset: int = 0, limit: int = 4000) -> dict:
+    """只通过索引读取完整源码；引用中的名字从不作为本地文件路径打开。"""
+    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 16000:
+        raise ValueError('offset 必须非负，limit 必须为 1 到 16000 的整数')
+    if not isinstance(reference, str) or len(reference) > 2048:
+        raise ValueError('reference 必须是知识引用')
+    stale = {'found': False, 'reference': reference, 'limitations': '引用不存在或索引版本已变化，请重新检索。'}
+    if reference.startswith('summary:') and reference[8:] in MODULES:
+        content = json.dumps(MODULES[reference[8:]], ensure_ascii=False, indent=2)
+        metadata = {'fact_type': 'curated_interpretation', 'namespace': 'summary'}
+    elif re.fullmatch(r'src:[0-9a-f]{32}', reference):
+        return stale
+    elif re.fullmatch(r'zoekt:[0-9a-f]{24}:[A-Za-z0-9_-]+', reference):
+        _, version, payload = reference.split(':')
+        try:
+            repo, path = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
+            if repo != 'hrp' or not isinstance(path, str) or not path or path.startswith('/') or any(
+                    part in {'', '.', '..'} for part in path.split('/')) or '\x00' in path:
+                raise ValueError('无效源码引用')
+        except (ValueError, TypeError, UnicodeError) as exc:
+            raise ValueError('无效源码引用') from exc
+        service = _source_service()
+        if version != service.bundle_id:
+            return stale
+        result = _query_result(service, 'file:' + _quote('^' + _literal(path) + '$'), 2, whole=True)
+        if result.get('FilesSkipped') or result.get('ShardsSkipped'):
+            raise ValueError('源码读取不完整，请重试；不能认定引用不存在')
+        files = result.get('Files') or []
+        if len(files) != 1 or files[0]['FileName'] != path:
+            return stale
+        content = base64.b64decode(files[0].get('Content') or '').decode('utf-8')
+        metadata = _public_source(service, files[0]) | {'coverage': _coverage(service), 'source_dependency': False}
+    else:
+        raise ValueError('reference 仅接受检索返回的 zoekt: 或 summary: 引用')
+    end = min(offset + limit, len(content))
+    return metadata | {'found': True, 'reference': reference, 'offset': offset, 'content': content[offset:end],
+                       'total_length': len(content), 'complete': end == len(content),
+                       'next_offset': end if end < len(content) else None, 'limitations': LIMITATIONS}
