@@ -33,9 +33,6 @@ SCHEMAS = {
     'dy_odoo_validate_plan': schema({'plan': {'type': 'object'}}, ['plan']),
     'dy_odoo_record_execute': schema({'model': {'enum': ['ir.module.module']},
         'method': {'enum': ['check_access_rights']}}, ['model', 'method']),
-    'dy_odoo_record_delete': schema({**WRITE, 'model': MODEL, 'record_id': POSITIVE,
-        'company_id': POSITIVE, 'expected_write_date': TEXT, 'expected_values': {'type': 'object'}},
-        ['model', 'record_id', 'company_id', 'environment', 'confirmed', 'expected_write_date', 'expected_values', 'idempotency_key']),
 }
 for operation in ('install', 'upgrade', 'uninstall'):
     SCHEMAS['dy_odoo_module_' + operation] = schema({**WRITE,
@@ -55,7 +52,6 @@ DESCRIPTIONS = {
     'dy_odoo_design_solution': '根据候选需求生成分阶段核对计划，不执行或授权实施。',
     'dy_odoo_validate_plan': '静态校验阶段依赖与实际工具参数，不证明环境或业务验收通过。',
     'dy_odoo_record_execute': '仅执行固定模型的只读权限检查；不开放任意RPC或业务动作。',
-    'dy_odoo_record_delete': '删除入口当前无获批模型白名单，拒绝全部删除请求。',
     **{'dy_odoo_module_' + op: '模块' + label + '：默认返回固定确认模板及摘要；安装预览只读解析线上依赖和安装顺序，执行前重核完整清单；执行须受信任环境开关、精确白名单、备份引用和用户确认。'
        for op, label in [('install', '安装'), ('upgrade', '升级'), ('uninstall', '卸载')]},
     'dy_odoo_module_upgrade': '模块升级仅提供固定确认预览，实际执行暂停：原生刷新模块清单后可能新增批外反向依赖，当前无法证明完整影响范围。',

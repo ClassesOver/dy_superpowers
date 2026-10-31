@@ -11,7 +11,6 @@ from .odoo_jsonrpc import OdooConfigurationError, OdooSettings
 
 # 方法与模型成对固定；不允许调用者指定方法参数或业务动作。
 EXECUTE_READS = {'ir.module.module': {'check_access_rights'}}
-DELETE_POLICIES = {}  # 尚无经业务批准可删的模型；空白名单明确拒绝，不开放业务单据。
 UPGRADE_BLOCKER = '暂停升级执行：原生升级刷新模块清单后可能新增批外反向依赖，当前只读预检无法证明完整影响范围'
 
 
@@ -206,8 +205,3 @@ def execute_read(client, args):
         raise OdooConfigurationError('模型和方法不在固定白名单内')
     return {'allowed': client._execute_kw(args['model'], args['method'], ['read', False], {}) is True,
             'execution_authorized': False}
-
-
-def delete_record(args):
-    if args['model'] not in DELETE_POLICIES:
-        raise OdooConfigurationError('当前无获批删除白名单；禁止删除业务记录')

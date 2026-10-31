@@ -38,7 +38,7 @@ EXPECTED_TOOLS = {
     'dy_odoo_diagnostics_health_check', 'dy_knowledge_community_gaps',
     'dy_odoo_import_template', 'dy_odoo_import_preview', 'dy_odoo_import_execute',
     'dy_odoo_analyze_requirements', 'dy_odoo_design_solution', 'dy_odoo_validate_plan',
-    'dy_odoo_record_execute', 'dy_odoo_record_delete',
+    'dy_odoo_record_execute',
     'dy_odoo_module_install', 'dy_odoo_module_upgrade', 'dy_odoo_module_uninstall',
 }
 
@@ -214,7 +214,6 @@ def test_all_50_mcp_tools_over_real_stdio_and_isolated_odoo(tmp_path):
                     for operation in ('install', 'upgrade', 'uninstall'):
                         await call('dy_odoo_module_' + operation, module_args, kind='模块只读预览；绝不执行变更', check=lambda r: r['status'] == 'confirmation_required' and r['execution_authorized'] is False)
                         await call('dy_odoo_module_' + operation, {**module_args, 'dry_run': False}, kind='模块执行默认关闭', denied='模块操作默认关闭')
-                    await call('dy_odoo_record_delete', {'model': 'res.company', 'record_id': company_id, 'company_id': company_id, 'environment': 'all-mcp-live', 'confirmed': True, 'expected_write_date': '禁止删除', 'expected_values': {'id': company_id}, 'idempotency_key': 'live-delete-refusal'}, kind='删除白名单为空', denied='当前无获批删除白名单')
                     csv_args = {'model': config['model'], 'company_id': company_id, 'csv_data': f'name,code,company_id\n隔离导入预览,live-import,{company_id}\n', 'environment': 'all-mcp-live', 'idempotency_key': 'live-import-preview'}
                     await call('dy_odoo_import_execute', {**csv_args, 'confirmed': False, 'confirmation_digest': '0' * 64, 'dry_run': True}, kind='导入本地预览；不执行', check=lambda r: r['status'] == 'confirmation_required' and r['execution_authorized'] is False)
                     await call('dy_odoo_import_execute', {**csv_args, 'confirmed': True, 'confirmation_digest': '0' * 64, 'dry_run': False}, kind='导入执行默认关闭', denied='配置导入默认关闭')

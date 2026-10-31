@@ -52,6 +52,7 @@ MEMORY_READ_FILES = [
 MEMORY_WRITE_FILES = sorted(WRITABLE_MEMORY_FILES)
 SESSION_INDEX_FILES = tuple(MEMORY_READ_FILES)
 SESSION_SOURCES = {"startup", "resume", "clear", "compact", "fork"}
+PLUGIN_VERSION = json.loads((Path(__file__).resolve().parents[2] / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
 
 # 安装即用：连接与令牌允许放在工作区 .env（已被 .gitignore 排除），服务启动时读取。
 # 只认白名单键、不覆盖已设置的环境变量、不回显任何值。
@@ -566,8 +567,6 @@ def _run_odoo_capability(name, arguments, workspace, store, span_id, otel_span):
         if result.get('status') == 'attempted':
             _clear_odoo_client()
         return result
-    if name == 'dy_odoo_record_delete':
-        return odoo_operations.delete_record(arguments)
     if name == 'dy_odoo_import_execute':
         return odoo_imports.execute(workspace, factory, arguments)
     client = factory()
@@ -1151,16 +1150,23 @@ TOOLS = {name: spec[0] for name, spec in TOOL_REGISTRY.items()}
 TOOL_SCHEMAS = {name: spec[1] for name, spec in TOOL_REGISTRY.items()}
 
 
-def _dispatch_tool(name, arguments, workspace, store, span_id, otel_span):
-    try:
-        from jsonschema import Draft202012Validator
-    except ImportError as exc:
-        raise RuntimeError("mcp-server 安装缺少必需依赖 jsonschema") from exc
+_VALIDATORS = {}
 
+
+def _validator(name):
+    """每个工具的 schema 校验器只编译一次。"""
+    validator = _VALIDATORS.get(name)
+    if validator is None:
+        from jsonschema import Draft202012Validator
+        validator = _VALIDATORS[name] = Draft202012Validator(TOOL_SCHEMAS[name])
+    return validator
+
+
+def _dispatch_tool(name, arguments, workspace, store, span_id, otel_span):
     spec = TOOL_REGISTRY.get(name) if isinstance(name, str) else None
     if spec is None:
         raise ToolRequestError(-32602, "未知工具")
-    if next(Draft202012Validator(spec[1]).iter_errors(arguments), None) is not None:
+    if next(_validator(name).iter_errors(arguments), None) is not None:
         raise ToolRequestError(-32602, "工具参数不符合 schema，请核对必填字段及类型")
     if name in {'dy_odoo_record_search', 'dy_odoo_record_read', 'dy_odoo_model_fields',
                 'dy_odoo_module_info', 'dy_odoo_module_list_installed'} or name in ODOO_CAPABILITY_SCHEMAS:
@@ -1243,7 +1249,7 @@ def execute_tool(name: str, arguments: object, workspace: Path) -> tuple[object,
 
 
 def _mcp_result(value: object) -> dict:
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=True)
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     return {"content": [{"type": "text", "text": text}]}
 
 
@@ -1253,7 +1259,7 @@ def handle(request: dict, workspace: Path) -> dict | None:
     if isinstance(method, str) and method.startswith("notifications/"):
         return None
     if method == "initialize":
-        return response(request_id, {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "dy_superpowers", "version": "0.1.0"}})
+        return response(request_id, {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "dy_superpowers", "version": PLUGIN_VERSION}})
     if method == "ping":
         return response(request_id, {})
     if method == "tools/list":
@@ -1302,7 +1308,7 @@ def run_mcp(workspace: Path) -> None:
             raise MCPError(error["code"], error["message"])
         return types.CallToolResult(content=[types.TextContent(type="text", text=_mcp_result(result)["content"][0]["text"])])
 
-    server = Server("dy_superpowers", version="0.2.0", on_list_tools=list_tools, on_call_tool=call_tool)
+    server = Server("dy_superpowers", version=PLUGIN_VERSION, on_list_tools=list_tools, on_call_tool=call_tool)
     # SDK 的自动遥测可能包含请求正文；插件自身不启用外部遥测，只保留本地 JSONL trace。
     try:
         from mcp.server._otel import OpenTelemetryMiddleware

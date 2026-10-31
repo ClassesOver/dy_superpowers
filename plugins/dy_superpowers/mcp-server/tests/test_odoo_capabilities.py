@@ -13,7 +13,7 @@ from dy_superpowers_mcp.odoo_jsonrpc import OdooRPCError, OdooSettings
 
 TOOLS = ('module_list_available', 'module_install', 'module_upgrade', 'module_uninstall',
          'model_list', 'model_search_field', 'import_preview', 'import_execute', 'import_template',
-         'analyze_requirements', 'design_solution', 'validate_plan', 'record_delete', 'record_execute',
+         'analyze_requirements', 'design_solution', 'validate_plan', 'record_execute',
          'diagnostics_health_check')
 
 
@@ -180,13 +180,6 @@ def test_import_template_uses_whitelist_and_writable_metadata(tmp_path, client):
 def test_record_execute_cannot_dispatch_arbitrary_methods(tmp_path, client):
     _, error = server.execute_tool('dy_odoo_record_execute', dict(trace_id='bad-method',
         model='account.move', method='action_post', ids=[1]), tmp_path)
-    assert error and not client.calls
-
-
-def test_record_delete_default_closed(tmp_path, client):
-    _, error = server.execute_tool('dy_odoo_record_delete', dict(trace_id='delete',
-        model='account.move', record_id=1, company_id=2, environment='demo', confirmed=True,
-        expected_write_date='2026-01-01', expected_values={'name': '甲'}, idempotency_key='delete-1'), tmp_path)
     assert error and not client.calls
 
 
