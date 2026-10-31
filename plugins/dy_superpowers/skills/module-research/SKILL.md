@@ -12,7 +12,7 @@ description: 在 HRP 项目交付中需要按模块模板收集聊天回答、�
 - 实时问答：读取[费用调研问题](references/expense-research-question.md)或[总账调研问题](references/general-ledger-research-question.md)，按问题开展多轮调研。问题文件仅投影模板中的调研问题，问题投影是实际调研问题清单；每个配置组对应一个答案，不将附件分支或布局行拆成额外问题。
 - 模板填答：读取[费用调研模板](references/费用模块调研清单.xlsx)或[总账调研模板](references/总账模块调研模板.xlsx)，依据其中的问题和附件清单收集答案。
 
-开始或续答时，使用 dy_module_memory_read 读取已确认答案及版本，复用已有内容，只补实际缺口。用户提供附件时，根据当前问题及对应附件清单提取相关内容，整理到答卷相应位置，与文字答案一并确认保存。工具调用使用实际返回的 question_id、template_revision 和答案版本。
+开始或续答时，按[答卷读取规则](../../references/common/qa-answer-read.md)使用 dy_module_memory_read 读取已确认答案及版本，复用已有内容，只补实际缺口；本技能另负责答卷写入。用户提供附件时，根据当前问题及对应附件清单提取相关内容，整理到答卷相应位置，与文字答案一并确认保存。工具调用使用实际返回的 question_id、template_revision 和答案版本。
 
 ## 工作流程
 
