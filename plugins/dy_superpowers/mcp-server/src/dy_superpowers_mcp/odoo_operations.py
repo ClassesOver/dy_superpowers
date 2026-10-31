@@ -11,13 +11,12 @@ from .odoo_jsonrpc import OdooConfigurationError, OdooSettings
 
 # 方法与模型成对固定；不允许调用者指定方法参数或业务动作。
 EXECUTE_READS = {'ir.module.module': {'check_access_rights'}}
-UPGRADE_BLOCKER = '暂停升级执行：原生升级刷新模块清单后可能新增批外反向依赖，当前只读预检无法证明完整影响范围'
 
 
 def digest(operation, args):
     payload = {k: v for k, v in args.items() if k not in
                {'trace_id', 'trace_context', 'dry_run', 'confirmed', 'confirmation_digest'}}
-    if operation in {'install', 'upgrade', 'uninstall', 'import'}:
+    if operation in {'install', 'uninstall', 'import'}:
         settings = OdooSettings.from_environment()
         payload['_connection'] = {'url': settings.url, 'database': settings.database}
     return hashlib.sha256(json.dumps([operation, payload], sort_keys=True, ensure_ascii=False,
@@ -75,7 +74,6 @@ def _module_confirmation(operation, args, fingerprint, plan):
         'requested_modules': args['module_names'], 'affected_modules': targets,
         'installation_plan': plan, 'blocked_modules': sorted(set(targets) - allowed | set(targets) & {'base', 'web'}),
         'write_enabled': os.environ.get('DY_ODOO_MODULE_WRITE_ENABLED') == '1',
-        'execution_blockers': [UPGRADE_BLOCKER] if operation == 'upgrade' else [],
         'backup_reference': args['backup_reference'], 'backup_verified': False,
         'idempotency_key': args['idempotency_key'], 'confirmation_digest': fingerprint,
         'warning': '依赖计划只证明本次读取的声明；备份未由工具验证。执行前会重新核对，数据回读不代替业务及浏览器验收。',
@@ -117,8 +115,6 @@ def module_operation(workspace, operation, args, client_factory):
     from .qa_basis import configured_environment_info
     if args['environment'] != configured_environment_info()['environment']:
         raise OdooConfigurationError('确认环境与当前环境连接不一致')
-    if operation == 'upgrade':
-        raise OdooConfigurationError(UPGRADE_BLOCKER)
     journal = _journal(workspace, 'modules-' + args['idempotency_key'])
     with record_lock(journal):
         if journal.exists():
@@ -134,8 +130,7 @@ def module_operation(workspace, operation, args, client_factory):
         version = client._rpc('common', 'version', [])
         if not isinstance(version, dict) or version.get('server_version_info', [])[:2] != [12, 0]:
             raise OdooConfigurationError('仅支持已核验的 Odoo 12')
-        method = {'install': 'button_immediate_install', 'upgrade': 'button_immediate_upgrade',
-                  'uninstall': 'button_immediate_uninstall'}[operation]
+        method = {'install': 'button_immediate_install', 'uninstall': 'button_immediate_uninstall'}[operation]
         request_fingerprint = fingerprint
         if operation == 'install':
             plan = _installation_plan(client, names)
@@ -156,7 +151,7 @@ def module_operation(workspace, operation, args, client_factory):
                                       ['name', 'state', 'latest_version'], 100)
         if len(rows) != len(names) or {r.get('name') for r in rows} != set(names):
             raise OdooConfigurationError('目标模块不存在、重复或不可访问')
-        required = {'install': {'uninstalled'}, 'upgrade': {'installed'}, 'uninstall': {'installed'}}[operation]
+        required = {'install': {'uninstalled'}, 'uninstall': {'installed'}}[operation]
         if any(r.get('state') not in required for r in rows):
             raise OdooConfigurationError('模块状态不满足操作前提，请重读后确认')
         if client._execute_kw('ir.module.module', 'check_access_rights', ['write', False], {}) is not True:
@@ -169,16 +164,11 @@ def module_operation(workspace, operation, args, client_factory):
             'ir.module.module.dependency', [['module_id', 'in', [r['id'] for r in rows]]], ['name'], 100)
         if len(dependencies) == 100:
             raise OdooConfigurationError('依赖超出安全上限，无法确认影响范围')
-        needed = sorted({r['name'] for r in dependencies} - set(names))
-        if needed and operation == 'upgrade':
-            available = client.search_read('ir.module.module', [['name', 'in', needed]], ['name', 'state'], 100)
-            if len(available) != len(needed) or any(r.get('state') != 'installed' for r in available):
-                raise OdooConfigurationError('存在未安装或不可见依赖，不得自动扩大安装范围')
-        # Odoo 12 升级也会递归标记已安装的反向依赖，不能只限制卸载范围。
-        if operation in {'upgrade', 'uninstall'}:
+        # 卸载会递归处理已安装的反向依赖，批外反向依赖一律拒绝。
+        if operation == 'uninstall':
             reverse = client.search_read('ir.module.module.dependency', [['name', 'in', names], ['module_id.state', '=', 'installed'], ['module_id', 'not in', [r['id'] for r in rows]]], ['name'], 1)
             if reverse:
-                raise OdooConfigurationError('存在本批次外已安装反向依赖，不得扩大升级或卸载范围')
+                raise OdooConfigurationError('存在本批次外已安装反向依赖，不得扩大卸载范围')
         automatic = client.search_read('ir.module.module', [['auto_install', '=', True], ['state', 'in', ['uninstalled', 'to install']]], ['name'], 1)
         if automatic and operation == 'install':
             raise OdooConfigurationError('存在可能自动安装的模块，须先人工核实影响范围')

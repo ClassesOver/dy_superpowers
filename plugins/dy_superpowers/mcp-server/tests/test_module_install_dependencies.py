@@ -142,8 +142,9 @@ def test_installed_target_is_reused_without_an_install_button(tmp_path, graph, m
     assert not any(c[1].startswith('button_immediate_') for c in graph.calls)
 
 
-@pytest.mark.parametrize('operation', ['upgrade', 'uninstall'])
-def test_module_previews_use_the_same_confirmation_template(tmp_path, client, operation):
+@pytest.mark.parametrize('operation', ['uninstall'])
+def test_module_previews_use_the_same_confirmation_template(tmp_path, client, operation, monkeypatch):
+    monkeypatch.setenv('DY_ODOO_MODULE_WRITE_ENABLED', '1')
     result = call(tmp_path, 'dy_odoo_module_' + operation, **lifecycle())
     assert result['confirmation']['template_version'] == 'module-change/v1'
     assert result['confirmation']['operation'] == operation
@@ -186,15 +187,3 @@ def test_install_refuses_incomplete_dependency_page(tmp_path, graph, monkeypatch
     _, error = server.execute_tool('dy_odoo_module_install', dict(trace_id='incomplete', **lifecycle()), tmp_path)
     assert error and error['code'] == -32602
     assert not any(c[1].startswith('button_immediate_') for c in graph.calls)
-
-
-def test_upgrade_is_preview_only_even_with_complete_authorization(tmp_path, client, monkeypatch):
-    monkeypatch.setenv('DY_ODOO_MODULE_WRITE_ENABLED', '1')
-    monkeypatch.setenv('DY_ODOO_MODULE_ALLOWED', 'dy_expense')
-    client.state = 'installed'
-    preview = call(tmp_path, 'dy_odoo_module_upgrade', **lifecycle())
-    _, error = server.execute_tool('dy_odoo_module_upgrade', dict(trace_id='upgrade-paused', **confirmed(preview)), tmp_path)
-    assert error and error['code'] == -32602 and '暂停升级' in error['message']
-    assert not any(c[1] == 'button_immediate_upgrade' for c in client.calls)
-    assert not (tmp_path / '.dy_superpowers/configuration').exists()
-    assert preview['confirmation']['execution_blockers']

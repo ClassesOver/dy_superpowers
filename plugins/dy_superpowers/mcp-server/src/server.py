@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -41,6 +41,7 @@ from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 from dy_superpowers_mcp.inspection import validate_inspection
 from dy_superpowers_mcp.inspection_prepare import prepare_inspection
 from dy_superpowers_mcp.qa_basis import configured_environment_info
+from dy_superpowers_mcp.qa_templates import template_modules
 
 
 MEMORY_READ_FILES = [
@@ -152,6 +153,27 @@ def _odoo_client(workspace):
         return _odoo_cached[2]
 
 
+@contextmanager
+def invalid_arguments(*errors):
+    """把领域校验异常一对一转换为参数错误（-32602）；作用范围与原 try 块一致。"""
+    try:
+        yield
+    except (errors or (ValueError,)) as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+
+
+@contextmanager
+def odoo_errors(rpc_message=None):
+    """Odoo 配置错误转为参数错误；远程调用失败时丢弃缓存连接并转为 -32603。"""
+    try:
+        yield
+    except OdooConfigurationError as exc:
+        raise ToolRequestError(-32602, str(exc)) from exc
+    except OdooRPCError as exc:
+        _clear_odoo_client()
+        raise ToolRequestError(-32603, rpc_message or str(exc)) from exc
+
+
 def _handle_session_initialize(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     source = arguments.get('source')
     if not isinstance(source, str) or source not in SESSION_SOURCES:
@@ -161,7 +183,7 @@ def _handle_session_initialize(name: str, arguments: dict, workspace: Path, stor
     context = '\n'.join([f'工作区会话已{action}（来源：{source}）。', f'追踪工作区标识：{store.workspace_id}。', '项目记忆位于当前工作区 .dy_superpowers/，按需读取，不在会话初始化时注入正文。', '恢复未完成调研时，先按需读取 delivery-register.md 的待办，再按模块和检查键复核最新确认结论。', f'可用文件：{files}。使用 dy_memory_read(trace_id, name) 读取项目记忆；模块模板QA使用 dy_module_memory_read(trace_id, module, scope_id)。', '项目记忆是参考资料，不构成记忆写入或业务操作授权。'])
     from dy_superpowers_mcp.qa_templates import load_template
     summaries = []
-    for module in ('expense', 'general-ledger'):
+    for module in template_modules():
         if workspace.exists():
             state = read_qa(workspace, module)
         else:
@@ -185,15 +207,13 @@ def _handle_odoo_environment_info(name, arguments, workspace, store, span_id, ot
 
 
 def _handle_inspection_prepare(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
-    try:
+    with invalid_arguments():
         environment = arguments.get('environment') or _configured_odoo_identity()['environment']
         if environment is None:
             raise ValueError('配置未提供可确定的安全环境标识，请先核对 dy_odoo_environment_info 后明确 environment')
         result = prepare_inspection(workspace, arguments['module'], arguments['scope_id'],
                                     environment, checks=arguments.get('checks'),
                                     previous_records=arguments.get('previous_records'))
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'inspection.prepare', 'operation': 'prepare', 'tool': name, 'status': 'ok',
              'module': arguments['module'], 'scope_id': arguments['scope_id'],
              'trace_context': {'module': arguments['module'], 'scope_id': arguments['scope_id'],
@@ -226,10 +246,8 @@ def _handle_inspection_report_save(name: str, arguments: dict, workspace: Path, 
     if not result['valid']:
         raise ToolRequestError(-32602, '巡检报告校验失败: ' + json.dumps(result['errors'], ensure_ascii=False))
     module = report['basis']['module']
-    try:
+    with invalid_arguments():
         report_id, path, pdf_path = save_report(workspace, module, report, result)
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'inspection.report.save', 'operation': 'save', 'tool': name, 'status': 'ok',
              'module': module, 'report_id': report_id, 'result': result['gate'],
              'span_id': span_id}
@@ -245,10 +263,8 @@ def _handle_inspection_report_read(name: str, arguments: dict, workspace: Path, 
     if (not isinstance(module, str) or not module.strip()
             or not isinstance(report_id, str) or not report_id.strip()):
         raise ToolRequestError(-32602, 'module 和 report_id 必须是非空文本')
-    try:
+    with invalid_arguments():
         content = read_report(workspace, module, report_id)
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'inspection.report.read', 'operation': 'read', 'tool': name, 'status': 'ok',
              'module': module, 'report_id': report_id,
              'content_bytes': len(content.encode('utf-8')), 'span_id': span_id}
@@ -262,10 +278,8 @@ def _handle_inspection_report_export_pdf(name: str, arguments: dict, workspace: 
     if (not isinstance(module, str) or not module.strip()
             or not isinstance(report_id, str) or not report_id.strip()):
         raise ToolRequestError(-32602, 'module 和 report_id 必须是非空文本')
-    try:
+    with invalid_arguments():
         pdf_path, created = export_report_pdf(workspace, module, report_id)
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'inspection.report.export_pdf', 'operation': 'export', 'tool': name,
              'status': 'ok', 'module': module, 'report_id': report_id,
              'result': '已生成' if created else '已存在', 'span_id': span_id}
@@ -277,14 +291,12 @@ def _handle_inspection_report_export_pdf(name: str, arguments: dict, workspace: 
 def _handle_notes_write(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     if arguments.get('confirmed') is not True:
         raise ToolRequestError(-32602, 'wiki 记忆写入需要用户明确确认')
-    try:
+    with invalid_arguments(ValueError, PermissionError, TypeError):
         path = write_note(workspace, arguments.get('slug', ''), arguments.get('title', ''),
                           arguments.get('body', ''), arguments.get('tags', []),
                           confirmed=True, source_refs=arguments.get('source_refs', []),
                           module=arguments.get('module'), research_topic=arguments.get('research_topic', False),
                           expected_content=arguments.get('expected_content'))
-    except (ValueError, PermissionError, TypeError) as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     content = path.read_text(encoding='utf-8')
     slug = path.relative_to(workspace / '.dy_superpowers' / 'notes').with_suffix('').as_posix()
     event = {'event': 'notes.write', 'operation': 'write', 'tool': name, 'status': 'ok',
@@ -297,10 +309,8 @@ def _handle_notes_write(name: str, arguments: dict, workspace: Path, store: Trac
 
 
 def _handle_notes_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
-    try:
+    with invalid_arguments():
         content = read_note(workspace, arguments.get('slug', ''))
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     if not content:
         return {'found': False, 'slug': arguments.get('slug', ''), 'notes': list_notes(workspace)}
     event = {'event': 'notes.read', 'operation': 'read', 'tool': name, 'status': 'ok',
@@ -316,21 +326,17 @@ def _handle_notes_list(name: str, arguments: dict, workspace: Path, store: Trace
 
 
 def _handle_project_configure(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
-    try:
+    with invalid_arguments(ValueError, PermissionError):
         result = configure_project(workspace, arguments['name'], arguments['code'],
                                    confirmed=arguments.get('confirmed', False))
-    except (ValueError, PermissionError) as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     return result
 
 
 def _handle_wiki_build(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     if arguments.get('confirmed') is not True:
         raise ToolRequestError(-32602, '本地 Wiki 构建需用户确认；不会推送远端')
-    try:
+    with invalid_arguments(ValueError, OSError):
         manifest = stage_wiki(workspace)
-    except (ValueError, OSError) as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     return {'built': True, 'project': manifest['project'], 'pages': len(manifest['entries']),
             'overview_slug': manifest['overview_slug'], 'published': False}
 
@@ -382,10 +388,8 @@ def _handle_trace_read(name: str, arguments: dict, workspace: Path, store: Trace
 def _handle_memory_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     memory = WorkspaceMemory(workspace)
     memory_file = arguments.get('name', '')
-    try:
+    with invalid_arguments():
         content = memory.read(memory_file)
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'memory.read', 'operation': 'read', 'tool': name, 'status': 'ok', 'memory_file': memory_file,
              'content_bytes': len(content.encode('utf-8')), 'memory_content': content, 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
@@ -399,14 +403,12 @@ def _handle_memory_search(name: str, arguments: dict, workspace: Path, store: Tr
     query = query.strip()
     if query.startswith('-'):
         raise ToolRequestError(-32602, '搜索关键词不能以连字符开头')
-    try:
+    with invalid_arguments():
         module = None
         trace_context = arguments.get('trace_context')
         if isinstance(trace_context, dict):
             module = trace_context.get('module')
         result = BasicMemoryAdapter(workspace).search(query, module=module)
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     results = result.get('results')
     event = {'event': 'memory.search', 'operation': 'search', 'tool': name,
              'status': 'ok' if result.get('available') else 'fallback',
@@ -426,50 +428,59 @@ def _handle_memory_write(name: str, arguments: dict, workspace: Path, store: Tra
     content = arguments.get('content')
     if not isinstance(content, str):
         raise ToolRequestError(-32602, 'content must be text')
-    try:
+    with invalid_arguments():
         path = memory.write(arguments.get('name', ''), content, confirmed=True, expected_content=arguments.get('expected_content'))
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'memory.write', 'operation': 'write', 'tool': name, 'status': 'ok', 'memory_file': path.name,
              'content_bytes': len(content.encode('utf-8')), 'memory_content': content, 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
     record_otel_event(otel_span, event)
     return {'written': True, 'name': path.name}
 
+class AuditedOdoo:
+    """唯一的 Odoo 查询审计：先记 odoo.query，成功后记 odoo.read；返回行不进入 trace。"""
+
+    def __init__(self, client, store, arguments, tool, span_id, otel_span):
+        self.client, self.store, self.arguments = client, store, arguments
+        self.tool, self.span_id, self.otel_span = tool, span_id, otel_span
+
+    def __getattr__(self, key):
+        return getattr(self.client, key)
+
+    def _append(self, event):
+        append_trace(self.store, self.arguments['trace_id'], event)
+        record_otel_event(self.otel_span, event)
+
+    def search_read(self, model, domain, fields, limit, offset=0, *, summary=None, **kwargs):
+        metadata = dict(operation='search_read', tool=self.tool, model=model, domain=domain,
+                        field_count=len(fields), domain_term_count=len(domain), limit=limit, offset=offset,
+                        active_test=(kwargs.get('context') or {}).get('active_test', True),
+                        trace_context=self.arguments.get('trace_context', {}), span_id=self.span_id)
+        self._append(dict(metadata, event='odoo.query', status='running'))
+        rows = self.client.search_read(model, domain, fields, limit, offset, **kwargs)
+        self._append(dict(metadata, **(summary(rows) if summary else {}), event='odoo.read', status='ok',
+                          count=len(rows), result_count=len(rows)))
+        return rows
+
+    def module_records(self, module=None, installed_only=False, offset=0):
+        domain = [['name', '=', module]] if module else []
+        if installed_only:
+            domain.append(['state', '=', 'installed'])
+        return self.search_read('ir.module.module', domain, ['name', 'state', 'latest_version'], 100, offset)
+
+
 def _handle_odoo_record_search(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
-    try:
+    with odoo_errors():
         model, domain, fields, limit, offset, context = validate_read_arguments(arguments)
         from dy_superpowers_mcp.odoo_comparison import validate_comparison, compare_records
-        try:
+        with invalid_arguments():
             validate_comparison(arguments.get('comparison'), fields, limit=limit, offset=offset)
-        except ValueError as exc:
-            raise ToolRequestError(-32602, str(exc)) from exc
-        query_event = {'event': 'odoo.query', 'operation': 'search_read', 'tool': name, 'status': 'running',
-                       'model': model, 'domain': domain, 'domain_term_count': len(domain),
-                       'field_count': len(fields), 'limit': limit, 'offset': offset,
-                       'active_test': context.get('active_test', True),
-                       'trace_context': arguments.get('trace_context', {}), 'span_id': span_id}
-        append_trace(store, arguments['trace_id'], query_event)
-        record_otel_event(otel_span, query_event)
-        client = _odoo_client(workspace)
-        result = client.search_read(model, domain, fields, limit, offset, **({'context': context} if context else {}))
-    except OdooConfigurationError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
-    except OdooRPCError as exc:
-        _clear_odoo_client()
-        raise ToolRequestError(-32603, str(exc)) from exc
-    event = {'event': 'odoo.read', 'operation': 'search_read', 'tool': name, 'status': 'ok', 'model': model,
-             **compare_records(arguments.get('comparison'), result),
-             'count': len(result), 'result_count': len(result), 'field_count': len(fields),
-             'domain_term_count': len(domain), 'limit': limit, 'offset': offset, 'domain': domain,
-             'active_test': context.get('active_test', True),
-             'trace_context': arguments.get('trace_context', {}), 'span_id': span_id}
-    append_trace(store, arguments['trace_id'], event)
-    record_otel_event(otel_span, event)
-    return result
+        client = AuditedOdoo(_odoo_client(workspace), store, arguments, name, span_id, otel_span)
+        return client.search_read(model, domain, fields, limit, offset,
+                                  summary=lambda rows: compare_records(arguments.get('comparison'), rows),
+                                  **({'context': context} if context else {}))
 
 def _handle_odoo_record_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
-    try:
+    with odoo_errors():
         client = _odoo_client(workspace)
         metadata = {}
         if name == 'dy_odoo_record_read':
@@ -479,10 +490,8 @@ def _handle_odoo_record_read(name: str, arguments: dict, workspace: Path, store:
             if not isinstance(fields, list) or not all((isinstance(item, str) and item for item in fields)):
                 raise ToolRequestError(-32602, 'fields 必须是字符串列表')
             from dy_superpowers_mcp.odoo_comparison import validate_comparison, compare_records
-            try:
+            with invalid_arguments():
                 validate_comparison(arguments.get('comparison'), fields)
-            except ValueError as exc:
-                raise ToolRequestError(-32602, str(exc)) from exc
             result = client.read_records(arguments['model'], ids, fields)
             operation = 'record_read'
             model = arguments['model']
@@ -511,50 +520,14 @@ def _handle_odoo_record_read(name: str, arguments: dict, workspace: Path, store:
         append_trace(store, arguments['trace_id'], event)
         record_otel_event(otel_span, event)
         return result
-    except OdooConfigurationError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
-    except OdooRPCError as exc:
-        _clear_odoo_client()
-        raise ToolRequestError(-32603, str(exc)) from exc
 
 def _handle_odoo_capability(name, arguments, workspace, store, span_id, otel_span):
-    try:
+    with odoo_errors(rpc_message='系统查询失败，请核对连接与权限；不返回远端正文'):
         return _run_odoo_capability(name, arguments, workspace, store, span_id, otel_span)
-    except OdooConfigurationError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
-    except OdooRPCError as exc:
-        _clear_odoo_client()
-        raise ToolRequestError(-32603, '系统查询失败，请核对连接与权限；不返回远端正文') from exc
 
 
 def _run_odoo_capability(name, arguments, workspace, store, span_id, otel_span):
-    class AuditedClient:
-        def __init__(self, client):
-            self.client = client
-
-        def __getattr__(self, key):
-            return getattr(self.client, key)
-
-        def search_read(self, model, domain, fields, limit, offset=0, **kwargs):
-            metadata = dict(operation='search_read', tool=name, model=model, domain=domain,
-                            field_count=len(fields), domain_term_count=len(domain), limit=limit,
-                            offset=offset, span_id=span_id, trace_context=arguments.get('trace_context', {}))
-            event = dict(metadata, event='odoo.query', status='running')
-            append_trace(store, arguments['trace_id'], event)
-            record_otel_event(otel_span, event)
-            rows = self.client.search_read(model, domain, fields, limit, offset, **kwargs)
-            event = dict(metadata, event='odoo.read', status='ok', count=len(rows), result_count=len(rows))
-            append_trace(store, arguments['trace_id'], event)
-            record_otel_event(otel_span, event)
-            return rows
-
-        def module_records(self, module=None, installed_only=False, offset=0):
-            domain = [['name', '=', module]] if module else []
-            if installed_only:
-                domain.append(['state', '=', 'installed'])
-            return self.search_read('ir.module.module', domain, ['name', 'state', 'latest_version'], 100, offset)
-
-    factory = lambda: AuditedClient(_odoo_client(workspace))
+    factory = lambda: AuditedOdoo(_odoo_client(workspace), store, arguments, name, span_id, otel_span)
     if name == 'dy_odoo_analyze_requirements':
         return odoo_planning.analyze(arguments['description'])
     if name == 'dy_odoo_design_solution':
@@ -563,7 +536,7 @@ def _run_odoo_capability(name, arguments, workspace, store, span_id, otel_span):
         return odoo_planning.validate(arguments['plan'], TOOL_SCHEMAS)
     if name == 'dy_odoo_diagnostics_health_check':
         return odoo_discovery.health_check(factory)
-    if name in {'dy_odoo_module_install', 'dy_odoo_module_upgrade', 'dy_odoo_module_uninstall'}:
+    if name in {'dy_odoo_module_install', 'dy_odoo_module_uninstall'}:
         result = odoo_operations.module_operation(workspace, name.rsplit('_', 1)[1], arguments, factory)
         if result.get('status') == 'attempted':
             _clear_odoo_client()
@@ -583,25 +556,19 @@ def _run_odoo_capability(name, arguments, workspace, store, span_id, otel_span):
 
 
 def _handle_knowledge_module_info(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
-    try:
+    with invalid_arguments():
         return knowledge_module_info(arguments.get('module', ''))
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
 
 def _handle_knowledge_search(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     query = arguments.get('query')
     if not isinstance(query, str) or not query.strip():
         raise ToolRequestError(-32602, 'query 必须是非空文本')
-    try:
+    with invalid_arguments():
         return knowledge_search(query, **{key: arguments[key] for key in ('module', 'knowledge_type', 'limit', 'retrieval_mode') if key in arguments})
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
 
 def _handle_knowledge_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
-    try:
+    with invalid_arguments():
         return knowledge_read(arguments['reference'], offset=arguments.get('offset', 0), limit=arguments.get('limit', 4000))
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
 
 def _handle_configuration_write(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     operation = 'create' if name == 'dy_odoo_record_create' else 'update'
@@ -624,12 +591,8 @@ def _handle_research_record_write(name: str, arguments: dict, workspace: Path, s
     sender_id = os.environ.get('FEISHU_CODEX_BOT_SENDER_USER_ID', '').strip()
     record_arguments['confirmed_by'] = sender_id or str(arguments.get('confirmed_by') or '未提供')
     record_arguments['confirmed_at'] = datetime.now(timezone.utc).isoformat()
-    try:
+    with invalid_arguments(PermissionError, ValueError):
         result = write_record(workspace, record_arguments)
-    except PermissionError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     operation = 'repair_record' if arguments.get('repair') else 'retire_scope' if result['status'] == 'retired' else 'confirmed_record'
     record = read_record(workspace, record_arguments['module'], record_arguments['check_order'], record_arguments['research_id'],
                          scope=record_arguments.get('scope'), scope_id=result['scope_id'])
@@ -652,7 +615,7 @@ def _qa_trace_records(records):
 
 def _handle_module_memory_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
     if arguments.get('legacy') is not True:
-        try:
+        with invalid_arguments():
             legacy_fields = {'check_order', 'research_id', 'checks', 'offset', 'limit', 'scope'} & arguments.keys()
             if legacy_fields:
                 raise ValueError('新版 QA 按 scope_id/question_ids 读取；旧键、scope文本或分页参数须显式 legacy=true')
@@ -661,9 +624,7 @@ def _handle_module_memory_read(name: str, arguments: dict, workspace: Path, stor
                 'tool': name, 'status': 'ok', 'module': arguments['module'], 'scope_id': result['scope_id'],
                 'research_content': _qa_trace_records(result['records']), 'span_id': span_id})
             return result
-        except ValueError as exc:
-            raise ToolRequestError(-32602, str(exc)) from exc
-    try:
+    with invalid_arguments():
         module = validate_module(arguments['module'])
         has_key = arguments.get('check_order') is not None or arguments.get('research_id') is not None
         view = arguments.get('view', 'full')
@@ -686,8 +647,6 @@ def _handle_module_memory_read(name: str, arguments: dict, workspace: Path, stor
                                                      include_history=view == 'full', checks=arguments.get('checks'))
         if view == 'summary':
             records = [record_summary(record) for record in records]
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     result = {'module': module, 'records': records, 'found': bool(records), 'has_more': has_more,
               'offset': arguments.get('offset', 0), 'limit': arguments.get('limit', 100),
               'next_offset': arguments.get('offset', 0) + len(records) if has_more else None}
@@ -719,7 +678,7 @@ def _progress_records(workspace, module, scope, scope_id):
 
 
 def _handle_research_progress(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
-    try:
+    with invalid_arguments():
         module = validate_module(arguments['module'])
         intent = arguments.get('intent')
         if intent is not None and intent not in ('research', 'progress', 'export', 'import', 'confirm'):
@@ -735,8 +694,6 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
             'confirm': 'save_confirmed',
             'research': 'ask_missing' if result['route'] == 'interactive' else 'offer_checklist',
         }[intent]
-    except ValueError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     event = {'event': 'research.progress', 'operation': 'calculate_progress', 'tool': name, 'status': 'ok',
              'module': module, 'scope_id': result['scope_id'], 'scope_mode': result['scope_mode'],
              'answered': result['answered'], 'total': result['total'],
@@ -750,24 +707,20 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
     return result
 
 def _handle_research_unanswered_export(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str, otel_span: object | None):
-    try:
+    with invalid_arguments(PermissionError, ValueError):
         if 'scope' in arguments:
             raise ValueError('新版答卷按 scope_id 导出，不接受 scope 文本，请先读取真实范围标识')
         result = export_qa(workspace, arguments['module'], scope_id=arguments.get('scope_id'),
                            confirmed=arguments.get('confirmed'))
-    except (PermissionError, ValueError) as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     return result
 
 
 def _handle_research_answers_save(name, arguments, workspace, store, span_id, otel_span):
-    try:
+    with invalid_arguments(ValueError, PermissionError):
         result = commit_qa(workspace, arguments['module'], scope=arguments['scope'],
             scope_id=arguments.get('scope_id'), template_revision=arguments['template_revision'],
             answers=arguments['answers'], batch_id=arguments['batch_id'], confirmed=arguments['confirmed'],
             confirmed_by=os.environ.get('FEISHU_CODEX_BOT_SENDER_USER_ID', '').strip() or '当前会话用户')
-    except (ValueError, PermissionError) as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     append_trace(store, arguments['trace_id'], {'event': 'research.write', 'operation': 'qa_batch',
         'tool': name, 'status': 'ok', 'module': arguments['module'], 'scope_id': result['scope_id'],
         'research_content': _qa_trace_records(result['records']), 'span_id': span_id})
@@ -775,10 +728,8 @@ def _handle_research_answers_save(name, arguments, workspace, store, span_id, ot
 
 
 def _handle_research_answers_import(name, arguments, workspace, store, span_id, otel_span):
-    try:
+    with invalid_arguments(ValueError, OSError):
         return parse_qa_workbook(workspace, arguments['path'])
-    except (ValueError, OSError) as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
 
 # 工具名、说明、schema 和处理器在此唯一注册。
 TOOL_REGISTRY = {
@@ -792,7 +743,7 @@ TOOL_REGISTRY = {
         '确认后批次保存当前模板问题答案；答案整项替换，其他问题保留，返回同步版本答卷路径。',
         {'type': 'object', 'additionalProperties': False,
          'required': ['trace_id', 'module', 'scope', 'template_revision', 'answers', 'batch_id', 'confirmed'],
-         'properties': {'trace_id': {'type': 'string'}, 'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
+         'properties': {'trace_id': {'type': 'string'}, 'module': {'type': 'string', 'enum': list(template_modules())},
              'scope': {'type': 'string', 'minLength': 1, 'maxLength': 500}, 'scope_id': {'type': 'string'},
              'template_revision': {'type': 'string'}, 'batch_id': {'type': 'string', 'minLength': 1},
              'confirmed': {'type': 'boolean'}, 'answers': {'type': 'array', 'items': {
@@ -829,7 +780,7 @@ TOOL_REGISTRY = {
         {'type': 'object', 'additionalProperties': False,
          'required': ['trace_id', 'module', 'scope_id'],
          'properties': {'trace_id': {'type': 'string', 'pattern': TRACE_ID_PATTERN.pattern},
-                        'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
+                        'module': {'type': 'string', 'enum': list(template_modules())},
                         'scope_id': {'type': 'string', 'pattern': '^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$'},
                         'environment': {'type': 'string', 'maxLength': 128, 'pattern': TRACE_CODE_PATTERN.pattern,
                                         'description': '可省略，使用dy_odoo_environment_info的安全配置身份；显式值须与证据trace_context一致，不能猜dev/prod。'},
@@ -983,7 +934,7 @@ TOOL_REGISTRY = {
         '调研发问前先调用。必须由模型按本轮意图传intent，再按next_action执行：progress仅报告；export导出清单；import核对本轮已填来源；confirm完成当前已明确批准的候选保存；research按完整完成比例低于70%走清单、达到70%才补问业务。未传intent时next_action=classify_intent，先识别意图并重新调用，不得直接行动。历史待办不构成import，非当前确认批次的“确认”不构成confirm。分别展示progress_summary的已确认回答与完整完成，后者决定route。范围可省略，唯一范围自动复用，多范围分别展示scope_progress，不合并、不先问范围。本工具只读，next_action本身不代表授权。',
         {'type': 'object', 'required': ['trace_id', 'module'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
-                        'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
+                        'module': {'type': 'string', 'enum': list(template_modules())},
                         'intent': {'type': 'string', 'enum': ['research', 'progress', 'export', 'import', 'confirm'],
                                    'description': '必填：模型识别当前请求，开始/继续调研research；只查进度progress；明确要清单export；本轮导入/核对已填来源import；回应当前明确确认/保存批次confirm。'},
                         'scope': {'type': 'string'}, 'scope_id': {'type': 'string'}}},
@@ -993,7 +944,7 @@ TOOL_REGISTRY = {
         '导出当前问卷完整答卷；本轮明确下载即授权confirmed=true，不受70%门槛。按scope_id选择真实范围，省略时唯一范围复用、多范围分别生成登记副本，不能拼接答案。包含问题投影全量、最新确认答案和附件明细，不覆盖原版本或旧下载。scope文本不支持。',
         {'type': 'object', 'required': ['trace_id', 'module', 'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
-                        'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
+                        'module': {'type': 'string', 'enum': list(template_modules())},
                         'scope': {'type': 'string'}, 'scope_id': {'type': 'string'},
                         'confirmed': {'type': 'boolean'}}},
         _handle_research_unanswered_export,
@@ -1150,6 +1101,24 @@ for _, schema, _ in TOOL_REGISTRY.values():
 TOOLS = {name: spec[0] for name, spec in TOOL_REGISTRY.items()}
 TOOL_SCHEMAS = {name: spec[1] for name, spec in TOOL_REGISTRY.items()}
 
+# 写类工具仅在宿主进程显式开启对应开关时出现在工具列表并可调用；开关不从工作区 .env 加载。
+WRITE_SWITCHES = {
+    'dy_odoo_record_create': 'DY_ODOO_CONFIG_WRITE_ENABLED',
+    'dy_odoo_record_update': 'DY_ODOO_CONFIG_WRITE_ENABLED',
+    'dy_odoo_import_execute': 'DY_ODOO_CONFIG_WRITE_ENABLED',
+    'dy_odoo_module_install': 'DY_ODOO_MODULE_WRITE_ENABLED',
+    'dy_odoo_module_uninstall': 'DY_ODOO_MODULE_WRITE_ENABLED',
+}
+
+
+def tool_enabled(name: str) -> bool:
+    switch = WRITE_SWITCHES.get(name)
+    return switch is None or os.environ.get(switch) == '1'
+
+
+def enabled_tools():
+    return [(name, spec) for name, spec in TOOL_REGISTRY.items() if tool_enabled(name)]
+
 
 _VALIDATORS = {}
 
@@ -1167,6 +1136,8 @@ def _dispatch_tool(name, arguments, workspace, store, span_id, otel_span):
     spec = TOOL_REGISTRY.get(name) if isinstance(name, str) else None
     if spec is None:
         raise ToolRequestError(-32602, "未知工具")
+    if not tool_enabled(name):
+        raise ToolRequestError(-32602, f"写入工具未启用：需在 MCP 进程环境设置 {WRITE_SWITCHES[name]}=1")
     if next(_validator(name).iter_errors(arguments), None) is not None:
         raise ToolRequestError(-32602, "工具参数不符合 schema，请核对必填字段及类型")
     if name in {'dy_odoo_record_search', 'dy_odoo_record_read', 'dy_odoo_model_fields',
@@ -1264,7 +1235,7 @@ def handle(request: dict, workspace: Path) -> dict | None:
     if method == "ping":
         return response(request_id, {})
     if method == "tools/list":
-        return response(request_id, {"tools": [{"name": name, "description": description, "inputSchema": TOOL_SCHEMAS[name]} for name, description in TOOLS.items()]})
+        return response(request_id, {"tools": [{"name": name, "description": spec[0], "inputSchema": spec[1]} for name, spec in enabled_tools()]})
     if method != "tools/call":
         return response(request_id, error={"code": -32601, "message": f"method not found: {method}"})
     params = request.get("params")
@@ -1301,7 +1272,7 @@ def run_mcp(workspace: Path) -> None:
 
     async def list_tools(context, params):
         return types.ListToolsResult(tools=[types.Tool(name=name, description=spec[0], input_schema=spec[1])
-                                           for name, spec in TOOL_REGISTRY.items()])
+                                           for name, spec in enabled_tools()])
 
     async def call_tool(context, params):
         result, error = await asyncio.to_thread(execute_tool, params.name, params.arguments or {}, workspace)

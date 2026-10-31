@@ -114,22 +114,32 @@ def test_configuration_tools_are_discoverable_but_not_generic_rpc(tool):
     assert not {'method', 'kwargs', 'sudo', 'sql'} & set(schema['properties'])
 
 
-def test_configuration_preview_then_disabled_write_never_connects(tmp_path, monkeypatch):
+def test_configuration_write_tools_are_hidden_and_rejected_while_switch_is_off(tmp_path, monkeypatch):
     monkeypatch.delenv('DY_ODOO_CONFIG_WRITE_ENABLED', raising=False)
+    listed = {tool['name'] for tool in server.handle({'id': 1, 'method': 'tools/list'}, tmp_path)['result']['tools']}
+    assert not {'dy_odoo_record_create', 'dy_odoo_record_update', 'dy_odoo_import_execute'} & listed
     arguments = {'trace_id': 'config-preview',
         'environment': {'url': 'https://odoo.example.test', 'database': 'test'},
         'company_id': 2, 'model': 'dy.fin.account.analytic.plan',
         'values': {'name': '测试方案', 'code': 'X', 'company_id': 2},
         'idempotency_key': 'preview-only', 'confirmed': False, 'dry_run': True}
-    preview, error = server.execute_tool('dy_odoo_record_create', arguments, tmp_path)
-    assert error is None
-    assert preview['status'] == 'confirmation_required'
-    assert len(preview['confirmation_digest']) == 64
-    arguments.update(dry_run=False, confirmed=True, confirmation_digest=preview['confirmation_digest'])
     _, error = server.execute_tool('dy_odoo_record_create', arguments, tmp_path)
-    assert error and error['code'] == -32602 and '默认关闭' in error['message']
+    assert error and error['code'] == -32602 and 'DY_ODOO_CONFIG_WRITE_ENABLED' in error['message']
     from dy_superpowers_mcp.trace import TraceStore
     assert '测试方案' not in json.dumps(TraceStore(tmp_path).read('config-preview'), ensure_ascii=False)
+
+
+def test_configuration_preview_is_available_once_switch_is_on(tmp_path, monkeypatch):
+    monkeypatch.setenv('DY_ODOO_CONFIG_WRITE_ENABLED', '1')
+    listed = {tool['name'] for tool in server.handle({'id': 1, 'method': 'tools/list'}, tmp_path)['result']['tools']}
+    assert {'dy_odoo_record_create', 'dy_odoo_record_update', 'dy_odoo_import_execute'} <= listed
+    preview, error = server.execute_tool('dy_odoo_record_create', {'trace_id': 'config-preview-on',
+        'environment': {'url': 'https://odoo.example.test', 'database': 'test'},
+        'company_id': 2, 'model': 'dy.fin.account.analytic.plan',
+        'values': {'name': '测试方案', 'code': 'X', 'company_id': 2},
+        'idempotency_key': 'preview-on', 'confirmed': False, 'dry_run': True}, tmp_path)
+    assert error is None
+    assert preview['status'] == 'confirmation_required' and len(preview['confirmation_digest']) == 64
     assert not (tmp_path / '.dy_superpowers/configuration').exists()
 
 

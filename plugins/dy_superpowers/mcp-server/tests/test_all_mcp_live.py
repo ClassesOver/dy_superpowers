@@ -33,14 +33,15 @@ EXPECTED_TOOLS = {
     'dy_odoo_record_search', 'dy_odoo_record_read', 'dy_odoo_model_fields',
     'dy_odoo_module_list_installed', 'dy_odoo_module_info',
     'dy_knowledge_module_info', 'dy_knowledge_search', 'dy_knowledge_read',
-    'dy_odoo_record_create', 'dy_odoo_record_update',
     'dy_odoo_module_list_available', 'dy_odoo_model_list', 'dy_odoo_model_search_field',
     'dy_odoo_diagnostics_health_check', 'dy_knowledge_community_gaps',
-    'dy_odoo_import_template', 'dy_odoo_import_preview', 'dy_odoo_import_execute',
+    'dy_odoo_import_template', 'dy_odoo_import_preview',
     'dy_odoo_analyze_requirements', 'dy_odoo_design_solution', 'dy_odoo_validate_plan',
     'dy_odoo_record_execute',
-    'dy_odoo_module_install', 'dy_odoo_module_upgrade', 'dy_odoo_module_uninstall',
 }
+# 写开关为 0 时这些工具不出现在列表中，调用被拒绝。
+GATED_WRITE_TOOLS = {'dy_odoo_record_create', 'dy_odoo_record_update', 'dy_odoo_import_execute',
+                     'dy_odoo_module_install', 'dy_odoo_module_uninstall'}
 
 pytestmark = pytest.mark.skipif(
     os.environ.get('DY_ALL_MCP_LIVE') != '1',
@@ -80,7 +81,7 @@ def test_all_50_mcp_tools_over_real_stdio_and_isolated_odoo(tmp_path):
     output = Path(os.environ.get('DY_ALL_MCP_OUTPUT_DIR',
         str(REPO / 'docs/testing/logs/2026-10-31-all-mcp/live')))
     output.mkdir(parents=True, exist_ok=True)
-    matrix = {name: [] for name in sorted(EXPECTED_TOOLS)}
+    matrix = {name: [] for name in sorted(EXPECTED_TOOLS | GATED_WRITE_TOOLS)}
     failures = []
 
     def persist():
@@ -97,7 +98,7 @@ def test_all_50_mcp_tools_over_real_stdio_and_isolated_odoo(tmp_path):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 listed = {tool.name for tool in (await session.list_tools()).tools}
-                assert len(EXPECTED_TOOLS) == 50
+                assert len(EXPECTED_TOOLS) == 43
                 assert listed == EXPECTED_TOOLS, f'工具清单漂移：缺少{EXPECTED_TOOLS-listed}，新增{listed-EXPECTED_TOOLS}'
                 active_session = session
 
@@ -208,15 +209,12 @@ def test_all_50_mcp_tools_over_real_stdio_and_isolated_odoo(tmp_path):
                         if operation == 'update':
                             # 仅本地预览/默认关闭，不把这个占位编号当成真实业务记录。
                             args.update(record_id=company_id, expected_values=dict(config['values']), expected_write_date='未读取；禁止执行', idempotency_key='live-preview-update')
-                        await call('dy_odoo_record_' + operation, {**args, 'dry_run': True}, kind='本地白名单预览；不访问 Odoo', check=lambda r: r['status'] == 'confirmation_required' and r['accepted'] is False and r['preflight_status'] == 'not_checked')
-                        await call('dy_odoo_record_' + operation, {**args, 'dry_run': False}, kind='远端配置写入默认关闭', denied='配置写入默认关闭')
+                        await call('dy_odoo_record_' + operation, {**args, 'dry_run': True}, kind='写开关关闭时工具未启用', denied='写入工具未启用')
                     module_args = {'module_names': ['base'], 'environment': 'all-mcp-live', 'idempotency_key': 'live-module-preview', 'backup_reference': '未提供备份；仅预览', 'dry_run': True}
-                    for operation in ('install', 'upgrade', 'uninstall'):
-                        await call('dy_odoo_module_' + operation, module_args, kind='模块只读预览；绝不执行变更', check=lambda r: r['status'] == 'confirmation_required' and r['execution_authorized'] is False)
-                        await call('dy_odoo_module_' + operation, {**module_args, 'dry_run': False}, kind='模块执行默认关闭', denied='模块操作默认关闭')
+                    for operation in ('install', 'uninstall'):
+                        await call('dy_odoo_module_' + operation, module_args, kind='写开关关闭时工具未启用', denied='写入工具未启用')
                     csv_args = {'model': config['model'], 'company_id': company_id, 'csv_data': f'name,code,company_id\n隔离导入预览,live-import,{company_id}\n', 'environment': 'all-mcp-live', 'idempotency_key': 'live-import-preview'}
-                    await call('dy_odoo_import_execute', {**csv_args, 'confirmed': False, 'confirmation_digest': '0' * 64, 'dry_run': True}, kind='导入本地预览；不执行', check=lambda r: r['status'] == 'confirmation_required' and r['execution_authorized'] is False)
-                    await call('dy_odoo_import_execute', {**csv_args, 'confirmed': True, 'confirmation_digest': '0' * 64, 'dry_run': False}, kind='导入执行默认关闭', denied='配置导入默认关闭')
+                    await call('dy_odoo_import_execute', {**csv_args, 'confirmed': False, 'confirmation_digest': '0' * 64, 'dry_run': True}, kind='写开关关闭时工具未启用', denied='写入工具未启用')
                     models = await call('dy_odoo_model_list', {'search': config['model'], 'limit': 100}, check=lambda r: isinstance(r['models'], list))
                     if not any(r['model'] == config['model'] for r in models['models']):
                         await call('dy_odoo_import_template', {'model': config['model'], 'include_optional': True}, kind='真实调用；模型未安装，非成功路径', blocked='系统查询失败', error_code=-32603)
