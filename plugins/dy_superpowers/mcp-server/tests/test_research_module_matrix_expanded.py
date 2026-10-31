@@ -1,9 +1,5 @@
-"""虚构调研遍历真实矩阵，并组合验证范围、修订及巡检状态的完整链路。"""
+"""历史记录的范围、修订及隔离；历史数据不能作为当前巡检依据。"""
 
-import hashlib
-import html
-from functools import cache
-import re
 import socket
 import sys
 from datetime import datetime, timezone
@@ -14,47 +10,16 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 import server
-from dy_superpowers_mcp.inspection import _matrix
 from dy_superpowers_mcp.memory import module_memory_path
 
 
-PLUGIN = Path(__file__).parents[2]
-EXPECTED_COUNTS = {"expense": 92, "general-ledger": 82}
+EXPECTED_COUNTS = {"expense": 25, "general-ledger": 37}
 
 
-@cache
-def matrix_source(module):
-    """独立从标题和调研表首列取键；不把模板中的结论当测试业务事实。"""
-    path = PLUGIN / f"skills/{module}-inspection/references/inspection-matrix.md"
-    order = None
-    pairs = []
-    configuration = {}
-    config_item = None
-    config_row_next = False
-    for line in path.read_text(encoding="utf-8").splitlines():
-        heading = re.fullmatch(r"## 检查顺序 (.+)", line)
-        if heading:
-            order = heading.group(1)
-            config_item = None
-            config_row_next = False
-        elif line.startswith("|") and "配置分类" in line and "配置项" in line:
-            config_row_next = True
-        elif config_row_next and line.startswith("|"):
-            cells = [cell.strip() for cell in line.strip("|").split("|")]
-            if not all(re.fullmatch(r"[-: ]*", cell) for cell in cells):
-                config_item = html.unescape(cells[1])
-                assert config_item, (module, order)
-                config_row_next = False
-        elif match := re.match(r"^\|\s*(\d+)｜", line):
-            assert order is not None and config_item is not None
-            pair = (order, match.group(1))
-            pairs.append(pair)
-            configuration[pair] = config_item
-    assert len(pairs) == len(set(pairs)) == EXPECTED_COUNTS[module]
-    revision, standards = _matrix(module)
-    assert set(pairs) == set(standards)
-    assert revision == hashlib.sha256(path.read_bytes()).hexdigest()
-    return pairs, revision, standards, configuration
+def history_samples(module):
+    """独立历史存储样本，不定义当前问卷或巡检要求。"""
+    pairs = [(f"history-{i}", "01") for i in range(EXPECTED_COUNTS[module])]
+    return pairs, "historical", dict.fromkeys(pairs, "历史要求"), dict.fromkeys(pairs, "历史配置")
 
 
 @pytest.fixture
@@ -81,7 +46,7 @@ def call(root, tool, **arguments):
 
 def payload(module, pair, scope="虚构甲公司/2026年/本期"):
     return dict(module=module, check_order=pair[0], research_id=pair[1],
-                config_item=matrix_source(module)[3][pair], scope=scope,
+                config_item=history_samples(module)[3][pair], scope=scope,
                 conclusion=f"虚构测试结论：{module}/{pair[0]}/{pair[1]}，仅测试存储契约。",
                 evidence_ref="虚构测试输入，不是模板示例、生产配置或验收事实。",
                 confirmed_by="虚构测试确认角色", confirmed_at="2026-01-01", confirmed=True)
@@ -90,7 +55,7 @@ def payload(module, pair, scope="虚构甲公司/2026年/本期"):
 def read(root, module, pair=None, **filters):
     if pair is not None:
         filters.update(check_order=pair[0], research_id=pair[1])
-    return call(root, "dy_module_memory_read", module=module, **filters)
+    return call(root, "dy_module_memory_read", module=module, legacy=True, **filters)
 
 
 def inspection_report(module, pair, research, revision, standards):
@@ -107,9 +72,9 @@ def inspection_report(module, pair, research, revision, standards):
 
 
 @pytest.mark.parametrize("module", ["expense", "general-ledger"])
-def test_every_matrix_key_roundtrips_with_pagination_and_workspace_isolation(workspaces, module):
+def test_history_records_roundtrip_with_pagination_and_workspace_isolation(workspaces, module):
     first, second = workspaces
-    pairs, _, _, configuration = matrix_source(module)
+    pairs, _, _, configuration = history_samples(module)
     expected = {}
     for pair in pairs:
         data = payload(module, pair)
@@ -135,7 +100,7 @@ def test_every_matrix_key_roundtrips_with_pagination_and_workspace_isolation(wor
 
     other = "general-ledger" if module == "expense" else "expense"
     assert read(first, other)["records"] == []
-    other_pair = matrix_source(other)[0][0]
+    other_pair = history_samples(other)[0][0]
     call(first, "dy_research_record_write", **payload(other, other_pair))
     assert len(read(first, module)["records"]) == len(pairs)
     assert len(read(first, other)["records"]) == 1
@@ -148,7 +113,7 @@ def test_every_matrix_key_roundtrips_with_pagination_and_workspace_isolation(wor
 
     memory = module_memory_path(first, module)
     before = memory.read_bytes()
-    for updates in [dict(check_order="NO-SUCH-CHECK"), dict(research_id="999"), dict(confirmed=False)]:
+    for updates in [dict(check_order="../outside"), dict(research_id="../outside"), dict(confirmed=False)]:
         _, error = server.execute_tool("dy_research_record_write",
                                       dict(trace_id="expanded-matrix", **dict(payload(module, pairs[0]), **updates)), first)
         assert error is not None and error["code"] == -32602
@@ -159,7 +124,7 @@ def test_every_matrix_key_roundtrips_with_pagination_and_workspace_isolation(wor
 @pytest.mark.parametrize("module", ["expense", "general-ledger"])
 def test_multiscope_revision_retirement_and_inspection_require_current_confirmed_record(workspaces, module):
     root, other_workspace = workspaces
-    pairs, matrix_revision, standards, _ = matrix_source(module)
+    pairs, matrix_revision, standards, _ = history_samples(module)
     pair = pairs[0]
     first_data = dict(payload(module, pair), research_complete=True)
     first = call(root, "dy_research_record_write", **first_data)
@@ -167,7 +132,7 @@ def test_multiscope_revision_retirement_and_inspection_require_current_confirmed
     second = call(root, "dy_research_record_write", **second_data)
     assert first["scope_id"] != second["scope_id"]
     _, ambiguous = server.execute_tool("dy_module_memory_read", dict(
-        trace_id="expanded-matrix", module=module, check_order=pair[0], research_id=pair[1]), root)
+        trace_id="expanded-matrix", legacy=True, module=module, check_order=pair[0], research_id=pair[1]), root)
     assert ambiguous is not None and ambiguous["code"] == -32602
     first_record = read(root, module, pair, scope_id=first["scope_id"])["records"][0]
     second_record = read(root, module, pair, scope_id=second["scope_id"])["records"][0]
@@ -178,7 +143,7 @@ def test_multiscope_revision_retirement_and_inspection_require_current_confirmed
     assert {page1["records"][0]["scope_id"], page2["records"][0]["scope_id"]} == {first["scope_id"], second["scope_id"]}
 
     before_report = inspection_report(module, pair, first_record, matrix_revision, standards)
-    assert call(root, "dy_inspection_validate", report=before_report)["valid"]
+    assert not call(root, "dy_inspection_validate", report=before_report)["valid"]
     memory = module_memory_path(root, module)
     unchanged = memory.read_bytes()
     for updates in [dict(expected_revision="stale"), dict(status="pending"), dict(status="retired")]:
@@ -198,9 +163,9 @@ def test_multiscope_revision_retirement_and_inspection_require_current_confirmed
     assert current["history"][0]["status"] == "superseded"
     stale_validation = call(root, "dy_inspection_validate", report=before_report)
     assert not stale_validation["valid"]
-    assert any("调研修订已变化" in e["message"] for e in stale_validation["errors"])
+    assert any(e["path"] == "basis" for e in stale_validation["errors"])
     refreshed_report = inspection_report(module, pair, current, matrix_revision, standards)
-    assert call(root, "dy_inspection_validate", report=refreshed_report)["valid"]
+    assert not call(root, "dy_inspection_validate", report=refreshed_report)["valid"]
 
     retired = call(root, "dy_research_record_write", **dict(
         first_data, conclusion=current["conclusion"], scope_id=current["scope_id"],
@@ -212,9 +177,9 @@ def test_multiscope_revision_retirement_and_inspection_require_current_confirmed
     stopped_report = inspection_report(module, pair, stopped, matrix_revision, standards)
     stopped_validation = call(root, "dy_inspection_validate", report=stopped_report)
     assert not stopped_validation["valid"]
-    assert any("范围已停用" in e["message"] for e in stopped_validation["errors"])
+    assert any(e["path"] == "basis" for e in stopped_validation["errors"])
     assert read(root, module, pair, scope_id=second["scope_id"])["records"][0] == second_record
     other_scope_report = inspection_report(module, pair, second_record, matrix_revision, standards)
-    assert call(root, "dy_inspection_validate", report=other_scope_report)["valid"]
+    assert not call(root, "dy_inspection_validate", report=other_scope_report)["valid"]
     assert len(read(root, module)["records"]) == 2
     assert read(other_workspace, module)["records"] == []

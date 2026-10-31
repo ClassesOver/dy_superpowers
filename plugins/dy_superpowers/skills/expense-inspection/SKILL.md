@@ -1,47 +1,22 @@
 ---
 name: expense-inspection
-description: 在巡检 Odoo 12 HRP 费用交付、配置、权限、政策、预算、支付、税务、集成或费用到会计衔接时使用。
+description: 在巡检 Odoo 12 HRP 费用交付、配置、岗位权限、业务流程或会计衔接时使用。
 ---
 
 # 费用模块巡检
 
-## 目标与输入
+读取当前业务范围的最新确认答卷及附件，利用现有知识检索和Odoo只读工具，核对当前系统是否满足答卷要求。连接由MCP从当前环境变量取得，不向用户重复索要。
 
-依据当前领域清单和确认调研，逐子项检查当前工作区单一项目的费用交付状态，输出有范围、版本和证据的中文报告。
+当前费用模板提供问题范围，同范围最新确认答案和绑定附件定义业务要求。模块标识expense，完整覆盖当前模板的全部question_id，分母取自prepare返回的expected_checks，原分组和编号用于展示，内部唯一question_id不改造或补号。不使用静态巡检矩阵，是否对齐须由工具检索当前系统取证后判断。
 
-执行前读取 [巡检通用流程](../../references/inspection-workflow.md)；输入包括项目和环境、实际 Odoo 版本/定制模块、公司/院区、业务日期/期间、岗位、本期业务范围及来源材料。缺失内容按通用流程补充，不从模板或文件名猜测。
+按[通用流程](../../references/inspection-workflow.md)执行“最新答卷 → 环境连接 → 提取要求 → 知识检索 → 系统查询 → 对齐比较”，报告遵循[校验合同](../../docs/inspection-validation.md)。dy_odoo_environment_info核对环境变量配置，prepare省略environment自动复用；不打印连接配置或凭据。公司或日期缺失只阻塞依赖分支，独立检查继续。
 
-## 适用范围
+调用dy_module_memory_read默认新QA，再dy_inspection_prepare(module, scope_id, environment)，以返回basis和全部expected_checks准备核验。局部答案、缺附件或漂移保留待确认/未检查。缺口交module-research，携带真实question_id、版本和事实，批次确认保存后回读，仅恢复对应分支。
 
-- 模块标识 `expense`，调用上下文 `skill=expense-inspection`；面向用户的检查顺序显示为 `EXP-001`，完整子项显示为 `EXP-001-01`。记忆及矩阵接口仍使用数字检查顺序和子项编号，例如 `1 + 01`。
-- 当前支持确认调研、矩阵键校验及 `dy_inspection_*` 正式报告闭环。
-- 依次核对基础应用与组织、单据和编号、费用项目与政策、预算/专项、审批权限、借款核销、支付税务、OCR/接口、打印归档及费用制证。按本期制度和交付范围判断集成适用性。
-- 公司隔离、岗位分离、金额/日期边界、预算占用释放、政策命中、支付和制证闭环均须有对应业务效果证据；配置存在不能代替实际验证。
+[源码与查询](references/source-queries.md)仅技术配方。先用dy_knowledge_search/read理解相关模块、模型和规则，再核对实际安装模块与字段，按当前答卷的预期值逐项查询比较。公司隔离、岗位、金额日期边界、预算、凭证、支付制证须对应业务效果证据，配置存在不能证明操作成功，无法验证保留材料/人工缺口。
 
-## 执行流程
+从答案与附件提取requirements，按通用流程填写verification_target；附件source_refs保留当前确认绑定的reference和sha256，摘要不一致先重新确认，不能沿用旧证据。prepare返回的detail_checks逐项保留，未核验不省略。配置项用当前系统取证，调研附件不自证对齐。逐项记录预期、实值、范围及分页完整性，结构校验不证明业务语义完整。
 
-1. 按通用流程确认范围，读取清单全部检查键，再关联同范围的确认调研；按 P0、P1、P2 排序本轮工作。
-2. 纳入本轮可验证子项，其余逐键列入排除清单并说明原因；每个纳入子项保留完整验收标准，依据确认结论选择分支。
-3. 读取 [费用源码与查询](references/source-queries.md)，先核对模块/字段，再按实际公司、父子关系、日期和状态取只读证据。
-4. 区分配置观察与业务验收，逐子项记录结果、证据限制和阻塞；按通用流程校验、展示、确认保存并回读报告。
+先dy_inspection_validate，展示当前模板全部问题的覆盖、门禁与边界，用户确认保存后dy_inspection_report_save(confirmed=true)，再dy_inspection_report_read。未知项不能删除凑通过，不适用须完整答案和真实依据。模板、答案版本或附件变化重新prepare；旧报告仅历史read，不能新验证放行或冒称补PDF通过。
 
-## 调研衔接
-
-调研缺失、过期、冲突或不足以选定验收分支时，按通用流程调用 `module-research`。费用问题和材料缺口读取[费用调研指引](../module-research/references/expense-research-guide.md)，按28个配置组、64个提取点和当前92个 `EXP-*` 矩阵子项归一化处理。源清单的 `DY-EXP-*` 不是运行键，缺号不得补造；附件模板只用于逐字段收集，示例和历史观察不等于线上配置。巡检仍按矩阵验证配置与业务效果，不把调研回答直接当验收结果。传原 `trace_id`、`EXP-*` 检查键、阻塞原因、完整验收标准和已知事实；保存确认结论后按同键及 `scope_id` 回读，只恢复有效 `confirmed` 子项。其他独立子项继续执行。
-
-## 源码对照
-
-[费用源码与查询](references/source-queries.md) 维护技术模块、模型、字段和查询范围。尤其核对共享单据类型、政策头与子行范围、业务日期与服务器今天的区别、费用期间与总账期间的独立状态。源码只作线索，以实际安装版本和元数据复核。
-
-## 结果与报告
-
-按通用流程和 [巡检校验合同](../../docs/inspection-validation.md) 留存结果；报告覆盖每个声明范围的纳入及排除子项。门禁、覆盖度和未验证业务分开说明；部分范围通过不得表述为费用模块整体交付通过。
-
-报告至少给出项目/环境、适用范围、逐子项调研与验收依据、结果与证据、异常影响、阻塞事项、下一步和门禁。调研、矩阵、范围或环境变化后，相关旧结果重新验证。项目事实经确认写入工作区，不能写回领域清单。
-
-## 参考资料
-
-- [费用清单](references/inspection-matrix.md)：检查键、调研问题及验收标准。
-- [费用源码与查询](references/source-queries.md)：执行只读配方前读取。
-- [巡检通用流程](../../references/inspection-workflow.md)：执行、调研、证据、报告及复查合同。
-- [来源驱动巡检](../../references/inspection-source-validation.md)：已有调研材料、映射差异及端到端测试。
+trace_context复用basis（含服务生成的connection_fingerprint），补question_id、answer_revision及必要的requirement_id；内部标识不展示。Odoo证据须本工作区成功tool.end和对应odoo.read。巡检只用只读工具，不调用配置或模块变更。详见[来源核对](../../references/inspection-source-validation.md)。

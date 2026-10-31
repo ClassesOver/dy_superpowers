@@ -56,7 +56,6 @@ def _evidence_ref(row: dict) -> str:
         return base + suffix if base else suffix.removeprefix("；")
     return base
 
-MATRIX_MODULES = {"expense", "general-ledger"}
 SOURCE_HINTS = {
     "multiple_conclusion_tables": "来源包含多个结论表，已按解析器规则择优解析；请核对覆盖范围",
     "hidden_sheet": "来源包含隐藏工作表，解析器仍扫描其内容；请核对可见性与适用范围",
@@ -101,14 +100,6 @@ def _latest_entry(ledger: list[dict], source_name: str) -> dict | None:
     return None
 
 
-def _matrix_keys(module: str) -> set | None:
-    if module not in MATRIX_MODULES:
-        return None
-    from dy_superpowers_mcp.inspection import _matrix
-    _, keys = _matrix(module)
-    return keys
-
-
 def _resolve_scope(row: dict, current: list[dict], default_scope: str) -> tuple[str, str | None]:
     """返回（范围文本，阻塞原因）；规则适用条件不是项目实际范围。"""
     scope = (row.get("scope") or "").strip() or (default_scope or "").strip()
@@ -122,7 +113,7 @@ def _resolve_scope(row: dict, current: list[dict], default_scope: str) -> tuple[
 
 
 def apply_mapping(candidates: list[dict], mapping: list) -> tuple[list[dict], list[dict]]:
-    """按问题文本把 QA 候选映射到矩阵检查键；映射由助手生成、用户确认，映射外问题不猜。"""
+    """按问题文本把 QA 候选映射到历史记录键；映射由助手生成、用户确认，映射外问题不猜。"""
     by_question = {}
     for item in mapping:
         if not isinstance(item, dict):
@@ -163,7 +154,6 @@ def _matches_source(current: dict, row: dict) -> bool:
 
 
 def classify(workspace: Path, module: str, candidates: list[dict], *, default_scope: str = "") -> dict:
-    matrix_keys = _matrix_keys(module)
     grouped = _by_key(_load_records(workspace, module))
     result = {"new": [], "changed": [], "unchanged": [], "blocked": []}
     for row in candidates:
@@ -174,12 +164,10 @@ def classify(workspace: Path, module: str, candidates: list[dict], *, default_sc
         if row.get("contains_pending_questions"):
             reasons.append("来源仍含待确认内容，不能分类为可导入结论")
         if not order:
-            reasons.append("QA 未映射矩阵检查键，须生成映射并经用户确认" if is_qa else "缺少检查顺序")
+            reasons.append("QA 未映射历史记录键，须生成映射并经用户确认" if is_qa else "缺少检查顺序")
         if not research_id:
             reasons.append("缺少调研子项编号（QA 须在映射中给出 research_id）" if is_qa
                            else "缺少调研子项编号（结论未按“01｜”样式编号）")
-        if matrix_keys is not None and (order, research_id) not in matrix_keys:
-            reasons.append("检查键不在当前模块矩阵")
         current = grouped.get((order, research_id), []) if order and research_id else []
         scope, scope_reason = _resolve_scope(row, current, default_scope)
         if scope_reason:
@@ -359,7 +347,7 @@ def main() -> None:
     parser.add_argument("--module", required=True)
     parser.add_argument("--source", type=Path, help="来源文件（与 --candidates 二选一）")
     parser.add_argument("--candidates", type=Path, help="已解析的候选 JSON，避免重复解析")
-    parser.add_argument("--map", type=Path, help="QA 问题到矩阵检查键的映射 JSON（助手生成、用户确认）")
+    parser.add_argument("--map", type=Path, help="QA 问题到历史记录键的映射 JSON（助手生成、用户确认）")
     parser.add_argument("--scope", default="", help="来源未提供适用条件时的默认范围（公司/账套/期间）")
     parser.add_argument("--record", action="store_true", help="写入完成后回读校验并登记导入台账")
     args = parser.parse_args()
@@ -387,7 +375,7 @@ def main() -> None:
         elif unmatched:
             result = {"recorded": False, "problems":
                       [{"question": (row.get("locator") or {}).get("question", ""),
-                        "reason": "QA 未映射矩阵检查键，未写入，不能登记台账"}
+                        "reason": "QA 未映射历史记录键，未写入，不能登记台账"}
                        for row in unmatched]}
         else:
             result = record_import(args.workspace, module, source_name, source_sha256,
@@ -403,7 +391,7 @@ def main() -> None:
         buckets["blocked"].append(
             {"check_order": "", "research_id": "", "config_item": row.get("config_item") or "",
              "locator": row.get("locator"), "conclusion": row.get("conclusion") or "",
-             "reasons": ["QA 未映射矩阵检查键：由助手生成 --map 映射并经用户确认"]})
+             "reasons": ["QA 未映射历史记录键：由助手生成 --map 映射并经用户确认"]})
     removed = removed_in_source(args.workspace, module, source_name, candidates, default_scope=args.scope)
     previous = _latest_entry(load_ledger(args.workspace, module), source_name)
     delta = bool(buckets["new"] or buckets["changed"] or removed or buckets["blocked"])
@@ -411,7 +399,7 @@ def main() -> None:
     notes = [SOURCE_HINTS[issue["code"]] for issue in metadata["issues"]
              if issue.get("code") in SOURCE_HINTS]
     if unmatched:
-        notes.append(f"{len(unmatched)} 个 QA 问题尚未映射矩阵检查键，全部阻塞，不得猜测检查键")
+        notes.append(f"{len(unmatched)} 个 QA 问题尚未映射历史记录键，全部阻塞，不得猜测检查键")
     if previous and previous.get("source_sha256") == source_sha256 and delta:
         notes.append("来源文件与上次导入相同但存在差异，可能记录被修复或手工修订，按差异执行")
     if not previous:

@@ -4,6 +4,7 @@
 
 当前已提供：
 
+- `configuration`：通用配置检索、依赖分析、确认后受限 MCP 写入与双重验收；
 - `module-research`：模块多轮调研与项目记忆；
 - `expense-inspection`：费用模块交付巡检；
 - `general-ledger-inspection`：总账模块交付巡检；

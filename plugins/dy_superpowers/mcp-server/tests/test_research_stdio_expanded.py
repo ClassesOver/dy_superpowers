@@ -13,9 +13,10 @@ from mcp.shared.exceptions import MCPError
 
 PLUGIN = Path(__file__).parents[2]
 sys.path.insert(0, str(PLUGIN / "mcp-server/src"))
-from dy_superpowers_mcp.inspection import _matrix
 from dy_superpowers_mcp.project_wiki import load_staged
-from dy_superpowers_mcp.research_progress import _guide_items
+from dy_superpowers_mcp.qa_templates import load_template
+from dy_superpowers_mcp.qa_store import read_qa
+from template_qa_helpers import make_report
 from dy_superpowers_mcp.trace import TraceStore
 
 
@@ -30,30 +31,19 @@ def _parameters(workspace, codex_home):
         cwd=str(workspace), env=env)
 
 
-def _uninspected_report(module, scope_id):
-    revision, standards = _matrix(module)
-    expected, records = [], []
-    for index, ((order, item), standard) in enumerate(sorted(standards.items())):
-        key = dict(module=module, check_order=order, research_id=item,
-                   scope_id=scope_id, environment="隔离测试环境")
-        expected.append(key)
-        records.append({**key, "record_id": f"expanded-{index}",
-                        "research_revision": "", "matrix_revision": revision,
-                        "acceptance_standard": standard, "result": "未检查",
-                        "reason": "仅测试交付报告链路，未访问业务系统",
-                        "verification_method": "未执行业务验收，不得视为通过",
-                        "verified_at": datetime.now(timezone.utc).isoformat(),
-                        "evidence_refs": []})
-    return {"expected_checks": expected, "excluded_checks": [], "records": records}
+def _uninspected_report(workspace, module, scope_id):
+    state = read_qa(workspace, module, scope_id)
+    return make_report(workspace, module, state=state, environment='UAT')
 
 
-@pytest.mark.parametrize("module,total", [("expense", 92), ("general-ledger", 82)])
-def test_stdio_scope_optional_routing_and_generic_export(tmp_path, module, total):
+@pytest.mark.parametrize("module", ["expense", "general-ledger"])
+def test_stdio_scope_optional_routing_and_generic_export(tmp_path, module):
     from openpyxl import load_workbook
 
     workspace = tmp_path / "project"
     workspace.mkdir()
-    item = _guide_items(module)[0]
+    total = len(load_template(module)['questions'])
+    item = load_template(module)["questions"][0]
 
     async def exercise():
         async with stdio_client(_parameters(workspace, tmp_path / "codex")) as (reader, writer):
@@ -74,30 +64,22 @@ def test_stdio_scope_optional_routing_and_generic_export(tmp_path, module, total
                 assert not (workspace / ".dy_superpowers").exists()
                 with pytest.raises(MCPError, match="明确确认"):
                     await call("dy_research_unanswered_export", confirmed=False)
-                payload = dict(check_order=item["check_order"], research_id=item["research_id"],
-                               config_item=item["config_item"], conclusion="仅测试：业务已确认，未执行巡检",
-                               research_complete=True, confirmed=True)
-                first = await call("dy_research_record_write", **payload, scope="虚构甲院/本期")
-                single = await call("dy_research_progress")
-                assert single["scope_mode"] == "selected" and single["answered"] == 1
-                assert single["scope_id"] == first["scope_id"]
-                await call("dy_research_record_write", **payload, scope="虚构乙院/本期")
-                path = workspace / ".dy_superpowers/modules" / module / "research.md"
-                before = path.read_bytes()
-                multiple = await call("dy_research_progress")
-                assert multiple["scope_mode"] == "multiple" and multiple["answered"] == 0
-                assert len(multiple["scope_progress"]) == 2
-                assert all(row["answered"] == 1 for row in multiple["scope_progress"])
-                exported = await call("dy_research_unanswered_export", confirmed=True)
-                assert exported["question_count"] == total and exported["scope_id"] is None
-                workbook = load_workbook(workspace / exported["path"], read_only=True)
-                try:
-                    rows = list(workbook.active.iter_rows(min_row=2, values_only=True))
-                    assert len(rows) == total and all(row[9] is None for row in rows)
-                    assert '虚构甲院/本期' in rows[0][7] and '虚构乙院/本期' in rows[0][7]
-                finally:
-                    workbook.close()
-                assert path.read_bytes() == before
+                payload = dict(template_revision=load_template(module)['revision'],
+                               answers=[dict(question_id=item['question_id'], answer='仅测试：业务已确认',
+                                             research_complete=True, expected_revision=None)], confirmed=True)
+                first = await call('dy_research_answers_save', **payload, batch_id='first', scope='虚构甲院/本期')
+                single = await call('dy_research_progress')
+                assert single['scope_mode'] == 'selected' and single['answered'] == 1
+                assert single['scope_id'] == first['scope_id']
+                await call('dy_research_answers_save', **payload, batch_id='second', scope='虚构乙院/本期')
+                multiple = await call('dy_research_progress')
+                assert multiple['scope_mode'] == 'multiple' and multiple['answered'] == 0
+                assert len(multiple['scope_progress']) == 2
+                exported = await call('dy_research_unanswered_export', confirmed=True)
+                assert len(exported['files']) == 2
+                assert all(f['question_count'] == total for f in exported['files'])
+                for f in exported['files']:
+                    assert Path(f['path']).is_file()
 
     asyncio.run(asyncio.wait_for(exercise(), timeout=30))
 
@@ -110,12 +92,11 @@ def test_stdio_partial_save_with_unknown_scope_resumes_without_completing_resear
     codex_home = tmp_path / "codex"
     trace_id = "partial-save"
     scope = "范围待补充；确认批次：partial-save/1"
-    item = _guide_items(module)[0]
+    item = load_template(module)["questions"][0]
     saved = {}
-    payload = dict(module=module, check_order=item["check_order"], research_id=item["research_id"],
-                   config_item=item["config_item"], scope=scope,
-                   conclusion="仅测试：用户已确认需要此项功能，其他要素待补充。",
-                   evidence_ref="测试会话：业务确认及后续保存授权", research_complete=False)
+    payload = dict(module=module, template_revision=load_template(module)['revision'], scope=scope,
+        batch_id='partial-first', answers=[dict(question_id=item['question_id'], answer='仅测试：局部确认',
+        research_complete=False, expected_revision=None)])
 
     async def call(session, name, **arguments):
         response = await session.call_tool(name, {"trace_id": trace_id, **arguments})
@@ -127,14 +108,14 @@ def test_stdio_partial_save_with_unknown_scope_resumes_without_completing_resear
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 with pytest.raises(MCPError, match="明确确认"):
-                    await call(session, "dy_research_record_write", **payload, confirmed=False)
+                    await call(session, "dy_research_answers_save", **payload, confirmed=False)
                 assert not (workspace / ".dy_superpowers/modules").exists()
-                saved.update(await call(session, "dy_research_record_write", **payload, confirmed=True))
+                saved.update(await call(session, "dy_research_answers_save", **payload, confirmed=True))
                 read = await call(session, "dy_module_memory_read", module=module,
-                                  check_order=item["check_order"], research_id=item["research_id"],
+                                  question_ids=[item["question_id"]],
                                   scope_id=saved["scope_id"])
-                assert read["records"][0]["conclusion"] == payload["conclusion"]
-                assert read["records"][0]["scope"] == scope
+                assert read["records"][0]["answer"] == payload["answers"][0]["answer"]
+                assert read["scope"] == saved["scope"]
                 assert read["records"][0]["research_complete"] is False
                 progress = await call(session, "dy_research_progress", module=module,
                                       scope_id=saved["scope_id"])
@@ -144,40 +125,28 @@ def test_stdio_partial_save_with_unknown_scope_resumes_without_completing_resear
                 assert progress["unanswered_count"] == progress["total"] - 1
                 assert f"1/{progress['total']}" in progress["progress_summary"]
 
-                report = _uninspected_report(module, saved["scope_id"])
-                record = next(record for record in report["records"]
-                              if (record["check_order"], record["research_id"])
-                              == (item["check_order"], item["research_id"]))
-                record.update(result="通过", research_revision=saved["revision"],
-                              evidence_refs=[{"kind": "document", "reference": "测试附件#功能需求"}])
-                checked = await call(session, "dy_inspection_validate", report=report)
-                assert checked["valid"] is False
-                assert any("尚未完整" in error["message"] for error in checked["errors"])
+                report = _uninspected_report(workspace, module, saved["scope_id"])
+                report['records'][0]['result'] = '通过'
+                checked = await call(session, 'dy_inspection_validate', report=report)
+                assert checked['valid'] is False
+                assert any('完整' in error['message'] for error in checked['errors'])
 
     async def resumed_session():
         async with stdio_client(_parameters(workspace, codex_home)) as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 read = await call(session, "dy_module_memory_read", module=module,
-                                  check_order=item["check_order"], research_id=item["research_id"],
+                                  question_ids=[item["question_id"]],
                                   scope_id=saved["scope_id"])
                 current = read["records"][0]
-                assert current["revision"] == saved["revision"]
+                assert current["revision"] == saved["records"][0]["revision"]
                 assert current["research_complete"] is False
-                other = await call(session, "dy_research_record_write", **{
-                    **payload, "scope": "范围待补充；确认批次：partial-save/2",
-                    "conclusion": "另一批次：用户已确认不需要此项功能。", "confirmed": True})
-                assert other["scope_id"] != saved["scope_id"]
-                updated = await call(session, "dy_research_record_write", **{
-                    **payload, "scope": "虚构甲院/报销/2026年", "scope_id": saved["scope_id"],
-                    "expected_revision": current["revision"], "confirmed": True})
-                assert updated["scope_id"] == saved["scope_id"]
-                final = await call(session, "dy_module_memory_read", module=module)
-                assert len(final["records"]) == 2
-                repaired_scope = next(row for row in final["records"] if row["scope_id"] == saved["scope_id"])
-                assert repaired_scope["history"][0]["scope"] == scope
-                assert repaired_scope["scope"] == "虚构甲院/报销/2026年"
-                assert repaired_scope["research_complete"] is False
+                other = await call(session, 'dy_research_answers_save', **{
+                    **payload, 'scope': '另一个确认批次', 'batch_id': 'partial-second', 'confirmed': True})
+                assert other['scope_id'] != saved['scope_id']
+                final = await call(session, 'dy_module_memory_read', module=module)
+                assert final['scope_mode'] == 'multiple' and final['records'] == []
+                assert all(s['partial_count'] == 1 for s in final['scope_progress'])
 
     async def exercise():
         await first_session()
@@ -194,7 +163,7 @@ def test_stdio_research_resume_report_and_workspace_isolation(tmp_path, module):
     other.mkdir()
     codex_home = tmp_path / "codex"
     trace_id = "expanded-project-flow"
-    order, item = sorted(_matrix(module)[1])[0]
+    order, item = 'historical', '01'
     payload = dict(module=module, check_order=order, research_id=item,
                    config_item="仅测试：基础应用", scope="虚构甲医院/本期",
                    conclusion="虚构甲医院本期交付基础应用，尚未核验系统。",
@@ -224,7 +193,7 @@ def test_stdio_research_resume_report_and_workspace_isolation(tmp_path, module):
                     with pytest.raises(MCPError) as denied:
                         await call(session, "dy_research_record_write", invalid)
                     assert denied.value.code == -32602
-                empty = await call(session, "dy_module_memory_read", {"module": module})
+                empty = await call(session, "dy_module_memory_read", {"module": module, "legacy": True})
                 assert empty["records"] == []
                 first = await call(session, "dy_research_record_write",
                                    {**payload, "trace_context": context})
@@ -264,7 +233,9 @@ def test_stdio_research_resume_report_and_workspace_isolation(tmp_path, module):
                                "scope_id": first["scope_id"], "expected_revision": first["revision"]})
                 assert conflict.value.code == -32602
                 await call(session, "dy_wiki_build", {"confirmed": True})
-                report = _uninspected_report(module, first["scope_id"])
+                from template_qa_helpers import save_answers
+                qa = save_answers(workspace, module)
+                report = _uninspected_report(workspace, module, qa["scope_id"])
                 validated = await call(session, "dy_inspection_validate", {"report": report})
                 assert validated["valid"] and validated["gate"] == "待确认"
                 for _ in range(2):
@@ -282,7 +253,7 @@ def test_stdio_research_resume_report_and_workspace_isolation(tmp_path, module):
                 initialized = await call(session, "dy_session_initialize", {"source": "resume"})
                 assert "delivery-register.md" in initialized
                 assert "甲医院修订后结论" not in initialized
-                records = await call(session, "dy_module_memory_read", {"module": module})
+                records = await call(session, "dy_module_memory_read", {"module": module, "legacy": True})
                 assert len(records["records"]) == 2 and not records["has_more"]
                 current = next(row for row in records["records"] if row["scope_id"] == saved["scope_id"])
                 assert current["revision"] == saved["revision"]
@@ -291,13 +262,19 @@ def test_stdio_research_resume_report_and_workspace_isolation(tmp_path, module):
                 for report in saved["reports"]:
                     content = await call(session, "dy_inspection_report_read",
                                          {"module": module, "report_id": report["report_id"]})
-                    assert "完整检查数据" in content and "未检查" in content
+                    assert "机器可读数据" not in content
+                    assert "## 模板问题与业务要求" in content and "未检查" in content
+                    from dy_superpowers_mcp.qa_templates import load_template
+                    import re
+                    visible = ' '.join(re.sub(r'\\(.)', r'\1', content).split())
+                    assert all(' '.join(q['config_item'].split()) in visible
+                               for q in load_template(module)['questions'])
 
     async def separate_project():
         async with stdio_client(_parameters(other, codex_home)) as (reader, writer):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
-                records = await call(session, "dy_module_memory_read", {"module": module})
+                records = await call(session, "dy_module_memory_read", {"module": module, "legacy": True})
                 assert records["records"] == []
                 notes = await call(session, "dy_notes_list", {})
                 assert notes["notes"] == []

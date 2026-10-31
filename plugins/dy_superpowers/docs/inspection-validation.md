@@ -1,53 +1,17 @@
-# 巡检校验合同
+# 模板驱动巡检校验合同
 
-巡检开始或恢复时可先调用 `dy_inspection_prepare(trace_id, module, scope_id, environment)`，可选 `checks` 限定本轮子项、`previous_records` 对照上次依赖。返回 `research_ready/missing/incomplete/completeness_unknown/retired`、验收标准、补问入口及复查原因；该视图不保存事实、不选定验收分支、不自动发问或执行查询。用 `dy_module_memory_read(view="current", checks=[...], scope_id=...)` 批量读取准备项的当前结论；历史按需用 `view="full"` 读取。补充调研确认保存并回读后重新准备，仅依赖已补齐的子项恢复。
+新版报告basis含module、scope_id、environment、connection_fingerprint、template_revision、answer_version，原样取自prepare；连接指纹绑定服务地址、数据库及服务身份，不含密码。连接变化须重取证。expected_checks覆盖当前模板全部question_id，数量按实际模板计算，records每题一次。旧报告仅历史读，不能新验证放行；补PDF必须通过当前合同，否则明确拒绝。
 
-明确结果要求当前调研 `status=confirmed` 且显式 `research_complete=true`。缺失完整性字段的旧记录按未知处理，不能默认完整；可报告待确认、未知或未检查，核实要素后再经用户确认修订。调研存储度、调研准备覆盖及实际巡检结果是不同指标。上次结果即使版本一致也不自动算本轮通过，证据真实性与时效性仍须复核。
+记录包含question_id、answer_revision、verification_method、verified_at、reason、requirements、evidence_refs、result。reason按各要求说明预期、实值、比较结论及查询范围与分页边界；校验器只验证其非空，不证明比较语义正确。明确结果（通过、不通过、部分通过、不适用）需同范围完整确认答案、非空要求、当前版本、晚于确认及证据且不晚于当前的带时区时间、真实证据。未答题保留未检查/待确认，可保存待确认报告。
 
-形成报告前调用插件内 `dy_inspection_validate(trace_id, report)`。它是只读校验，不保存报告或记忆，也不授予业务写入权限。校验后向顾问展示报告与门禁结果；获确认后调用 `dy_inspection_report_save(trace_id, report, confirmed=true)`，工具会重新校验、生成 UTC 时间戳和唯一后缀，并保存到工作区目录 `.dy_superpowers/reports/<module>/<YYYY-MM-DD>/<report-id>.md`。工具返回实际报告编号和路径，后续按响应编号读取；既有报告不覆盖。
+requirements含requirement_id、text、source_refs、result、evidence_refs。来源仅kind=answer配question_id/revision，或kind=attachment配reference/sha256，必须同问题当前确认记录与绑定附件。无论问题结果如何，每个附件全部已确认requirements均按文本和引用/摘要逐项覆盖；未核验要求标未检查/待确认且可无evidence，不能整份隐去。模型理解答案提取要求，结构校验不证明自由文本语义完整。
 
-保存后的报告面向业务人员：开头先给中文交付结论、范围和数量摘要，随后列出阻塞事项与建议下一步；明细按巡检矩阵中的业务分类展示检查项、优先级、结果和说明。每项的完整验收要求、验证方法及证据引用置于明细后，末尾保留报告编号、校验时间、矩阵版本和完整机器可读 JSON。未提供的责任人和计划完成日期明确标记为待指定，不由工具推测。
+prepare的detail_checks定义附件非空字段覆盖（包括false与0）：报告原样保留text和source_ref，后者含sheet、从1起的明细row及field。字段可合并检索，但核验项不得漏。明确要求结果必须含verification_target=configuration/business/document，分别表示系统配置、业务效果、制度材料；configuration必须含当前Odoo证据，document不得替代配置核验。
 
-## 输入
+系统配置的明确结论还必须由实时精确比较支撑：在`dy_odoo_record_search/read`传入`comparison={"expected_count":1,"expected_values":{"name":"预期名称","company_id":4}}`，并在报告同一Odoo证据中保留完全相同的comparison。预期字段显式放入fields；搜索从offset=0开始，limit大于expected_count（搜索预期最多99条），以检测重复与截断。按实际模型字段声明公司及关联ID，不能把company_id套用于所有模型。Many2one按真实ID比较，布尔值不与0/1混同；列表按顺序精确比较。公司过滤条件仍须显式放入domain。
 
-`report` 包含以下列表：
+trace只保存规范化预期的SHA256摘要及passed/mismatch，不保存预期正文或业务返回行。配置“通过/不适用”必须匹配passed，“不通过/部分通过”必须匹配mismatch；同一上下文和模型采用最新成功读取事件，缺比较、预期被改动或状态不符均拒绝明确结论。历史报告可读取，重新验证须补充当前比较证据。模型仍负责从确认答案正确提取预期值，比较成功不能证明自由文本已完整理解，也不能代替业务效果及浏览器验收。
 
-- `expected_checks`：本次声明的完整检查范围，每项包含 `module`、`check_order`、`research_id`、`scope_id`、`environment`。
-- `records`：范围内每个子项恰好一条当前结果。未完成项也须记录，不得通过删掉预期项来制造通过；复查历史保留在台账中，不混入当前结果列表。
-- `excluded_checks`：本次范围外的矩阵子项，每项包含同样的范围键和非空 `reason`。对每个模块、范围标识和环境，`expected_checks` 与 `excluded_checks` 的并集必须覆盖当前矩阵全部子项；排除项会随报告保存，便于审阅范围边界。
+document目标明确结果必须含document/manual材料证据。document证据需独立真实工作区文件及摘要，observed_at晚于答案确认且不晚于verified_at；不得使用当前答卷任一问题的调研附件或其改名副本（相同摘要）自证。manual还需可追踪签认材料、signed_by、signed_at。Odoo证据必须有当前有效连接及匹配的非空连接指纹，再以本workspace成功tool.end与odoo.read匹配basis及question_id/answer_revision，可附requirement_id；不能删除指纹退化为离线校验。纯材料报告可在缺连接时核验材料本身，不证明系统配置对齐。新增发现工具只能证明对应元数据。business须补真实结果材料/人工签认，否则待确认。同题重复附件绑定须先合并确认，不能覆盖要求。
 
-模块支持 `expense`、`general-ledger`。检查顺序和子项编号必须原样取自领域清单，例如费用 `1 + 01`、总账 `GL-1-001 + 01`；不要自行统一编号。`scope_id` 沿用调研读取工具的返回值，环境名称须与声明范围一致。每个 `module + scope_id + environment` 分别覆盖完整清单；保存时一次提交单一模块报告。
-
-每条 `records` 除范围字段外，还须包含：
-
-| 字段 | 内容 |
-| --- | --- |
-| `record_id` | 本次报告内唯一的记录标识 |
-| `research_revision` | 最新确认调研的 `revision`；明确结论必须提供 |
-| `matrix_revision` | 对应模块 `inspection-matrix.md` 当前原始文件字节的 SHA-256 |
-| `acceptance_standard` | 该子项“验收标准（调研后）”完整原文，保留条件分支；支持直接复制 Markdown 单元格内容 |
-| `verification_method` | 本次验证方法 |
-| `verified_at` | 带时区的 ISO 8601 验证时间，明确结论须晚于所用调研修订 |
-| `evidence_refs` | 结构化证据引用列表；明确结论须提供。每条包含 `kind`、`reference`；Odoo 引用还须提供 `trace_id`、`model`，并匹配成功的 Odoo 工具调用及相同模块、检查项、调研版本、范围和环境 |
-| `result` | 通过、部分通过、不通过、不适用、待确认、未检查或未知 |
-| `reason` | 结果理由、所选验收分支或当前阻塞原因 |
-
-在 `report` 中可额外保留前次记录、限制与复查说明，但不要放业务记录正文。矩阵哈希可通过 Python 标准库 `hashlib.sha256(path.read_bytes()).hexdigest()` 获取；校验响应也返回当前使用的 `matrix_revisions`。哈希或调研版本变化后须重新核验，不能只替换版本号。
-
-校验会匹配矩阵中同检查序号、同子项的验收标准，允许 HTML 实体和换行表现差异；要求每个范围逐项列出所有矩阵子项，范围外项目必须给出排除理由。Odoo 证据引用要求关联到同一工作区 trace 中同模型的成功读取事件。它不判断顾问是否选对条件分支，也不验证 Odoo 行或外部材料内容；这些仍需实际审阅证据。
-
-## 输出与门禁
-
-`valid` 表示记录结构、覆盖和版本对应关系是否满足规则。`gate` 表示声明范围的汇总结果：
-
-- 有校验错误：`待确认`。
-- 校验有效且有不通过项：`不通过`，其他未完成项仍须逐项说明。
-- 校验有效、没有不通过项且存在待确认、未检查、未知或部分通过：`待确认`。
-- 校验有效且全部不适用：`不适用`。
-- 校验有效且仅有通过和不适用，并至少有通过项：`通过`。
-
-调研缺失时允许提交待确认、未知或未检查结果，并保持待确认门禁；明确结论必须关联当前 `confirmed` 调研。调研停用、记录损坏、修订变化、验收标准错配或验证时间过早时，原通过结果不能继续通过校验。
-
-响应包含 `errors`、`validated_at`、`matrix_revisions` 和 `execution_authorized=false`。验证时间必须带时区、不得晚于当前时间，并晚于所用调研修订。保存报告时会再次校验调研和矩阵版本。既有报告不会在后台自动更新；恢复会话或交付前应重新校验。
-
-此门禁只适用于报告声明的单一模块、范围标识和环境，不能据此断言整个项目已经交付。范围覆盖检查确保当前矩阵每项都作为检查或排除项列出；它仍不能证明调用者选择的环境和项目范围真实完整。
+聚合先不通过，有未知、待确认、未检查或部分通过不能通过；全不适用为不适用，其余仅通过/不适用则通过。门禁先不通过、再待确认、再全不适用/通过。结构、版本、摘要、引用错误valid=false不能保存。报告按模板分组编号、业务配置项、问题和要求显示全部结果及未验证边界，不取旧矩阵优先级或标题。范围名称由当前答卷取得并随报告保存，重导不改名。默认读取及PDF只展示业务正文、材料文件名和核验说明，不展示内部问题标识、范围标识、版本摘要、追踪标识或原始证据JSON；完整关联数据仅保存在Markdown机器数据中供追溯和重导。

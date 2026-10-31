@@ -1,7 +1,7 @@
 # HRP 源码索引
 
 数据来源：当前可读的鼎医 HRP Odoo 12 源码，覆盖 16 个仓库目录、166 个 addon manifest（技术名、中文名、版本、依赖均提取自 `__manifest__.py`）。依赖仅表示 manifest 的源码声明，不代表目标账套已安装，也不证明线上工作流。
-用途：巡检时把巡检矩阵的配置项名称（业务叫法）映射到实际技术模块和模型；实际安装状态、字段与定制仍须用 `dy_odoo_module_list_installed` / `dy_odoo_model_fields` / `dy_odoo_record_search` 在目标账套核验。源码索引不是账套事实。
+用途：巡检时把最新确认答卷及附件中的配置项名称（业务叫法）映射到实际技术模块和模型；实际安装状态、字段与定制仍须用 `dy_odoo_module_list_installed` / `dy_odoo_model_fields` / `dy_odoo_record_search` 在目标账套核验。源码索引不是账套事实。
 
 ## dy-finance（总账（财务会计），8 个 addon）
 
@@ -157,7 +157,7 @@
 
 ## 使用约定
 
-- 巡检矩阵中的业务叫法（如“费用管理”“会计平台-费用”“预算会计平台-基础”）对应本表技术名（`dy_expense`、`dy_fin_expense_pf`、`dy_fin_budget_pf`）；检查模块安装时用技术名查 `ir.module.module`。
+- 答卷中的业务叫法（如“费用管理”“会计平台-费用”“预算会计平台-基础”）对应本表技术名（`dy_expense`、`dy_fin_expense_pf`、`dy_fin_budget_pf`）；检查模块安装时用技术名查 `ir.module.module`。
 - 模块列表每页最多 100 条；返回满页必须继续用 offset 翻页，取全量后才能下“未安装”结论。
 - 查配置记录前先用 `dy_odoo_model_fields` 核对该账套字段是否与源码一致；定制 addon 可能增删字段。
 - 源码版本与账套实际版本可能不同：`ir.module.module.latest_version` 是账套事实，本表版本是源码仓库事实。

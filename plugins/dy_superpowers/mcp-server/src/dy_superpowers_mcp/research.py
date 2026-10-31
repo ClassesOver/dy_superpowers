@@ -264,11 +264,6 @@ def write_record(workspace: str | Path, data: dict[str, Any]) -> dict[str, Any]:
     if any(re.search(r"(?<!\d)(?:1[3-9]\d{9}|\d{17}[\dXx])(?!\d)", str(data.get(name, ""))) for name in ("conclusion", "scope", "evidence_ref", "retirement_reason")):
         raise ValueError("调研记录不得包含敏感个人信息")
     module = validate_module(data["module"])
-    if module in {"expense", "general-ledger"}:
-        from .inspection import _matrix
-        _, matrix_keys = _matrix(module)
-        if (data["check_order"], data["research_id"]) not in matrix_keys:
-            raise ValueError("检查键不在当前模块巡检矩阵中")
     path = module_memory_path(workspace, module)
     directory = path.parent
     directory.mkdir(parents=True, exist_ok=True)

@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import sys
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -70,6 +71,7 @@ def parse_xlsx(path: Path, module: str | None = None) -> dict:
     cached = load_workbook(path, data_only=True)
     worksheets, issues, tables = [], [], []  # tables: (表头标签, 行集合)
     unanswered, pending_locations, attachment_sheets = [], [], {}
+    placeholder_questions, question_groups = [], 0
     for ws in workbook:
         for cells in ws:
             for cell in cells:
@@ -83,10 +85,53 @@ def parse_xlsx(path: Path, module: str | None = None) -> dict:
                            "hidden_rows": sum(bool(v.hidden) for v in ws.row_dimensions.values())})
         if ws.sheet_state != "visible":
             issues.append({"code": "hidden_sheet", "sheet": ws.title})
+        current_header = next((row for row in range(1, min(ws.max_row, 20) + 1)
+                               if [_text(ws.cell(row, col).value) for col in range(1, 7)] ==
+                               ['检查编号', '配置项', '配置路径', '调研问题（按配置项归并）', '附件清单（点击跳转）', '答案']), None)
+        if current_header:
+            groups = {}
+            for row in range(current_header + 1, ws.max_row + 1):
+                def merged(column):
+                    for low, high, left, right in merges:
+                        if low <= row <= high and left <= column <= right:
+                            return ws.cell(low, left).value
+                    return ws.cell(row, column).value
+                order = _text(merged(1))
+                if not order:
+                    continue
+                group = groups.setdefault(order, {'item': _text(merged(2)), 'question': _text(merged(4)),
+                                                  'answers': [], 'cells': [], 'branches': []})
+                branch = _text(ws.cell(row, 5).value)
+                if branch:
+                    group['branches'].append({'text': branch, 'cell': f'E{row}'})
+                cell = ws.cell(row, 6)
+                value = cached[ws.title][cell.coordinate].value if cell.data_type == 'f' else cell.value
+                if cell.data_type == 'f' and value is None:
+                    issues.append({'code': 'formula_without_cache', 'sheet': ws.title, 'cell': cell.coordinate})
+                if _text(value):
+                    group['answers'].append(_text(value))
+                    group['cells'].append(cell.coordinate)
+            question_groups += len(groups)
+            grouped_rows = []
+            for order, group in groups.items():
+                locator = {'sheet': ws.title, 'cells': group['cells']}
+                if group['question'] in ('', '/'):
+                    placeholder_questions.append({'question_id': order, 'question': group['question'],
+                                                  'attachment_branches': group['branches']})
+                if not group['answers']:
+                    unanswered.append({'question_id': order, 'check_order': order, 'locator': locator})
+                    continue
+                record = _row(order, group['item'], '\n'.join(group['answers']), locator)
+                record.update(question_id=order, research_question=group['question'],
+                              answer_cells=group['cells'], attachment_branches=group['branches'])
+                grouped_rows.append(record)
+            tables.append(('答案', grouped_rows))
+            continue
         if ws.title != "调研问题清单":
-            headers = [_text(ws.cell(1, col).value) for col in range(1, ws.max_column + 1)]
+            attachment_header = 2 if _text(ws.cell(1, 1).value) == '返回调研清单' else 1
+            headers = [_text(ws.cell(attachment_header, col).value) for col in range(1, ws.max_column + 1)]
             rows, example_present = [], False
-            for row_number in range(2, ws.max_row + 1):
+            for row_number in range(attachment_header + 1, ws.max_row + 1):
                 values = [_json_cell(ws.cell(row_number, col).value) for col in range(1, ws.max_column + 1)]
                 if not any(_text(value) for value in values):
                     continue
@@ -216,10 +261,18 @@ def parse_xlsx(path: Path, module: str | None = None) -> dict:
                        "selected": "全部结论表", "skipped": 0})
     return {"rows": rows, "worksheets": worksheets, "issues": issues,
             'unanswered': unanswered, 'pending_locations': pending_locations,
+            'placeholder_questions': placeholder_questions, 'question_groups': question_groups,
             "attachment_sheets": attachment_sheets}
 
 
 def _json_cell(value):
+    if isinstance(value, timedelta):
+        sign = '-' if value < timedelta(0) else ''
+        span = abs(value)
+        hours, seconds = divmod(span.seconds, 3600)
+        minutes, seconds = divmod(seconds, 60)
+        fraction = f'.{span.microseconds:06d}'.rstrip('0') if span.microseconds else ''
+        return f'{sign}P{span.days}DT{hours}H{minutes}M{seconds}{fraction}S'
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return value
@@ -451,8 +504,10 @@ def parse_source(path: Path, module: str) -> dict:
             "issues": extracted.get("issues", []),
             'unanswered': extracted.get('unanswered', []),
             'pending_locations': extracted.get('pending_locations', []),
+            'placeholder_questions': extracted.get('placeholder_questions', []),
             'attachment_sheets': extracted.get('attachment_sheets', {}),
             "coverage": {"source_subitems": len(extracted["rows"]),
+                         'question_groups': extracted.get('question_groups', 0),
                          'source_pending_cells': len(extracted.get('pending_locations', [])),
                          "contains_pending_questions": sum(r["contains_pending_questions"] for r in extracted["rows"]),
                          "confirmed_written": 0},

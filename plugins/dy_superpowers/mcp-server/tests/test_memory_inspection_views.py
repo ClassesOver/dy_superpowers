@@ -7,7 +7,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
 import dy_superpowers_mcp.research as research
-from dy_superpowers_mcp.research_progress import calculate_progress
 
 
 def save(workspace, order='1', **changes):
@@ -42,7 +41,7 @@ def test_current_and_summary_views_skip_history_and_do_not_change_memory(tmp_pat
     path = tmp_path / '.dy_superpowers/modules/expense/research.md'
     before = path.read_bytes()
     monkeypatch.setattr(research, '_read_history', lambda *_: pytest.fail('当前视图不应展开历史'))
-    args = dict(trace_id='views', module='expense', scope_id='site-a')
+    args = dict(legacy=True, trace_id='views', module='expense', scope_id='site-a')
     current, error = server.execute_tool('dy_module_memory_read', dict(args, view='current'), tmp_path)
     assert error is None
     record = current['records'][0]
@@ -60,7 +59,7 @@ def test_batch_keys_do_not_mix_scopes_and_paginate_selected_keys(tmp_path, monke
     for order in ('1', '2', '3'):
         save(tmp_path, order)
     save(tmp_path, '2', scope='乙院', scope_id='site-b', conclusion='其他范围')
-    args = dict(trace_id='batch', module='expense', view='current', scope_id='site-a', limit=1,
+    args = dict(legacy=True, trace_id='batch', module='expense', view='current', scope_id='site-a', limit=1,
                 checks=[dict(check_order='2', research_id='01'), dict(check_order='3', research_id='01')])
     first, error = server.execute_tool('dy_module_memory_read', args, tmp_path)
     assert error is None and first['next_offset'] == 1
@@ -70,14 +69,13 @@ def test_batch_keys_do_not_mix_scopes_and_paginate_selected_keys(tmp_path, monke
     assert all(r['scope_id'] == 'site-a' for r in first['records'] + second['records'])
 
 
-def test_progress_exception_lists_do_not_echo_conclusions_or_history():
-    records = [dict(module='expense', check_order='legacy', research_id='01', scope_id='a',
-                    status='confirmed', conclusion='不应重复输出', history=[{'conclusion': '旧值'}])]
-    progress = calculate_progress('expense', records, scope_id='a')
-    assert progress['answered'] == 0
-    for field in ('unmapped_records', 'completeness_unknown'):
-        assert progress[field][0]['check_order'] == 'legacy'
-        assert 'conclusion' not in progress[field][0] and 'history' not in progress[field][0]
+def test_default_qa_does_not_echo_legacy_unmapped_records(tmp_path, monkeypatch):
+    monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
+    save(tmp_path, conclusion='不应重复输出')
+    result, error = server.execute_tool('dy_module_memory_read',
+        dict(trace_id='new-view', module='expense'), tmp_path)
+    assert error is None and result['records'] == [] and result['answered'] == 0
+    assert '不应重复输出' not in str(result)
 
 
 @pytest.mark.parametrize('view', ['current', 'summary', 'full'])
