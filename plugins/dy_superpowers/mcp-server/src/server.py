@@ -39,7 +39,8 @@ from dy_superpowers_mcp.qa_store import read_qa, commit_qa, export_qa, parse_qa_
 from dy_superpowers_mcp.reports import export_report_pdf, read_report, save_report
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 from dy_superpowers_mcp.inspection import validate_inspection
-from dy_superpowers_mcp.inspection_prepare import prepare_inspection, configured_environment_info
+from dy_superpowers_mcp.inspection_prepare import prepare_inspection
+from dy_superpowers_mcp.qa_basis import configured_environment_info
 
 
 MEMORY_READ_FILES = [
@@ -1127,7 +1128,7 @@ TOOL_REGISTRY = {
 }
 for operation, schema in CONFIGURATION_SCHEMAS.items():
     TOOL_REGISTRY[f'dy_odoo_record_{operation}'] = (
-        '受限 HRP 配置写入；默认关闭。先 dry_run 预览摘要，经用户确认后写入并回读。答卷驱动时须携带完整巡检 trace_context，摘要绑定当前答卷；过期拒绝。不授予批次验收通过。',
+        '受限 HRP 配置写入；默认关闭。先 dry_run 预览摘要，经用户确认后写入并回读。按答卷配置时 trace_context 须完整携带 module、scope_id、template_revision、question_id、answer_revision、environment；摘要绑定该答卷与服务连接身份，答卷修订、附件变化或连接变化后拒绝。不授予批次验收通过。',
         schema, _handle_configuration_write)
 for name, schema in ODOO_CAPABILITY_SCHEMAS.items():
     TOOL_REGISTRY[name] = (ODOO_CAPABILITY_DESCRIPTIONS[name], schema, _handle_odoo_capability)

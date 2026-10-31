@@ -166,7 +166,7 @@ def test_attachment_change_invalidates_report(tmp_path):
 def configured_inspection(monkeypatch):
     for key, value in dict(APP_URL='https://odoo.example.test', DB_NAME='UAT', APP_USER='operator', APP_PASSWORD='placeholder').items():
         monkeypatch.setenv(key, value)
-    from dy_superpowers_mcp.inspection_prepare import configured_environment_info
+    from dy_superpowers_mcp.qa_basis import configured_environment_info
     return configured_environment_info()['connection_fingerprint']
 
 

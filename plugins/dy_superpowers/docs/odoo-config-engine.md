@@ -67,15 +67,15 @@ MCP 进程环境由管理员显式设置 `DY_ODOO_CONFIG_WRITE_ENABLED=1` 才可
 4. 摘要算法公开：剔除 trace_id、confirmed、confirmation_digest、dry_run，trace_context 只纳入下述答卷关联字段；未关联答卷时仍剔除 trace_context，保持独立配置兼容。合并 operation 后以 `sort_keys=true, ensure_ascii=false, separators=(',', ':'), allow_nan=false` 的 UTF-8 JSON 做 SHA-256。调用方使用 dry_run 取得摘要，无需手算。
 5. 执行前核对环境、原生权限、模块/字段、公司和更新快照；更新固定传入 Odoo 12 的 `__last_update` 并发上下文。该机制取决于部署代码，不能宣称所有定制均有原子比较交换保证，操作期间应避免人工并发修改；要求可证明原子更新的场景停止，转人工或专门的服务端实现。
 
-### 调研答卷驱动的配置闭环
+### 按答卷清单配置
 
-由答卷发起配置时，先读取当前范围的 `dy_module_memory_read` 和 `dy_inspection_prepare`。模型结合确认答案及附件提取配置预期，使用 Knowledge 和实时字段元数据核对，再将结构化预期传入 `dy_odoo_design_solution` 的 `user_answers.configuration_checks`。执行只读计划时，携带 prepare 返回的完整 basis、question_id、answer_revision 和模型分配的稳定 requirement_id 作为 trace_context；带 comparison 的实时查询才可支撑配置巡检结论。源码引用或答卷本身不能证明线上配置已完成，模型也不能仅因有候选而发起写入。
+配置独立运行，只读取答卷，不依赖巡检准备或巡检报告。由答卷发起配置时，先用 `dy_module_memory_read` 读取当前范围的确认答案及附件明细，模型结合清单数据提取配置预期，使用 Knowledge 和实时字段元数据核对，再逐行比较账套已有记录。源码引用或答卷本身不能证明线上配置已完成，模型也不能仅因有候选而发起写入。
 
-发现配置缺失或不符后，继续沿用同一 trace_context 调用 `dy_odoo_record_create/update` 预览、展示精确变更并另行确认。以下九个字段全部参与配置确认摘要，预览的 confirmation 返回同一组身份：module、scope_id、template_revision、answer_version、question_id、answer_revision、environment、connection_fingerprint、requirement_id。出现任何答卷关联字段就必须提供完整身份；skill 等纯追踪标签不参与摘要。不要去掉关联信息来复用旧摘要。
+调用 `dy_odoo_record_create/update` 预览时，`trace_context` 携带答卷依据，以下六个字段全部参与配置确认摘要，预览的 confirmation 返回同一组身份：module、scope_id、template_revision、question_id、answer_revision、environment。出现任何答卷关联字段就必须提供完整身份；skill 等纯追踪标签及巡检专用标识（如 requirement_id）不参与摘要。服务连接身份（URL、数据库、账号的摘要）由服务端计入所有配置写入的确认摘要，调用方不传入；连接变化后旧摘要失效。不要去掉关联信息来复用旧摘要。
 
-预览及执行开始时核对当前答卷，线上预检结束后、落盘尝试和写入前再核对一次。答案须已确认且 research_complete，必需附件须齐全且内容摘要未变化；模板、范围、答案版本、题目修订和服务连接身份须一致。过期、未完成、附件变化或身份不符时拒绝相关项，重新读取、分析并确认；其他独立事项可继续。上述核对不锁定用户编辑附件或远端配置，不能宣称跨本地答卷与 Odoo 的分布式原子事务。独立配置继续使用原接口；此关联也不验证模型对自由文本的解释是否正确，业务字段预期仍须用户确认。
+预览及执行开始时核对当前答卷，线上预检结束后、落盘尝试和写入前再核对一次。该题答案须已确认且 research_complete，必需附件须齐全且内容摘要未变化；模板、范围、题目修订和环境须一致。过期、未完成、附件变化或身份不符时拒绝相关项，重新读取、分析并确认；其他独立事项可继续。上述核对不锁定用户编辑附件或远端配置，不能宣称跨本地答卷与 Odoo 的分布式原子事务。不按答卷的配置继续使用原接口；此关联也不验证模型对自由文本的解释是否正确，业务字段预期仍须用户确认。
 
-成功写入返回 research_context 便于连接报告；幂等重放仍仅返回尝试状态，必须独立回读。自动回读和更新旧值核对采用与 comparison 相同的严格类型规则，False 不等同 0。用当前答卷身份、原记录 ID 和完整 comparison 再执行只读核对，更新巡检报告；答卷修订后重新 prepare 和回读，旧报告不能沿用。最后以同环境、公司和记录 ID 完成 Playwright 验收，报告及截图标明答卷身份和报告 ID。数据通过与界面通过分别记录；单题闭环不代表整份答卷或模块全部验收通过。
+成功写入返回 answer_context 便于在配置报告中标明答卷依据；幂等重放仍仅返回尝试状态，必须独立回读。自动回读和更新旧值核对采用与 comparison 相同的严格类型规则，False 不等同 0。最后以同环境、公司和记录 ID 完成 Playwright 验收，报告及截图标明答卷身份。数据通过与界面通过分别记录；单题配置完成不代表整份答卷或模块验收通过。
 
 ### 幂等与失败语义
 

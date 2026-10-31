@@ -6,7 +6,7 @@ import pytest
 
 import server
 from dy_superpowers_mcp import knowledge, odoo_planning
-from dy_superpowers_mcp.inspection_prepare import configured_environment_info
+from dy_superpowers_mcp.qa_basis import configured_environment_info
 from test_template_inspection import report_for, validate
 
 

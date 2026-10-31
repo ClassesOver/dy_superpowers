@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .qa_store import read_qa
 from .trace import TraceStore, TRACE_CODE_PATTERN
-from .inspection_prepare import configured_environment_info, optional_attachment, attachment_detail_checks
+from .qa_basis import attachment_detail_checks, configured_environment_info, optional_attachment
 
 KEY_FIELDS = ("module", "check_order", "research_id", "scope_id", "environment")
 RESULTS = {"通过", "部分通过", "不通过", "不适用", "待确认", "未检查", "未知"}

@@ -95,7 +95,7 @@ def module_operation(workspace, operation, args, client_factory):
     if args.get('dry_run', True):
         plan = None
         if operation == 'install':
-            from .inspection_prepare import configured_environment_info
+            from .qa_basis import configured_environment_info
             if args['environment'] != configured_environment_info()['environment']:
                 raise OdooConfigurationError('确认环境与当前环境连接不一致')
             client = client_factory()
@@ -114,7 +114,7 @@ def module_operation(workspace, operation, args, client_factory):
         raise OdooConfigurationError('必须确认本次环境、模块、备份及精确操作摘要')
     if not args.get('backup_reference', '').strip():
         raise OdooConfigurationError('必须提供已核实备份的引用；工具不创建或证明备份可恢复')
-    from .inspection_prepare import configured_environment_info
+    from .qa_basis import configured_environment_info
     if args['environment'] != configured_environment_info()['environment']:
         raise OdooConfigurationError('确认环境与当前环境连接不一致')
     if operation == 'upgrade':

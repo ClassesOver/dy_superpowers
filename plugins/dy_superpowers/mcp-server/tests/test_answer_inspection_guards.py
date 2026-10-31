@@ -8,7 +8,7 @@ import pytest
 import server
 from test_template_inspection import report_for, validate
 from dy_superpowers_mcp.qa_store import commit_qa
-from dy_superpowers_mcp.inspection_prepare import configured_environment_info
+from dy_superpowers_mcp.qa_basis import configured_environment_info
 from dy_superpowers_mcp.trace import TraceStore
 
 
