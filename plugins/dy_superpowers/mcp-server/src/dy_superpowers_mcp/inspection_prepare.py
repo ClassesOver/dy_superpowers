@@ -1,133 +1,98 @@
-"""只读计算巡检的调研准备情况和旧结果复查依赖，不产生验收结论。"""
-from __future__ import annotations
-
-from collections import Counter
-from datetime import datetime, timezone
+"""按模板问题列出确认 QA、附件要求及本轮缺口。"""
 from pathlib import Path
-
-from .inspection import KEY_FIELDS, RESULTS, _matrix
-from .research import read_module_records, validate_checks
-from .research_progress import _guide_items, calculate_progress
-from .trace import TRACE_CODE_PATTERN
-
-
-def _previous_records(records: list[dict]) -> dict[tuple, dict]:
-    if not isinstance(records, list) or len(records) > 1000:
-        raise ValueError('previous_records 必须是至多1000条巡检记录的列表')
-    indexed = {}
-    for record in records:
-        if (not isinstance(record, dict) or any(not isinstance(record.get(field), str)
-                or not record[field].strip() for field in KEY_FIELDS)):
-            raise ValueError('上次巡检记录必须包含完整检查键、范围和环境')
-        for field in ('research_revision', 'matrix_revision', 'verified_at', 'result'):
-            if field in record and not isinstance(record[field], str):
-                raise ValueError(f'上次巡检记录 {field} 必须是文本')
-        key = tuple(record[field] for field in KEY_FIELDS)
-        if key in indexed:
-            raise ValueError('上次巡检记录包含重复的检查键、范围和环境')
-        indexed[key] = record
-    return indexed
+import os
+import re
+import hashlib
+import json
+from .qa_store import read_qa
+from .trace import TRACE_CODE_PATTERN, redact
+from .odoo_jsonrpc import OdooSettings, OdooConfigurationError
 
 
-def _recheck_reasons(previous: dict | None, research: dict | None, matrix_revision: str) -> list[str]:
-    if previous is None:
-        return ['no_previous_record']
-    reasons = []
-    if previous.get('matrix_revision') != matrix_revision:
-        reasons.append('matrix_revision_changed')
-    if research is None or previous.get('research_revision') != research['revision']:
-        reasons.append('research_revision_changed')
+def configured_environment_info():
+    """仅读取安全配置身份；不创建连接或进行认证。"""
+    def identifier(value):
+        value = value.strip()
+        return value if value and len(value) <= 128 and TRACE_CODE_PATTERN.fullmatch(value) and '://' not in value and redact(value) == value else None
+    database = identifier(os.environ.get('DB_NAME', ''))
+    explicit = os.environ.get('DY_ODOO_ENVIRONMENT', '').strip()
+    environment = identifier(explicit) if explicit else database
     try:
-        verified = datetime.fromisoformat(previous.get('verified_at', '').replace('Z', '+00:00'))
-        if verified.tzinfo is None or verified > datetime.now(timezone.utc):
-            raise ValueError('无效验证时间')
-        if research is not None:
-            updated = datetime.fromisoformat(research['updated_at'].replace('Z', '+00:00'))
-            if updated.tzinfo is None:
-                updated = updated.replace(tzinfo=timezone.utc)
-            if verified < updated:
-                reasons.append('verification_predates_research')
-    except (ValueError, TypeError, AttributeError, KeyError):
-        reasons.append('invalid_verification_time')
-    if previous.get('result') not in RESULTS:
-        reasons.append('invalid_previous_result')
-    return reasons
+        settings = OdooSettings.from_environment()
+        fingerprint = hashlib.sha256(json.dumps([settings.url, settings.database, settings.username],
+            ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+        configured = True
+    except OdooConfigurationError:
+        configured = False
+        fingerprint = None
+    return {'environment': environment, 'database': database, 'configured': configured,
+            'connection_fingerprint': fingerprint}
+
+
+def attachment_detail_checks(attachments):
+    """确认明细的非空字段均须保留，包括 false 与零；定位仅用于内部覆盖。"""
+    checks = []
+    for attachment in attachments:
+        for detail in attachment.get('details', []):
+            for index, row in enumerate(detail['rows'], 1):
+                for field, value in row.items():
+                    if value is None or value == '':
+                        continue
+                    source = dict(kind='attachment', reference=attachment['reference'], sha256=attachment['sha256'],
+                                  sheet=detail['sheet'], row=index, field=field)
+                    rid = hashlib.sha256(json.dumps(source, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:24]
+                    checks.append(dict(requirement_id='detail-' + rid, source_ref=source, expected_value=value,
+                        text=f"{detail['sheet']} 第{index}行 {field}：{json.dumps(value, ensure_ascii=False)}"))
+    return checks
+
+
+def optional_attachment(question):
+    """只读取完整模板的明确按需标记，不猜测确认答案的业务语义。"""
+    instruction = question.get('attachment_instruction', '')
+    optional = re.search(r'附件[（(]按需[）)]', instruction)
+    required = re.search(r'附件\s*[:：]', instruction)
+    return bool(optional and not required)
 
 
 def prepare_inspection(workspace: Path, module: str, scope_id: str, environment: str, *,
-                       checks: list[dict] | None = None, previous_records: list[dict] | None = None) -> dict:
-    if any(not isinstance(value, str) or not value.strip() for value in (scope_id, environment)):
-        raise ValueError('必须明确 scope_id 和 environment，不能猜测范围或环境')
-    if len(environment) > 128 or not TRACE_CODE_PATTERN.fullmatch(environment):
-        raise ValueError('environment 必须是与证据追踪一致的稳定环境标识，例如 UAT 或 PROD')
-    matrix_revision, standards = _matrix(module)
-    selected_keys = validate_checks(checks)
-    if selected_keys is not None and not selected_keys <= standards.keys():
-        raise ValueError('checks 含当前模块矩阵之外的检查键')
-    previous = _previous_records([] if previous_records is None else previous_records)
-    records = []
-    while True:
-        page, more = read_module_records(workspace, module, scope_id=scope_id,
-                                        offset=len(records), limit=100, include_history=False)
-        records.extend(page)
-        if not more:
-            break
-        if not page:
-            raise ValueError('调研记录分页没有前进')
-    current = {}
-    for record in records:
-        key = (record['check_order'], record['research_id'])
-        if key in current:
-            raise ValueError('当前范围存在重复调研记录，不能选择其中一条用于巡检')
-        current[key] = record
-    questions = {(item['check_order'], item['research_id']): item['question']
-                 for item in _guide_items(module)}
-    items, used_previous = [], set()
-    for key, standard in standards.items():
-        if selected_keys is not None and key not in selected_keys:
-            continue
-        record = current.get(key)
-        if record is None:
-            readiness, reason = 'missing', '同范围调研缺失，需确认业务结论并授权保存'
-        elif record['status'] == 'retired':
-            readiness, reason = 'retired', '该范围记录已停用，需重新核对适用性'
-        elif 'research_complete' not in record:
-            readiness, reason = 'completeness_unknown', '旧记录完整性未知，不能默认完整'
-        elif record['research_complete'] is not True:
-            readiness, reason = 'incomplete', '仅有局部确认事实，尚不足以驱动明确巡检结果'
-        else:
-            readiness, reason = 'research_ready', ''
-        full_key = (module, *key, scope_id, environment)
-        prior = previous.get(full_key)
-        if prior is not None:
-            used_previous.add(full_key)
-        reasons = _recheck_reasons(prior, record, matrix_revision)
-        if readiness != 'research_ready':
-            reasons.append('research_not_ready')
-        items.append({'module': module, 'check_order': key[0], 'research_id': key[1],
-                      'scope_id': scope_id, 'environment': environment,
-                      'scope': record.get('scope') if record else None,
-                      'research_revision': record['revision'] if record else None,
-                      'matrix_revision': matrix_revision, 'acceptance_standard': standard,
-                      'readiness': readiness, 'blocking_reason': reason,
-                      'next_question': questions.get(key, f'请按验收标准补充 {key[0]}/{key[1]} 的业务依据')
-                                       if reason else None,
-                      'previous_result': prior.get('result') if prior else None,
-                      'recheck_required': bool(reasons), 'recheck_reasons': reasons,
-                      'evidence_reusable': False})
-    progress = calculate_progress(module, records, scope_id=scope_id)
-    ready = sum(item['readiness'] == 'research_ready' for item in items)
-    unmatched = [{field: value[field] for field in KEY_FIELDS}
-                 for key, value in previous.items() if key not in used_previous]
-    return {'module': module, 'scope_id': scope_id, 'environment': environment,
-            'matrix_revision': matrix_revision, 'items': items,
-            'research_storage': {field: progress[field] for field in ('answered', 'total', 'percentage', 'route')},
-            'preparation': {'total': len(items), 'research_ready': ready, 'blocked': len(items) - ready},
-            'verification': {'performed': False, 'previous_results_reported': dict(Counter(
-                item['previous_result'] for item in items if item['previous_result'] is not None))},
-            'unmapped_records': progress['unmapped_records'],
-            'completeness_unknown': progress['completeness_unknown'],
-            'unmatched_previous': unmatched, 'execution_authorized': False,
-            'limitations': 'research_ready 仅表示同范围调研已显式完整，仍需核对验收分支并采集实时证据。'
-                           'next_question 是指南补问入口，需结合已有事实拆分为一次一题，不自动发起QA。'
-                           '本工具未执行巡检；上次结果只作声明，未验证其证据，不自动沿用通过或改写历史报告。'}
+                       checks=None, previous_records=None) -> dict:
+    if not isinstance(environment, str) or len(environment) > 128 or not TRACE_CODE_PATTERN.fullmatch(environment):
+        raise ValueError('environment 必须是稳定环境标识')
+    configured = configured_environment_info()['environment']
+    if configured is not None and environment != configured:
+        raise ValueError('environment 与当前服务实际配置身份不一致')
+    if not isinstance(scope_id, str) or not scope_id.strip():
+        raise ValueError('必须明确 scope_id')
+    state = read_qa(workspace, module, scope_id)
+    questions = state['questions']
+    if checks is not None:
+        if not isinstance(checks, list) or not checks or any(not isinstance(q, dict) or q.get('question_id') not in {x['question_id'] for x in questions} for q in checks):
+            raise ValueError('checks 只能使用当前模板 question_id；完整报告仍须覆盖全部问题')
+        if len({q['question_id'] for q in checks}) != len(checks):
+            raise ValueError('checks 不可重复')
+    current = {a['question_id']: a for a in state['records']}
+    basis = {k: state[k] for k in ('module', 'scope_id', 'template_revision', 'answer_version')}
+    basis['environment'] = environment
+    basis['connection_fingerprint'] = configured_environment_info()['connection_fingerprint']
+    if previous_records is not None and not isinstance(previous_records, list):
+        raise ValueError('previous_records 必须是列表')
+    items = []
+    for q in questions:
+        a = current.get(q['question_id'])
+        readiness = 'missing' if a is None else 'incomplete' if not a['research_complete'] else 'attachment_missing' if q['attachment_names'] and not optional_attachment(q) and not a['attachments'] else 'research_ready'
+        if a and any(change['question_id'] == q['question_id'] for change in state['attachment_changes']):
+            readiness = 'attachment_changed'
+        items.append({**q, 'answer_revision': a['revision'] if a else None,
+            'answer': a['answer'] if a else None, 'confirmed_at': a['confirmed_at'] if a else None,
+            'attachments': a['attachments'] if a else [], 'readiness': readiness,
+            'detail_checks': attachment_detail_checks(a['attachments']) if a else [],
+            'blocking_reason': '' if readiness == 'research_ready' else '需补齐当前确认答案或附件要求',
+            'next_question': q['question'] if readiness != 'research_ready' else None,
+            'recheck_required': True, 'recheck_reasons': ['live_verification_required'], 'evidence_reusable': False})
+    ready = sum(i['readiness'] == 'research_ready' for i in items)
+    return {'module': module, 'scope_id': scope_id, 'environment': environment, 'basis': basis, 'items': items,
+        'expected_checks': [{'question_id': q['question_id']} for q in questions],
+        'research_storage': {k: state[k] for k in ('answered', 'total', 'percentage', 'route', 'confirmed_count', 'partial_count')},
+        'preparation': {'total': len(items), 'research_ready': ready, 'blocked': len(items) - ready},
+        'verification': {'performed': False}, 'execution_authorized': False,
+        'limitations': '完整确认仅提供巡检依据，仍须逐项提取要求和采集本轮真实证据。历史结果不自动复用。'}

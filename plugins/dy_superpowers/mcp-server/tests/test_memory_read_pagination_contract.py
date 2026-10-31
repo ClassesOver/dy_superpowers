@@ -15,7 +15,7 @@ def test_memory_read_returns_next_offset_until_last_page(tmp_path, monkeypatch):
         write_record(tmp_path, dict(module='expense', check_order=order, research_id='01',
                      config_item='应用', conclusion='本期启用', scope='中心院区',
                      confirmed=True, confirmed_by='测试', confirmed_at='2026-10-28'))
-    arguments = dict(trace_id='pagination', module='expense', limit=2)
+    arguments = dict(legacy=True, trace_id='pagination', module='expense', limit=2)
     first, error = server.execute_tool('dy_module_memory_read', arguments, tmp_path)
     assert error is None
     assert len(first['records']) == 2 and first['has_more'] is True

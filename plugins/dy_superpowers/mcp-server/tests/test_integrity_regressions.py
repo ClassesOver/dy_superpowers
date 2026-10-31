@@ -229,12 +229,12 @@ def test_scoped_research_is_accessible_through_tool(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     write_record(tmp_path, research_data())
     write_record(tmp_path, research_data(scope="公司B"))
-    result, error = server.execute_tool("dy_module_memory_read", {
+    result, error = server.execute_tool("dy_module_memory_read", {"legacy": True,
         "trace_id": "scope-read", "module": "account", "check_order": "1", "research_id": "01", "scope": "公司A",
     }, tmp_path)
     assert error is None
     assert result["records"][0]["scope"] == "公司A"
-    result, error = server.execute_tool("dy_module_memory_read", {
+    result, error = server.execute_tool("dy_module_memory_read", {"legacy": True,
         "trace_id": "scope-ambiguous", "module": "account", "check_order": "1", "research_id": "01",
     }, tmp_path)
     assert result is None

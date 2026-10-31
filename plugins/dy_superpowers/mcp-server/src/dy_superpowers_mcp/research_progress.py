@@ -1,4 +1,4 @@
-"""调研子项覆盖率与固定待补问题模板。"""
+"""旧研究存储的历史覆盖率与旧答卷实现；新版业务入口直接使用 qa_store。"""
 
 from __future__ import annotations
 

@@ -75,7 +75,7 @@ def test_confirmed_research_record_is_stored_by_key_and_keeps_history(workspace)
 
     read = call_tool(
         "dy_module_memory_read",
-        {"trace_id": "research-c", "module": "expense", "check_order": "1", "research_id": "01"},
+        {"legacy": True, "trace_id": "research-c", "module": "expense", "check_order": "1", "research_id": "01"},
         workspace,
     )
     payload = json.loads(read["result"]["content"][0]["text"])["records"][0]
@@ -107,7 +107,7 @@ def test_research_write_uses_feishu_sender_and_system_time(workspace, monkeypatc
 
     read = call_tool(
         "dy_module_memory_read",
-        {"trace_id": "research-metadata-read", "module": "expense", "check_order": "1", "research_id": "01"},
+        {"legacy": True, "trace_id": "research-metadata-read", "module": "expense", "check_order": "1", "research_id": "01"},
         workspace,
     )
     record = json.loads(read["result"]["content"][0]["text"])["records"][0]
@@ -157,7 +157,7 @@ def test_concurrent_research_updates_preserve_every_revision(workspace):
     record = json.loads(
         call_tool(
             "dy_module_memory_read",
-            {"trace_id": "research-read", "module": "expense", "check_order": "1", "research_id": "01"},
+            {"legacy": True, "trace_id": "research-read", "module": "expense", "check_order": "1", "research_id": "01"},
             workspace,
         )["result"]["content"][0]["text"]
     )["records"][0]
@@ -423,7 +423,7 @@ def test_oversized_odoo_domain_is_marked_as_truncated():
 def test_research_read_traces_memory_content(workspace):
     arguments = research_arguments(trace_id="research-source")
     assert "error" not in call_tool("dy_research_record_write", arguments, workspace)
-    result = call_tool("dy_module_memory_read", {
+    result = call_tool("dy_module_memory_read", {"legacy": True,
         "trace_id": "research-read-metadata", "module": "expense",
         "check_order": "1", "research_id": "01",
     }, workspace)

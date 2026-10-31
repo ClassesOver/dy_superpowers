@@ -66,6 +66,19 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
                 assert 'scope_id' in schemas['dy_module_memory_read']['properties']
                 assert 'expected_revision' in schemas['dy_research_record_write']['properties']
                 assert 'dy_inspection_validate' in schemas
+                assert schemas['dy_knowledge_search']['properties']['limit']['maximum'] == 50
+                found = await session.call_tool('dy_knowledge_search', {
+                    'trace_id': 'protocol-source-search', 'query': 'dy.expense.document.type',
+                    'module': 'dy_expense', 'knowledge_type': 'source', 'limit': 2,
+                })
+                source_result = json.loads(found.content[0].text)
+                assert source_result['coverage']['backend'] == 'zoekt'
+                assert 0 < source_result['count'] <= 2
+                source_page = await session.call_tool('dy_knowledge_read', {
+                    'trace_id': 'protocol-source-read',
+                    'reference': source_result['results'][0]['reference'], 'limit': 20,
+                })
+                assert json.loads(source_page.content[0].text)['found'] is True
                 initialized = await session.call_tool(
                     'dy_session_initialize', {'trace_id': 'protocol-start', 'source': 'resume'}
                 )
@@ -104,18 +117,22 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
                 }
                 await session.call_tool('dy_research_record_write', research_args)
                 research = await session.call_tool('dy_module_memory_read', {
-                    'trace_id': 'protocol-research-read', 'module': 'expense', 'check_order': '1', 'research_id': '01',
+                    'legacy': True, 'trace_id': 'protocol-research-read', 'module': 'expense', 'check_order': '1', 'research_id': '01',
                 })
                 current = json.loads(research.content[0].text)['records'][0]
-                prepared = await session.call_tool('dy_inspection_prepare', {
-                    'trace_id': 'protocol-prepare', 'module': 'expense', 'scope_id': current['scope_id'],
-                    'environment': 'UAT', 'checks': [{'check_order': '1', 'research_id': '01'}],
+                # 旧记录只读可查，但不能成为新巡检依据。
+                default = await session.call_tool('dy_module_memory_read', {
+                    'trace_id': 'protocol-new-read', 'module': 'expense',
                 })
-                preparation = json.loads(prepared.content[0].text)
-                assert preparation['items'][0]['readiness'] == 'completeness_unknown'
-                assert preparation['verification']['performed'] is False
+                assert json.loads(default.content[0].text)['records'] == []
+                with pytest.raises(MCPError):
+                    await session.call_tool('dy_inspection_prepare', {
+                        'trace_id': 'protocol-prepare', 'module': 'expense',
+                        'scope_id': current['scope_id'], 'environment': 'db',
+                        'checks': [{'check_order': '1', 'research_id': '01'}],
+                    })
                 compact = await session.call_tool('dy_module_memory_read', {
-                    'trace_id': 'protocol-current', 'module': 'expense', 'scope_id': current['scope_id'],
+                    'legacy': True, 'trace_id': 'protocol-current', 'module': 'expense', 'scope_id': current['scope_id'],
                     'checks': [{'check_order': '1', 'research_id': '01'}], 'view': 'current',
                 })
                 compact_record = json.loads(compact.content[0].text)['records'][0]

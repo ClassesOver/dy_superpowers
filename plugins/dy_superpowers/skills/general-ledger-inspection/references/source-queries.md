@@ -9,7 +9,7 @@
 | 预算会计 | `dy_fin_gaap` | `account.mapping`、`budget.account.move`；两个预算向导见下文 |
 | 财务会计平台基础 | `dy_fin_pf` | `dy.fin.pf.account.class.define`、`dy.fin.pf.account.move.generation.rule`、`dy.fin.pf.influence.factor.setting` |
 
-`dy_fin_pf` 是业务凭证生成规则共同入口，按本期适用范围使用，不能因为矩阵未直接命名而推断必装或不适用。
+`dy_fin_pf` 是业务凭证生成规则共同入口，按最新确认答卷的本期适用范围核对，不能因问题未直接命名而推断必装或不适用。
 
 - 期间与开关账：持久模型 `dy.fin.account.period` 按 `company_id/date_from/date_to/account_structure_id` 筛选，读取 `state/state_show/cashier_period_state`。`dy.fin.account.period.open.and.done` 是 `TransientModel` 操作向导，只有开关选项，没有公司或期间状态字段；仅可读元数据，不能查向导行判断开账，更不能执行向导。开关顺序及权限反例须有既有日志、授权操作证据或人工验证。
 - 科目与辅助：查 `account.account`、`dy.fin.account.structure` / `dy.fin.account.structure.line`；公司适用结构由结构行 `dy.fin.account.structure.line.company_id` 关联其结构头 `head_id` 推导。辅助核算查 `dy.fin.account.analytic.plan` 及实例。辅助方案、现金流映射 `dy.fin.cash.flow.mapping` 和财务预算映射 `account.mapping` 的记录归属用 `company_id`；它们的 `company_ids` 是不可直接搜索的界面候选计算字段，不能作归属 domain。

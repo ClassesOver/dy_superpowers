@@ -1,224 +1,117 @@
+"""问题指引只投影调研问题；主 Skill 保留批次确认、安全与分流合同。"""
 from pathlib import Path
-import re
-
+import pytest
+from dy_superpowers_mcp.qa_templates import load_template
 
 ROOT = Path(__file__).parents[2]
-SKILL = ROOT / "skills/module-research/SKILL.md"
-GUIDE = ROOT / "skills/module-research/references/general-ledger-research-guide.md"
+SKILL = ROOT / 'skills/module-research/SKILL.md'
 
 
-def test_module_research_skill_contains_the_built_in_general_ledger_qa():
-    skill = SKILL.read_text(encoding="utf-8")
-
-    assert "## 总账内置 QA" in skill
-    assert "当前矩阵中的 `GL-*` 编号" in skill
-    assert "详细问题、字段和缺口映射" in skill
-    assert "当前会话" in skill
-    assert "多轮" in skill
-
-
-def test_general_ledger_guide_maps_all_check_items_and_attachment_templates():
-    guide = GUIDE.read_text(encoding="utf-8")
-
-    check_ids = set(re.findall(r"^\| (GL-[0-9]+(?:-[0-9]+)+) \|", guide, flags=re.MULTILINE))
-    templates = re.findall(r"^### 模板：(.+)$", guide, flags=re.MULTILINE)
-    assert len(check_ids) == 37
-    assert "GL-9-031" in check_ids and "GL-12-037" in check_ids
-    assert len(templates) == 39
-    assert "凭证打印样张及要求" in templates
-    assert "公司应用清单" in templates
-    assert "通用转账模板清单" in templates
-    assert "提取指引要素" in guide
-    assert "附件（按需）" in guide
-    assert "附件证据不得扩展业务确认范围" in guide
+@pytest.mark.parametrize('module,groups,attachments', [('expense',25,25), ('general-ledger',37,39)])
+def test_builtin_qa_projects_every_current_business_question(module, groups, attachments):
+    guide = (SKILL.parent / f'references/{module}-research-question.md').read_text()
+    template = load_template(module)
+    assert len(set(q['check_order'] for q in template['questions'])) == groups
+    assert len(template['attachments']) == attachments
+    for q in template['questions']:
+        assert f'#### {q["question_id"]}' not in guide
+        assert q['question'].replace('\n', '<br>') in guide
+    assert '来源定位' not in guide and '验收定位' not in guide
+    for label in ('配置路径：', '结论参考：', '参考答案：', '附件：', '## 附件字段', '提问要素：', '#### '):
+        assert not any(line.startswith(label) for line in guide.splitlines())
 
 
-def test_research_wiki_uses_confirmed_findings_and_template_source_index():
-    skill = SKILL.read_text(encoding="utf-8")
-
-    assert "dy_wiki_build" in skill
-    assert "已确认结论" in skill
-    assert "资料索引" in skill
-    assert "不得发布附件全文" in skill
-
-
-def test_attachment_locations_use_supported_evidence_ref_field():
-    guide = GUIDE.read_text(encoding="utf-8")
-
-    assert "`attachment_refs`" not in guide
-    assert "附件定位写入 `evidence_ref`" in guide
+@pytest.mark.parametrize('module', ['expense', 'general-ledger'])
+def test_inspection_uses_current_question_ids_and_dependency_blocks(module):
+    text = (ROOT / f'skills/{module}-inspection/SKILL.md').read_text()
+    assert 'question_id' in text and '当前模板的全部question_id' in text
+    assert '分母取自prepare返回的expected_checks' in text
+    assert '62' not in text
+    assert 'dy_odoo_environment_info' in text and '独立' in text
+    assert 'requirements' in text and 'sha256' in text
 
 
-def _expense_matrix_subitems():
-    matrix = ROOT / "skills/expense-inspection/references/inspection-matrix.md"
-    order = None
-    items = {}
-    for line in matrix.read_text(encoding="utf-8").splitlines():
-        if line.startswith("## 检查顺序 "):
-            order = line.removeprefix("## 检查顺序 ").strip()
-            if match := re.fullmatch(r"EXP-(\d{3})", order):
-                order = str(int(match.group(1)))
-        elif match := re.match(r"^\|\s*(\d+)｜([^|]+)\|", line):
-            items[order, match.group(1)] = match.group(2).strip()
-    return items
+@pytest.mark.parametrize('contract', [
+    'dy_research_answers_save', 'dy_research_answers_import', 'template_revision',
+    'expected_revision', 'batch_id', 'can_write_confirmed=false', '空白不删除',
+    '同题冲突', '当前问题总数', '70%', '多范围分别导出', '不重复确认',
+    '业务方明确确认完整', '旧格式不可回退', '省略attachments保留', '同步版本答卷不可原地改',
+])
+def test_module_research_exposes_versioned_batch_contract(contract):
+    assert contract in SKILL.read_text()
 
 
-def test_expense_guide_covers_current_matrix_subitems_and_source_mapping():
-    guide = ROOT / "skills/module-research/references/expense-research-guide.md"
-    assert guide.is_file(), "费用调研缺少来源可追溯的内置QA参考"
-    text = guide.read_text(encoding="utf-8")
-    rows = re.findall(r"^\| expense \| EXP-(\d{3}) \| (\d+) \| (.*?) \| ([^|]+) \| 仅保存已确认事实", text, re.MULTILINE)
-    mapped = {}
-    for order, subitem, extraction, _attachment in rows:
-        key = (str(int(order.removeprefix("EXP-"))), subitem)
-        assert key not in mapped
-        mapped[key] = extraction
-    matrix = _expense_matrix_subitems()
-    assert len(mapped) == len(matrix) == 92
-    assert all(mapped[key].startswith(matrix[key]) for key in matrix)
-    assert "费用模块巡检Skill手册_V1.1.xlsx" not in text
-    assert "费用模块调研更新_2.0.xlsx" not in text
-    assert "矩阵第7组为借款与核销补问项" in text
-    assert "EXP-028 |" in text and "EXP-028-03" in text
-    source_section = text.split("### 逐点提取 QA", 1)[1].split("## 提取要素与矩阵映射", 1)[0]
-    source_rows = re.findall(r"^\| EXP-\d{3} \| [^|]+ \| .+ \| .+ \| .+ \|$", source_section, re.MULTILINE)
-    assert len(source_rows) == 64
-    assert "检查顺序显示为 `EXP-001`" in text
+def test_question_guides_remain_research_only_and_both_module_routes_resolve():
+    text = SKILL.read_text()
+    for module in ('expense', 'general-ledger'):
+        relative = f'references/{module}-research-question.md'
+        assert relative in text
+        assert (SKILL.parent / relative).is_file()
+    assert '问题文件仅投影模板中的调研问题' in text and '按问题开展多轮调研' in text
+    assert '巡检' not in text and 'dy_inspection_' not in text
 
 
-def test_expense_guidance_routes_qa_and_preserves_material_boundary():
-    text = (ROOT / "skills/module-research/references/expense-research-guide.md").read_text(encoding="utf-8")
-    skill = SKILL.read_text(encoding="utf-8")
-    inspection = (ROOT / "skills/expense-inspection/SKILL.md").read_text(encoding="utf-8")
-    assert "references/expense-research-guide.md" in skill
-    assert "expense-research-guide.md" in inspection
-    assert "附件是调研收集模板，不是系统现状证明" in text
-    assert len(re.findall(r"^### 模板：", text, re.MULTILINE)) == 19
-    assert "scope_id" in text and "expected_revision" in text
-    assert "业务明确确认" in text and "evidence_ref" in text
-    assert "模板示例" in text and "历史观察" in text
+def test_candidate_batches_require_business_confirmation_save_authorization_and_readback():
+    text = SKILL.read_text()
+    for boundary in ('业务确认和保存授权分别满足', '只保存获批项', '暂缺项保留候选/待办',
+                     '本批次已明确确认并保存时不重复问', '同范围dy_module_memory_read回读核对'):
+        assert boundary in text
 
 
-def test_module_routes_load_research_guides_before_inspection_matrices():
-    skill = SKILL.read_text(encoding="utf-8")
-    source_section = skill.split("## 调研来源", 1)[1].split("## 费用内置 QA", 1)[0]
-
-    assert "费用模块：读取[费用调研指南](references/expense-research-guide.md)" in source_section
-    assert "总账模块：读取[总账调研指南](references/general-ledger-research-guide.md)" in source_section
-    assert "inspection-matrix.md" not in source_section
-    assert "调研阶段不要读取巡检矩阵" in source_section
-    assert "先按用户文字和附件内容识别模块" in source_section
-    assert "不能先向用户提出通用项目问题" in source_section
-    assert source_section.index("费用模块：读取") < source_section.index("读取指南后直接从指南")
+def test_followup_reuses_facts_and_keeps_question_rounds_small():
+    text = SKILL.read_text()
+    assert '复用已明确事实' in text and '一轮最多三个独立问题' in text
+    assert '不设公司、项目、期间固定开场问卷' in text
+    assert '不能因低进度丢弃' in text and '不循环索要' in text
 
 
-# 分流、范围隔离及阈值由 test_research_progress.py 的真实工具测试覆盖；
-# 开场提问由独立代理行为测试验证，不用旧开场问题的逐字匹配固定 Skill 行为。
+def test_research_accepts_template_or_live_answers_with_matching_attachment_details():
+    text = SKILL.read_text()
+    for phrase in ('用户可填写模板，也可实时回答并提供附件', '两种方式可交替续答',
+                   '当前问题关联的附件清单', '答卷对应附件页', '不把附件摘要代替应填明细',
+                   '与文字答案一起展示并确认后保存', '回读答卷核对'):
+        assert phrase in text
 
 
-def test_module_materials_cannot_skip_their_builtin_qa_guides():
-    skill = SKILL.read_text(encoding="utf-8")
-
-    assert "费用、报销、费用政策、费用项目" in skill
-    assert "必须先读 `references/expense-research-guide.md`" in skill
-    assert "总账、凭证、制证、期间" in skill
-    assert "必须先读 `references/general-ledger-research-guide.md`" in skill
-    assert "未读取对应调研指南前不得开始提问" in skill
+def test_internal_identifiers_are_only_for_tools_and_not_user_replies():
+    text = SKILL.read_text()
+    assert '内部标识仅用于工具调用和状态关联，不向用户展示' in text
+    assert '不得出现在回复、问答卡片或结果说明中' in text
+    assert '将内部状态转述为自然业务语言' in text
 
 
-def test_expense_source_generic_carrier_subitem_has_exact_matrix_mapping():
-    text = (ROOT / "skills/module-research/references/expense-research-guide.md").read_text(encoding="utf-8")
-    matrix = _expense_matrix_subitems()
-    assert ("28", "03") in matrix, "结果G95及K93的有效来源子项未进入矩阵"
-    assert matrix["28", "03"] == "通用承运人映射：允许／不允许；适用范围【待确认】"
-    source = (ROOT / "skills/expense-inspection/references/inspection-matrix.md").read_text(encoding="utf-8")
-    assert "03｜仅在确认需要席别映射时检查通用承运人范围；允许或不允许的口径与实际匹配结果一致。" in source
-    assert "通用承运人映射" in text
+def test_research_preserves_workspace_memory_and_trace_privacy_boundaries():
+    text = SKILL.read_text()
+    assert '隐私、账号、密钥、生产原始明细不写记忆' in text
+    assert '记忆仅当前工作区' in text
+    assert 'trace正文脱敏且不展开附件明细' in text
 
 
-def test_imported_pending_business_signoffs_must_trigger_native_qa_before_finalizing():
-    skill = SKILL.read_text(encoding="utf-8")
-    source_intake = (SKILL.parent / "references/source-intake.md").read_text(encoding="utf-8")
-
-    assert "request_user_input" in skill
-    assert "待业务签认" in skill
-    assert "待确认" in skill
-    assert "不能只生成候选台账后结束" in skill
-    assert "每组最多 3 个相互独立的问题" in skill
-    assert "项目档案生成不适用此自动 QA 规则" in source_intake
+def test_research_does_not_route_new_qa_to_legacy_write_or_wiki():
+    text = SKILL.read_text()
+    assert 'dy_research_record_write(' not in text
+    assert '历史版本' in text and '续答读取当前版本，不自动回滚' in text
+    assert 'legacy=true' not in text
 
 
-def test_research_candidate_ledger_output_is_grouped_and_scannable():
-    skill = SKILL.read_text(encoding="utf-8")
-
-    assert "不要把大量长结论放入单张宽表" in skill
-    assert "按配置组分节" in skill
-    assert "先展示待确认与待业务签认项" in skill
-    assert "逐条使用短标签换行展示" in skill
-
-
-def test_pending_source_items_can_be_confirmed_in_batches_before_completion():
-    skill = SKILL.read_text(encoding="utf-8")
-
-    assert "分批处理待确认结论" in skill
-    assert "每个确认批次都要明确对应的业务回答" in skill
-    assert "未完成批次不得报告完整导入" in skill
-    assert "逐条确认" not in skill
+def test_expense_attachment_catalog_preserves_actual_headers_and_no_samples():
+    template = load_template('expense')
+    text = (SKILL.parent / 'references/expense-research-question.md').read_text()
+    assert len(template['attachments']) == 25
+    assert '1022' not in text and 'XXX第一医院' not in text
+    assert all(a['headers'] for a in template['attachments'])
 
 
-def test_explicit_wiki_request_continues_through_build_and_sync_after_confirmation():
-    skill = SKILL.read_text(encoding="utf-8")
-
-    assert "用户明确要求写入 Wiki" in skill
-    assert "dy_project_configure" in skill
-    assert "dy_wiki_build" in skill
-    assert "dy_wiki_sync" in skill
-    assert "确认结论写入记忆并回读成功后" in skill
-    assert "不重复询问是否保存" in skill
-    assert "本次明确要求写入 Wiki 即作为外发确认" in skill
-    assert "构建预览后，Wiki 外发同步仍须单独确认" not in skill
-    assert "不追问确认人或日期" in skill
-    assert "FEISHU_CODEX_BOT_SENDER_USER_ID" in skill
-    assert "系统时间" in skill
+def test_attachment_branches_have_one_business_question():
+    points = [q for q in load_template('general-ledger')['questions'] if q['check_order']=='GL-8-024']
+    assert len(points) == 1 and points[0]['question_id'] == 'GL-8-024'
+    assert points[0]['rows'] == [48, 49]
 
 
-
-def test_expense_source_roles_and_actual_workbook_inventory():
-    text = (ROOT / "skills/module-research/references/expense-research-guide.md").read_text(encoding="utf-8")
-    assert "矩阵第7组为借款与核销补问项" in text
-    assert len(re.findall(r"^\| (?:0[1-9]|1[0-9])_[^|]+ \|", text, re.MULTILINE)) == 19
-    assert "来源与覆盖" not in text
-    assert "来源定位" not in text
-
-
-def test_expense_attachment_catalog_preserves_actual_headers_and_data_ranges():
-    text = (ROOT / "skills/module-research/references/expense-research-guide.md").read_text(encoding="utf-8")
-    assert "17_单据页面字段明细" in text
-    assert "18_费用项目字段明细" in text
-    assert "19_申请项目字段明细" in text
-    assert "页面名称；页面环节；适用公司；适用单据类型" in text
-    assert "配置名称；适用公司；有效状态；附件类型；敏感词" in text
-    assert "配置名称；适用公司；信用说明；有效状态；初始分；满分" in text
-    assert "公司、编码、上级公司、本位币" not in text
-    assert "1022" not in text and "XXX第一医院" not in text
-    assert "2023-03-22" not in text
-
-
-def test_expense_field_qa_maps_to_the_actual_field_templates():
-    text = (ROOT / "skills/module-research/references/expense-research-guide.md").read_text(encoding="utf-8")
-    rows = text.split("## 提取要素与矩阵映射", 1)[1].split("## 附件清单与存储结构", 1)[0]
-    assert "| expense | EXP-010 | 02 |" in rows and "19_申请项目字段明细" in rows
-    assert "| expense | EXP-011 | 02 |" in rows and "18_费用项目字段明细" in rows
-    assert "申请项目行字段明细收集表（工作表：19_申请项目字段明细）" in text
-    assert "费用项目行字段明细收集表（工作表：18_费用项目字段明细）" in text
-
-
-def test_expense_source_audit_is_outside_skill_reference():
-    audit = ROOT.parents[1] / "docs/research-sources/expense-v2.0.md"
-    assert audit.is_file()
-    text = audit.read_text(encoding="utf-8")
-    assert "费用模块调研更新_2.0.xlsx" in text
-    assert "21 个" in text and "64 个" in text
-    assert "DY-EXP-07" in text
-    guide = (ROOT / "skills/module-research/references/expense-research-guide.md").read_text(encoding="utf-8")
-    assert "费用模块调研更新_2.0.xlsx" not in guide
+def test_workflow_uses_projected_questions_and_reuses_shared_basis_after_confirmation():
+    text = SKILL.read_text()
+    assert '问题投影是实际调研问题清单' in text
+    assert '不将附件分支或布局行拆成额外问题' in text
+    assert '不把“/”作为问题展示' in text
+    assert '共用依据仍须本轮确认后保存' in text
+    assert '43/62' not in text and '44/62' not in text

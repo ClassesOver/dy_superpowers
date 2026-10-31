@@ -26,7 +26,7 @@ ri = _load_script()
 # parse_plain 解析 .txt：标题行给检查顺序，正文行“01｜结论”给子项编号。
 V1 = ["# 1 应用安装", "01｜费用基础应用需要安装并启用。", "02｜OCR 模块按需启用，服务已确认可用。"]
 V2 = ["# 1 应用安装", "01｜费用基础应用需要安装，并在验收前启用。",  # 01 结论变更
-      "# 999 不存在的检查项", "01｜该行应被矩阵校验阻塞。"]  # 02 被移除；999 键不在矩阵
+      "# 999 不存在的检查项", "01｜该行缺少有效键时应阻塞。"]  # 02 被移除；第二条将在测试中去掉键
 
 
 def _write_source(path: Path, lines: list[str]) -> Path:
@@ -135,6 +135,7 @@ def test_new_version_changed_removed_and_blocked(tmp_path):
 
     v2 = _write_source(tmp_path / "v1.txt", V2)  # 同名文件的升级版本
     candidates = _candidates(v2)
+    candidates[-1]['check_order'] = ''  # 历史候选缺少键时不能导入。
     result = ri.classify(workspace, "expense", candidates, default_scope="示例医院/2026")
     assert [item["research_id"] for item in result["changed"]] == ["01"]
     changed = result["changed"][0]
@@ -143,7 +144,7 @@ def test_new_version_changed_removed_and_blocked(tmp_path):
     assert changed["current"]["conclusion"] == "费用基础应用需要安装并启用。"
     assert result["unchanged"] == [] and result["new"] == []
     assert [item["research_id"] for item in result["blocked"]] == ["01"]
-    assert "矩阵" in result["blocked"][0]["reasons"][-1]
+    assert "缺少检查顺序" in result["blocked"][0]["reasons"]
 
     removed = ri.removed_in_source(workspace, "expense", v2.name, candidates)
     assert [item["research_id"] for item in removed] == ["02"]

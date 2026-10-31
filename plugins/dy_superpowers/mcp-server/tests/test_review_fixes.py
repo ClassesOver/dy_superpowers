@@ -122,7 +122,7 @@ def test_module_memory_list_filters_before_pagination(tmp_path, monkeypatch):
         write_record(tmp_path, dict(module='expense', check_order='1', research_id='01', config_item='项目',
                                     conclusion=f'结论{scope}', scope=scope, scope_id=scope_id,
                                     confirmed_by='顾问', confirmed_at='2026-10-21', confirmed=True))
-    result, error = server.execute_tool('dy_module_memory_read', {
+    result, error = server.execute_tool('dy_module_memory_read', {"legacy": True,
         'trace_id': 'scope-page', 'module': 'expense', 'scope_id': 'scope-a', 'limit': 1,
     }, tmp_path)
     assert error is None
@@ -177,12 +177,19 @@ def test_same_day_future_confirmation_timestamp_is_rejected(tmp_path, monkeypatc
                                     confirmed_at='2026-10-22T23:59:59+00:00', confirmed=True))
 
 
-def test_builtin_inspection_research_rejects_unknown_matrix_key(tmp_path):
-    from dy_superpowers_mcp.research import write_record
-    with pytest.raises(ValueError, match='矩阵'):
-        write_record(tmp_path, dict(module='expense', check_order='999', research_id='999', config_item='不存在',
-                                    conclusion='结论', scope='公司A', confirmed_by='顾问',
-                                    confirmed_at='2026-10-21', confirmed=True))
+def test_builtin_inspection_research_rejects_unknown_question_key(tmp_path, monkeypatch):
+    from dy_superpowers_mcp.qa_templates import load_template
+    from dy_superpowers_mcp.qa_store import read_qa
+    monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
+    result, error = server.execute_tool('dy_research_answers_save', {
+        'trace_id': 'unknown-question', 'module': 'expense', 'scope': '公司A',
+        'template_revision': load_template('expense')['revision'],
+        'batch_id': 'unknown-question', 'confirmed': True,
+        'answers': [{'question_id': '999', 'answer': '不存在的问题不得写入',
+                     'expected_revision': None, 'research_complete': True, 'attachments': []}]}, tmp_path)
+    assert result is None and error and error['code'] == -32602
+    assert '问题' in error['message']
+    assert read_qa(tmp_path, 'expense')['records'] == []
 
 
 def test_odoo_connection_reused_and_credentials_invalidate_cache(tmp_path, monkeypatch):

@@ -17,7 +17,8 @@ from mcp import ClientSession
 from mcp.client.stdio import stdio_client
 from mcp.shared.exceptions import MCPError
 
-from test_inspection_skill_e2e import _matrix, _parameters, _report
+from test_inspection_skill_e2e import _parameters, _report
+from dy_superpowers_mcp.qa_templates import load_template
 
 # 仅列可只读核验的配置，不把岗位、支付、核销、关账等操作伪装成读取验证。
 RECIPES = {
@@ -77,7 +78,9 @@ RECIPES = {
 
 def build_plan(manifest):
     module = manifest["module"]
-    revision, standards = _matrix(module)
+    template = load_template(module)
+    revision = template['revision']
+    standards = {(q['check_order'], q['research_id']): q['question'] for q in template['questions']}
     groups, unmapped = {}, []
     for row in manifest["records"]:
         key = str(row["check_order"]), str(row["research_id"])
@@ -86,7 +89,7 @@ def build_plan(manifest):
         else:
             groups.setdefault(key, []).append(row)
     duplicates = sorted(key for key, values in groups.items() if len(values) != 1)
-    return {"module": module, "matrix_revision": revision, "standards": standards,
+    return {"module": module, "template_revision": revision, "standards": standards,
             "sources": {key: values[0] for key, values in groups.items() if len(values) == 1},
             "duplicates": duplicates, "unmapped": unmapped,
             "missing": sorted(set(standards) - {key for key, values in groups.items() if len(values) == 1})}
@@ -132,7 +135,7 @@ def validate_manifest(manifest):
     assert records and all(row.get("source", {}).get("file") and row["source"].get("sheet")
                            and row["source"].get("cell") for row in records)
     assert all(row["source"].get("sha256") == manifest["source_sha256"] for row in records)
-    assert manifest.get("matrix_revision") == _matrix(manifest["module"])[0], "矩阵已变化，应重新核对来源映射"
+    assert manifest.get("template_revision") == load_template(manifest["module"])["revision"], "模板已变化，应重新核对来源映射"
     return coverage
 
 
@@ -198,7 +201,7 @@ async def source_workflow(workspace, manifest, connection, as_of, *, diagnostic_
     module = plan["module"]
     scope_company_ids = source_company_scope(manifest)
     trace_id = f"source-e2e-{module}"
-    report = _report(module, "SOURCE-E2E-READONLY", result="待确认",
+    report = _report(module, connection.get("DY_ODOO_ENVIRONMENT", connection["DB_NAME"]), workspace=workspace, result="待确认",
                      reason="来源未提供可追溯业务签认，候选要求与配置观察不能代替最终验收")
     for item in report["records"]:
             source = plan["sources"].get((item["check_order"], item["research_id"]))
@@ -209,12 +212,12 @@ async def source_workflow(workspace, manifest, connection, as_of, *, diagnostic_
                 ref = source["source"]
                 item["reason"] = f"来源：{ref['file']}#{ref.get('sheet', '')}!{ref.get('cell', '')}；业务签认、范围及完整样例仍待核实"
             if conflict:
-                item["reason"] += f"；外部验收标准与当前矩阵不一致（来源 {conflict['source']['sheet']}!{conflict['source']['cell']}），按当前矩阵标准仍阻塞复核"
+                item["reason"] += f"；外部验收标准与当前模板不一致（来源 {conflict['source']['sheet']}!{conflict['source']['cell']}），按当前模板标准仍阻塞复核"
             if any(key == (item["check_order"], item["research_id"]) for key in plan["duplicates"]):
                 item["reason"] += "；同一来源键有重复或冲突记录，阻塞自动映射"
             if any(row.get("check_order") == item["check_order"] and row.get("research_id") == item["research_id"]
                    for row in plan["unmapped"]):
-                item["reason"] += "；来源子项未映射到当前矩阵，阻塞该子项"
+                item["reason"] += "；来源子项未映射到当前模板，阻塞该子项"
     summary = {"module": module, "as_of": as_of, "source_coverage": manifest["coverage"],
                "source_sha256": manifest["source_sha256"], "checks": [], "gaps": [],
                "source_scope_confirmed": manifest.get("company_scope_confirmed") is True,
@@ -375,25 +378,24 @@ async def source_workflow(workspace, manifest, connection, as_of, *, diagnostic_
                                     "先确认业务要求和例外，再对配置差异逐项复查",
                                     "页面、流程、权限反例、政策算例继续待验证；不自动补配或续期历史规则"]
             validation = await call("dy_inspection_validate", report=report)
-            assert validation["valid"] and validation["gate"] == "待确认"
-            saved = await call("dy_inspection_report_save", report=report, confirmed=True)
-            text = await call("dy_inspection_report_read", module=module, report_id=saved["report_id"])
-            assert text == (workspace / saved["path"]).read_text(encoding="utf-8")
+            assert not validation["valid"] and validation["gate"] != "通过"
+            with pytest.raises(MCPError):
+                await call("dy_inspection_report_save", report=report, confirmed=True)
             assert not (workspace / ".dy_superpowers/modules").exists()
             trace = await call("dy_trace_read")
             secret = connection["APP_PASSWORD"]
             assert not secret or secret not in json.dumps(trace, ensure_ascii=False)
-            summary.update(gate=validation["gate"], report_path=saved["path"],
+            summary.update(gate=validation["gate"], report_path=None,
                            report_records=len(report["records"]), remote_writes=False,
                            limitations=validation["limitations"] + "；来源未签认，配置相符也不等于验收通过")
     (workspace / "source-e2e-summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     return summary
 
 
-def test_manifest_integrity_requires_source_locations_and_matrix_revision():
-    revision = _matrix("expense")[0]
+def test_manifest_integrity_requires_source_locations_and_template_revision():
+    revision = load_template("expense")["revision"]
     manifest = {"module": "expense", "source_sha256": "a" * 64,
-                "matrix_revision": revision,
+                "template_revision": revision,
                 "coverage": {"source_subitems": 1, "mapped_subitems": 1, "unmapped_subitems": 0},
                 "records": [{"mapped": True, "source": {"file": "source.xlsx", "sheet": "Sheet1", "cell": "G4", "sha256": "a" * 64}}]}
     assert validate_manifest(manifest)["source_subitems"] == 1
@@ -421,22 +423,22 @@ def test_scoped_domain_never_uses_unknown_model_as_unbounded_query():
 
 def test_plan_preserves_extra_source_item_and_does_not_confirm():
     manifest = {"module": "expense", "records": [
-        {"check_order": "1", "research_id": "01", "mapped": True, "conclusion": "需要安装，不代表已安装"},
+        {"check_order": "DY-EXP-01", "research_id": "01", "mapped": True, "conclusion": "需要安装，不代表已安装"},
         {"check_order": "28", "research_id": "99", "source_check_order": "DY-28", "mapped": False},
     ]}
     plan = build_plan(manifest)
     assert len(plan["unmapped"]) == 1
-    assert ("1", "01") in plan["sources"]
-    assert len(plan["standards"]) == 92
+    assert ("DY-EXP-01", "01") in plan["sources"]
+    assert len(plan["standards"]) == 25
     assert "confirmed" not in manifest["records"][0]
 
 
 def test_plan_does_not_pick_one_of_conflicting_source_rows():
-    row = {"check_order": "1", "research_id": "01", "mapped": True}
+    row = {"check_order": "DY-EXP-01", "research_id": "01", "mapped": True}
     plan = build_plan({"module": "expense", "records": [dict(row, conclusion="需要"), dict(row, conclusion="不需要")]})
-    assert plan["duplicates"] == [("1", "01")]
-    assert ("1", "01") not in plan["sources"]
-    assert ("1", "01") in plan["missing"]
+    assert plan["duplicates"] == [("DY-EXP-01", "01")]
+    assert ("DY-EXP-01", "01") not in plan["sources"]
+    assert ("DY-EXP-01", "01") in plan["missing"]
 
 
 def test_policy_name_is_derived_from_source_not_all_policies():
@@ -528,7 +530,8 @@ def test_live_inspection_from_supplied_research(tmp_path, module):
     assert summary["gate"] == "待确认"
     assert summary["confirmed_research_written"] == 0
     assert summary["remote_writes"] is False
-    assert summary["report_records"] == len(_matrix(module)[1])
+    assert summary["report_records"] == 0
+    assert summary["report_path"] is None
     assert summary["checks"], "来源没有匹配任何配方，不能称为端到端诊断"
     if source_company_scope(manifest) or os.environ.get("DY_E2E_VISIBLE_SCOPE_DIAGNOSTIC") == "1":
         assert any("actual_count" in item for item in summary["checks"]), "没有成功记录查询，不能称为配置端测通过"

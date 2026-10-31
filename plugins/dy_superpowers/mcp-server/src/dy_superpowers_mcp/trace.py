@@ -26,6 +26,7 @@ REDACTED = "[REDACTED]"
 TRACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 TRACE_FILE_PATTERN = re.compile(r"^(?P<trace_id>[A-Za-z0-9_-]{1,128})(?:\.(?P<day>\d{4}-\d{2}-\d{2}))?\.jsonl(?P<backup>\.1)?$")
 EVENT_FIELDS = {
+    "comparison_digest", "comparison_status",
     "event", "span_id", "parent_span_id", "operation", "tool", "status", "workspace_id",
     "duration_ms", "error_type", "error_code", "project_id", "target_id", "plan_version", "source_ref", "memory_file",
     "skill", "check_order", "research_id", "result", "evidence_ref",
@@ -55,7 +56,7 @@ SECRET_VALUE_PATTERN = re.compile(
     r"(?P<bearer>Bearer\s+)([A-Za-z0-9._~+/=-]+)"
 )
 TRACE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_.:/#-]{1,256}$")
-TRACE_CONTEXT_FIELDS = {"skill", "module", "check_order", "research_id", "scope_id", "revision", "environment"}
+TRACE_CONTEXT_FIELDS = {"skill", "module", "check_order", "research_id", "scope_id", "revision", "environment", "connection_fingerprint", "question_id", "template_revision", "answer_version", "answer_revision", "requirement_id"}
 TRACE_RESULTS = {"通过", "部分通过", "不通过", "不适用", "待确认", "未检查", "未知", "ok", "error"}
 
 MAX_TRACE_DOMAIN_CHARS = 2048

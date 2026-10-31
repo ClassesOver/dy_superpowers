@@ -1,0 +1,40 @@
+{
+  "description": "仅用于静态语言服务评估的合成addons；不是HRP源码、业务记录或Knowledge输入。源码不得执行。",
+  "files": {
+    "addons/dy_probe_limit/__manifest__.py": "{'name': '合成限制样本', 'version': '12.0.1.0.0', 'depends': ['base'], 'data': ['data/a.xml', 'reference.xml'], 'demo': ['data/b.xml']}\n",
+    "addons/dy_probe_limit/__init__.py": "raise RuntimeError('合成源码仅供静态解析，不得执行')\n",
+    "addons/dy_probe_limit/static.py": "from odoo import fields, models\n\nclass Static(models.Model):\n    _name = 'dy.probe.static'\n    value = fields.Char(string='静态对照')\n\n    def read_value(self):\n        return self.value\n\n    def missing_model(self):\n        return self.env['dy.probe.absent']\n\n    def duplicate_model(self):\n        return self.env['dy.probe.duplicate']\n\n    def missing_dependency_model(self):\n        return self.env['dy.probe.missing']\n",
+    "addons/dy_probe_limit/dynamic.py": "from odoo import fields, models\n\nclass Dynamic(models.Model):\n    _name = 'dy.probe.dynamic'\n    field_class = 'Char'\n    value = getattr(fields, field_class)(string='动态样本')\n\n    def read_value(self):\n        return self.value\n",
+    "addons/dy_probe_limit/invalid.py": "from odoo import fields, models\n\nclass Invalid(models.Model):\n    _name = 'dy.probe.invalid'\n    value = fields.Char(\n",
+    "addons/dy_probe_limit/duplicate_a.py": "from odoo import models\n\nclass DuplicateA(models.Model):\n    _name = 'dy.probe.duplicate'\n",
+    "addons/dy_probe_limit/duplicate_b.py": "from odoo import models\n\nclass DuplicateB(models.Model):\n    _name = 'dy.probe.duplicate'\n",
+    "addons/dy_probe_limit/data/a.xml": "<odoo>\n  <record id='same_record' model='dy.probe.static'>\n    <field name='value'>合成data声明</field>\n  </record>\n</odoo>\n",
+    "addons/dy_probe_limit/data/b.xml": "<odoo>\n  <record id='same_record' model='dy.probe.static'>\n    <field name='value'>合成demo声明</field>\n  </record>\n</odoo>\n",
+    "addons/dy_probe_limit/reference.xml": "<odoo>\n  <record id='reference_record' model='dy.probe.static'>\n    <field name='value' ref='same_record'/>\n  </record>\n</odoo>\n",
+    "addons/dy_probe_missing/__manifest__.py": "{'name': '合成缺失依赖样本', 'version': '12.0.1.0.0', 'depends': ['base', 'dy_probe_dependency_absent']}\n",
+    "addons/dy_probe_missing/__init__.py": "raise RuntimeError('合成源码仅供静态解析，不得执行')\n",
+    "addons/dy_probe_missing/models.py": "from odoo import fields, models\n\nclass MissingDependency(models.Model):\n    _name = 'dy.probe.missing'\n    _inherit = 'dy.probe.unavailable'\n    value = fields.Char(string='缺失依赖中的本地字段')\n\n    def read_value(self):\n        return self.value\n"
+  },
+  "cases": [
+    {"case_id":"C1","group":"control","method":"hover","file":"addons/dy_probe_limit/static.py","anchor":{"line":8,"needle":"value"},"expected_type":"Char","expectation":"正常对照必须有Char悬停，避免把整个索引未加载误判为限制样本结果"},
+    {"case_id":"C2","group":"control","method":"definition","file":"addons/dy_probe_limit/static.py","anchor":{"line":4,"needle":"dy.probe.static"},"expected_definition":{"file":"synthetic:addons/dy_probe_limit/static.py","line":4}},
+    {"case_id":"N1","group":"absent","method":"definition","file":"addons/dy_probe_limit/static.py","anchor":{"line":11,"needle":"dy.probe.absent"},"expectation":"不应生成定义；客户端保守记录未知，而非将其他加载缺口一律解释为不存在"},
+    {"case_id":"D1","group":"dynamic","method":"hover","file":"addons/dy_probe_limit/dynamic.py","anchor":{"line":9,"needle":"value"},"expectation":"getattr构造字段不能假定静态可完整识别；空信息应显式未知"},
+    {"case_id":"B1","group":"syntax","method":"diagnostic","file":"addons/dy_probe_limit/invalid.py","expectation":"检查真实LSP是否报告未闭合括号；空diagnostics不是语法正确的证据"},
+    {"case_id":"B2","group":"syntax","method":"definition","file":"addons/dy_probe_limit/invalid.py","anchor":{"line":4,"needle":"dy.probe.invalid"},"expectation":"即使错误恢复能返回模型定位，也不能视为文件解析完整"},
+    {"case_id":"L1","group":"missing_dependency","method":"hover","file":"addons/dy_probe_missing/models.py","anchor":{"line":9,"needle":"value"},"expectation":"本地字段可识别也不代表缺失模块及父模型已齐备"},
+    {"case_id":"L2","group":"missing_dependency","method":"definition","file":"addons/dy_probe_missing/models.py","anchor":{"line":5,"needle":"dy.probe.unavailable"},"expectation":"父模型故意不提供，禁止生成确定的继承完整性结论"},
+    {"case_id":"L3","group":"missing_dependency","method":"diagnostic","file":"addons/dy_probe_missing/models.py","expectation":"检查LSP是否明确报告缺失父模型/模块；同时以人工manifest事实记录依赖缺口"},
+    {"case_id":"R1","group":"duplicate_model","method":"definition","file":"addons/dy_probe_limit/static.py","anchor":{"line":14,"needle":"dy.probe.duplicate"},"expected_candidate_files":["synthetic:addons/dy_probe_limit/duplicate_a.py", "synthetic:addons/dy_probe_limit/duplicate_b.py"],"expectation":"完整源码投影必须保留两处声明；单一跳转目标不足以证明无歧义"},
+    {"case_id":"R2","group":"duplicate_xml_id","method":"definition","file":"addons/dy_probe_limit/reference.xml","anchor":{"line":3,"needle":"same_record"},"expected_candidate_files":["synthetic:addons/dy_probe_limit/data/a.xml", "synthetic:addons/dy_probe_limit/data/b.xml"],"expectation":"data/demo同一XML ID的声明应分别可审计，不能让单一定位冒充全部源码事实"}
+  ],
+  "manual_facts": {
+    "syntax_error": "addons/dy_probe_limit/invalid.py第5行未闭合fields.Char调用",
+    "missing_module": "dy_probe_dependency_absent没有提供源码或manifest",
+    "missing_parent_model": "dy.probe.unavailable没有提供声明",
+    "dynamic_field": "value使用getattr(fields, field_class)构造，不是静态fields.Char调用",
+    "duplicate_models": "duplicate_a.py和duplicate_b.py各自声明同一个_name",
+    "duplicate_xml_id": "data/a.xml和data/b.xml都声明dy_probe_limit.same_record；manifest分别放在data和demo",
+    "prohibited_conclusion": "合成限制样本不证明HRP业务配置、线上模块安装或完整Odoo12兼容性"
+  }
+}
