@@ -10,14 +10,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
-from dy_superpowers_mcp import telemetry, trace
+from dy_superpowers_mcp import trace
+from dy_superpowers_mcp.tools.runtime import trace_scope
 from dy_superpowers_mcp.memory import WorkspaceMemory
 from dy_superpowers_mcp.research import read_record, write_record
 
 
-def test_tool_span_does_not_suppress_business_exception(tmp_path):
+def test_trace_scope_does_not_suppress_business_exception(tmp_path):
     with pytest.raises(ValueError, match='业务失败'):
-        with telemetry.tool_span('recovery', tmp_path, 'dy_memory_read'):
+        with trace_scope('recovery'):
             raise ValueError('业务失败')
 
 
@@ -141,7 +142,6 @@ def test_corrupt_legacy_trace_does_not_block_new_trace(tmp_path, capsys):
 ])
 def test_damaged_trace_file_does_not_block_unrelated_tools(tmp_path, monkeypatch, capsys, filename, content):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     store = trace.TraceStore(tmp_path)
     store.directory.mkdir(parents=True)
     damaged = store.directory / filename

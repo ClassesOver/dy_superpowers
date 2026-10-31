@@ -4,6 +4,7 @@ import copy
 import pytest
 
 import server
+from dy_superpowers_mcp.tools import runtime
 from test_odoo_capabilities import Client, call, client, lifecycle
 
 
@@ -47,7 +48,7 @@ class GraphClient(Client):
 @pytest.fixture
 def graph(client, monkeypatch):
     fake = GraphClient()
-    monkeypatch.setattr(server, '_odoo_client', lambda workspace: fake)
+    monkeypatch.setattr(runtime, 'odoo_client', lambda workspace: fake)
     monkeypatch.setenv('DY_ODOO_MODULE_WRITE_ENABLED', '1')
     monkeypatch.setenv('DY_ODOO_MODULE_ALLOWED', 'dy_expense,dep_b,dep_c')
     return fake

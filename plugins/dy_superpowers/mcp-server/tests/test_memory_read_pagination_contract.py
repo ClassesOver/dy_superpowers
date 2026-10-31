@@ -10,7 +10,6 @@ from dy_superpowers_mcp.research import write_record
 
 def test_memory_read_returns_next_offset_until_last_page(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     for order in ('1', '2', '3'):
         write_record(tmp_path, dict(module='expense', check_order=order, research_id='01',
                      config_item='应用', conclusion='本期启用', scope='中心院区',

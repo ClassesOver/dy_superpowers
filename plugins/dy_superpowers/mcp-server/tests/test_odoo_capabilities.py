@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
+from dy_superpowers_mcp.tools import runtime
 from dy_superpowers_mcp.odoo_jsonrpc import OdooRPCError, OdooSettings
 
 
@@ -83,8 +84,7 @@ def client(tmp_path, monkeypatch):
     for key in ('DY_ODOO_MODULE_WRITE_ENABLED', 'DY_ODOO_RECORD_DELETE_ENABLED', 'DY_ODOO_MODULE_ALLOWED'):
         monkeypatch.delenv(key, raising=False)
     fake = Client()
-    monkeypatch.setattr(server, '_odoo_client', lambda workspace: fake)
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
+    monkeypatch.setattr(runtime, 'odoo_client', lambda workspace: fake)
     return fake
 
 
@@ -235,7 +235,7 @@ def test_module_wrong_environment_rejected_before_connection(tmp_path, client, m
     args.update(dry_run=False, confirmed=True, confirmation_digest=preview['confirmation_digest'])
     def forbidden(root):
         pytest.fail('环境不符不得创建连接')
-    monkeypatch.setattr(server, '_odoo_client', forbidden)
+    monkeypatch.setattr(runtime, 'odoo_client', forbidden)
     _, error = server.execute_tool('dy_odoo_module_install', dict(trace_id='other-env', **args), tmp_path)
     assert error and error['code'] == -32602
 
@@ -305,7 +305,7 @@ def test_planning_rejects_malformed_module_candidates(tmp_path, client):
 
 def test_health_configuration_failure_is_safe_and_specific(tmp_path, client, monkeypatch):
     from dy_superpowers_mcp.odoo_jsonrpc import OdooConfigurationError
-    monkeypatch.setattr(server, '_odoo_client', lambda root: (_ for _ in ()).throw(OdooConfigurationError('private-password')))
+    monkeypatch.setattr(runtime, 'odoo_client', lambda root: (_ for _ in ()).throw(OdooConfigurationError('private-password')))
     value = call(tmp_path, 'dy_odoo_diagnostics_health_check')
     assert value['overall'] == 'unhealthy'
     assert 'private-password' not in json.dumps(value)
@@ -340,7 +340,7 @@ def test_import_dry_run_never_executes(tmp_path, client, monkeypatch):
     args = dict(model='dy.fin.account.analytic.plan', company_id=2, environment='demo',
                 idempotency_key='dry-import', csv_data='name,code,company_id\n方案,B,2\n')
     preview = call(tmp_path, 'dy_odoo_import_preview', **args)
-    monkeypatch.setattr(server, '_odoo_client', lambda root: pytest.fail('dry_run不连接'))
+    monkeypatch.setattr(runtime, 'odoo_client', lambda root: pytest.fail('dry_run不连接'))
     result = call(tmp_path, 'dy_odoo_import_execute', **args, confirmed=True, dry_run=True,
                   confirmation_digest=preview['confirmation_digest'])
     assert result['status'] == 'confirmation_required'

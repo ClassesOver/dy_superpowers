@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
+from dy_superpowers_mcp.tools import runtime
 from dy_superpowers_mcp.qa_store import commit_qa, read_qa
 from dy_superpowers_mcp.qa_templates import load_template
 from dy_superpowers_mcp.qa_workbook import answer_column
@@ -18,7 +19,6 @@ from dy_superpowers_mcp.trace import TraceStore
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     monkeypatch.delenv('DB_NAME', raising=False)
     monkeypatch.delenv('DY_ODOO_ENVIRONMENT', raising=False)
 
@@ -385,7 +385,7 @@ def test_environment_info_and_prepare_reuse_configured_identity_without_login(tm
     for key, value in values.items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv('DY_ODOO_ENVIRONMENT', raising=False)
-    monkeypatch.setattr(server, '_odoo_client', lambda *_: pytest.fail('身份读取不能登录或请求Odoo'))
+    monkeypatch.setattr(runtime, 'odoo_client', lambda *_: pytest.fail('身份读取不能登录或请求Odoo'))
     assert 'dy_odoo_environment_info' in server.TOOL_SCHEMAS
     info = call(tmp_path, 'dy_odoo_environment_info')
     assert {key: info[key] for key in ('environment', 'database', 'configured')} == {'environment': 'configured-db', 'database': 'configured-db', 'configured': True}
@@ -499,7 +499,7 @@ def test_report_save_malformed_basis_returns_invalid_arguments(tmp_path):
 def test_configured_environment_rejects_forged_labels_before_remote_call(tmp_path, monkeypatch):
     monkeypatch.setenv('DB_NAME', 'dev-real')
     monkeypatch.delenv('DY_ODOO_ENVIRONMENT', raising=False)
-    monkeypatch.setattr(server, '_odoo_client', lambda *_: pytest.fail('伪标签拒绝必须发生在远程调用前'))
+    monkeypatch.setattr(runtime, 'odoo_client', lambda *_: pytest.fail('伪标签拒绝必须发生在远程调用前'))
     state = saved(tmp_path)
     for tool, arguments in [
         ('dy_inspection_prepare', dict(module='expense', scope_id=state['scope_id'], environment='PROD')),
@@ -548,7 +548,7 @@ def test_pdf_export_malformed_basis_is_explained_invalid_request(tmp_path, basis
 def test_odoo_environment_trace_is_server_bound_and_unlabeled_reads_remain_available(tmp_path, monkeypatch):
     from types import SimpleNamespace
     monkeypatch.setenv('DB_NAME', 'actual-dev')
-    monkeypatch.setattr(server, '_odoo_client', lambda *_: SimpleNamespace(search_read=lambda *args, **kwargs: []))
+    monkeypatch.setattr(runtime, 'odoo_client', lambda *_: SimpleNamespace(search_read=lambda *args, **kwargs: []))
     assert call(tmp_path, 'dy_odoo_record_search', model='ir.module.module', args=[[]], kwargs={'fields': ['name'], 'limit': 1}) == []
     events = TraceStore(tmp_path).read('qa-integration')
     read = next(e for e in events if e.get('event') == 'odoo.read')

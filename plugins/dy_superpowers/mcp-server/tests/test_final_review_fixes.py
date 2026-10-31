@@ -21,7 +21,6 @@ from template_qa_helpers import make_report
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     monkeypatch.delenv('DB_NAME', raising=False)
     monkeypatch.delenv('DY_ODOO_ENVIRONMENT', raising=False)
 

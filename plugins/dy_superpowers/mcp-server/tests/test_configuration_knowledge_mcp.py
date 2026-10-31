@@ -7,12 +7,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
+from dy_superpowers_mcp import knowledge as knowledge_lib
 
 
 @pytest.fixture(autouse=True)
 def local_trace(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
 
 
 def test_knowledge_filters_reach_search(tmp_path, monkeypatch):
@@ -22,7 +22,7 @@ def test_knowledge_filters_reach_search(tmp_path, monkeypatch):
         received.append((query, filters))
         return {'query': query, 'count': 0, 'results': []}
 
-    monkeypatch.setattr(server, 'knowledge_search', search)
+    monkeypatch.setattr(knowledge_lib, 'search', search)
     value, error = server.execute_tool('dy_knowledge_search', {
         'trace_id': 'knowledge-filter', 'query': '公司', 'module': 'dy_expense',
         'knowledge_type': 'source',
@@ -43,7 +43,7 @@ def test_retired_knowledge_filters_are_rejected_before_backend(tmp_path, monkeyp
     def unexpected_search(*args, **kwargs):
         pytest.fail('弃用筛选参数不应进入检索后端')
 
-    monkeypatch.setattr(server, 'knowledge_search', unexpected_search)
+    monkeypatch.setattr(knowledge_lib, 'search', unexpected_search)
     _, error = server.execute_tool('dy_knowledge_search', {
         'trace_id': 'retired-filter', 'query': '费用', **filters}, tmp_path)
     assert error and error['code'] == -32602
@@ -56,7 +56,7 @@ def test_knowledge_read_routes_reference_and_page(tmp_path, monkeypatch):
         received.append((reference, offset, limit))
         return {'reference': reference, 'content': '代码', 'complete': False, 'next_offset': 20}
 
-    monkeypatch.setattr(server, 'knowledge_read', read, raising=False)
+    monkeypatch.setattr(knowledge_lib, 'read', read, raising=False)
     value, error = server.execute_tool('dy_knowledge_read', {
         'trace_id': 'knowledge-read', 'reference': 'src:0123456789abcdef',
         'offset': 10, 'limit': 10,
@@ -73,7 +73,7 @@ def test_knowledge_search_limit_reaches_the_default_backend(tmp_path, monkeypatc
         received.append(filters)
         return {'query': query, 'count': 0, 'results': []}
 
-    monkeypatch.setattr(server, 'knowledge_search', search)
+    monkeypatch.setattr(knowledge_lib, 'search', search)
     _, error = server.execute_tool('dy_knowledge_search', {
         'trace_id': 'knowledge-limit', 'query': '公司', 'knowledge_type': 'source', 'limit': 3,
     }, tmp_path)
@@ -88,7 +88,7 @@ def test_hybrid_retrieval_mode_reaches_backend_and_is_discoverable(tmp_path, mon
         received.append(filters)
         return {'query': query, 'count': 0, 'results': [], 'retrieval_mode': 'hybrid'}
 
-    monkeypatch.setattr(server, 'knowledge_search', search)
+    monkeypatch.setattr(knowledge_lib, 'search', search)
     value, error = server.execute_tool('dy_knowledge_search', {
         'trace_id': 'knowledge-hybrid', 'query': '微信导入', 'retrieval_mode': 'hybrid', 'limit': 3,
     }, tmp_path)

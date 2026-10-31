@@ -192,7 +192,6 @@ def test_memory_replace_failure_preserves_original(tmp_path, monkeypatch):
 
 
 def test_local_trace_failure_does_not_turn_successful_memory_write_into_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
 
     def unavailable(*args, **kwargs):
         raise OSError("磁盘故障")
@@ -213,7 +212,6 @@ def test_local_trace_failure_does_not_turn_successful_memory_write_into_error(tm
 
 def test_memory_conflict_is_actionable_tool_error(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     WorkspaceMemory(tmp_path).write("profile.md", "当前事实", confirmed=True)
     result, error = server.execute_tool("dy_memory_write", {
         "trace_id": "memory-conflict", "name": "profile.md", "content": "旧事实", "confirmed": True,
@@ -226,7 +224,6 @@ def test_memory_conflict_is_actionable_tool_error(tmp_path, monkeypatch):
 
 def test_scoped_research_is_accessible_through_tool(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     write_record(tmp_path, research_data())
     write_record(tmp_path, research_data(scope="公司B"))
     result, error = server.execute_tool("dy_module_memory_read", {"legacy": True,

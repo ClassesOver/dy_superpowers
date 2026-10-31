@@ -17,7 +17,6 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
     for key in ('APP_URL', 'APP_USER', 'APP_PASSWORD', 'DB_NAME', 'DY_ODOO_ENVIRONMENT'):
         monkeypatch.delenv(key, raising=False)
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
 
 
 def independent_report(root):
