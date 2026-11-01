@@ -9,6 +9,7 @@ PLUGIN_ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(PLUGIN_ROOT / "mcp-server/src"))
 
 import server
+from mcp_helpers import listed_tools
 from dy_superpowers_mcp.odoo_jsonrpc import OdooReadClient
 from dy_superpowers_mcp.tools import runtime
 
@@ -96,8 +97,7 @@ def test_module_info_does_not_accept_offset_passthrough(tmp_path, monkeypatch):
 
 
 def test_tools_list_exposes_optional_offset_property(tmp_path):
-    response = server.handle({"id": 1, "method": "tools/list"}, tmp_path)
-    tools = {tool["name"]: tool for tool in response["result"]["tools"]}
+    tools = {tool["name"]: tool for tool in listed_tools()}
     schema = tools["dy_odoo_module_list_installed"]["inputSchema"]
     assert schema["required"] == ["trace_id"]
     assert schema["properties"]["offset"] == {"type": "integer", "minimum": 0}

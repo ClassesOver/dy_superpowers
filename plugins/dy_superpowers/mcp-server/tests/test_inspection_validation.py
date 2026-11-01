@@ -3,9 +3,7 @@ import copy
 from datetime import datetime,timezone,timedelta
 import pytest
 import server
-from dy_superpowers_mcp.qa_store import read_qa
 from dy_superpowers_mcp.qa_templates import load_template
-from dy_superpowers_mcp.research import write_record
 from template_qa_helpers import make_report,save_answers
 
 
@@ -63,14 +61,6 @@ def test_partial_confirmed_answer_cannot_back_definitive_result(tmp_path):
     report['records'][0]['result']='通过'
     result=validate(tmp_path,report)
     assert not result['valid'] and any('完整' in e['message'] for e in result['errors'])
-
-
-def test_legacy_answers_never_supply_new_inspection_basis(tmp_path):
-    write_record(tmp_path,dict(module='expense',check_order='1',research_id='01',config_item='旧应用',
-        scope='历史',conclusion='历史确认',confirmed=True,research_complete=True,confirmed_by='测试',confirmed_at='2026-10-28'))
-    assert read_qa(tmp_path,'expense')['records']==[]
-    result=validate(tmp_path,dict(expected_checks=[],records=[]))
-    assert not result['valid'] and any(e['path']=='basis' for e in result['errors'])
 
 
 @pytest.mark.parametrize('mutation',[

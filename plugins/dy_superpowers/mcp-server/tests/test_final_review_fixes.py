@@ -8,6 +8,7 @@ import pytest
 from openpyxl import Workbook, load_workbook
 
 import server
+from mcp_helpers import call_tool
 from dy_superpowers_mcp import qa_workbook, report_pdf
 from dy_superpowers_mcp.inspection import validate_inspection
 from dy_superpowers_mcp.inspection_prepare import prepare_inspection
@@ -103,8 +104,7 @@ def test_attachment_excel_scalars_survive_mcp_serialization_readonly(tmp_path, v
         book['会计年度与分配公司清单']['D2'].number_format = '[hh]:mm:ss'
     book.save(path)
     before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
-    response = server.handle(dict(jsonrpc='2.0', id=1, method='tools/call', params=dict(
-        name='dy_research_answers_import', arguments=dict(trace_id='date-repro', path=str(path)))), tmp_path)
+    response = call_tool('dy_research_answers_import', dict(trace_id='date-repro', path=str(path)), tmp_path)
     json.dumps(response)
     assert 'error' not in response, response
     result = json.loads(response['result']['content'][0]['text'])

@@ -28,7 +28,7 @@ EXPECTED_TOOLS = {
     'dy_inspection_report_read', 'dy_inspection_report_export_pdf',
     'dy_trace_event', 'dy_trace_read',
     'dy_memory_read', 'dy_memory_write', 'dy_memory_search', 'dy_module_memory_read',
-    'dy_research_progress', 'dy_research_unanswered_export', 'dy_research_record_write',
+    'dy_research_progress', 'dy_research_unanswered_export',
     'dy_odoo_record_search', 'dy_odoo_record_read', 'dy_odoo_model_fields',
     'dy_odoo_module_list_installed', 'dy_odoo_module_info',
     'dy_knowledge_module_info', 'dy_knowledge_search', 'dy_knowledge_read',
@@ -96,7 +96,7 @@ def test_all_50_mcp_tools_over_real_stdio_and_isolated_odoo(tmp_path):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 listed = {tool.name for tool in (await session.list_tools()).tools}
-                assert len(EXPECTED_TOOLS) == 37
+                assert len(EXPECTED_TOOLS) == 36
                 assert listed == EXPECTED_TOOLS, f'工具清单漂移：缺少{EXPECTED_TOOLS-listed}，新增{listed-EXPECTED_TOOLS}'
                 active_session = session
 
@@ -168,7 +168,6 @@ def test_all_50_mcp_tools_over_real_stdio_and_isolated_odoo(tmp_path):
                     await call('dy_memory_write', {'name': 'profile.md', 'content': '隔离验证项目记忆', 'confirmed': True})
                     await call('dy_memory_read', {'name': 'profile.md'}, check=lambda r: r == '隔离验证项目记忆')
                     await call('dy_memory_search', {'query': '隔离验证'}, check=lambda r: bool(r['results']))
-                    await call('dy_research_record_write', {'module': 'expense', 'check_order': '1', 'research_id': '01', 'config_item': '历史兼容入口验证', 'conclusion': '仅验证历史入口，不能作为当前业务验收依据。', 'scope': '隔离测试范围', 'confirmed': True}, check=lambda r: r['status'] == 'confirmed')
                     for module in ('expense', 'general-ledger'):
                         initial = await call('dy_module_memory_read', {'module': module}, check=lambda r: r['total'] > 0 and r['records'] == [])
                         question = initial['questions'][0]

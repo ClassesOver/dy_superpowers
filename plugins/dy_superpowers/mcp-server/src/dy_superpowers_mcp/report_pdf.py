@@ -9,8 +9,8 @@ from __future__ import annotations
 import html
 
 from .reports import _text, _business_refs
+from .qa_templates import MODULE_LABELS
 
-_MODULE_NAMES = {"expense": "费用", "general-ledger": "总账"}
 
 _CSS = """
 @page {
@@ -52,7 +52,7 @@ def render_report_pdf(module: str, report_id: str, report: dict, validation: dic
     from .qa_templates import load_template
     from weasyprint import HTML
     questions = {q['question_id']: q for q in load_template(module)['questions']}
-    parts = [f'<h1>{_esc(_MODULE_NAMES.get(module, module))}模块巡检报告</h1>',
+    parts = [f'<h1>{_esc(MODULE_LABELS.get(module, module))}模块巡检报告</h1>',
         f'<p>报告编号：{_esc(report_id)}；门禁：{_esc(validation["gate"])}</p>',
         f'<p>校验时间：{_esc(generated_at or validation.get("validated_at", ""))}</p>',
         f'<p>模板覆盖：{len(report["records"])}/{len(questions)} 提取点</p>',
@@ -71,5 +71,5 @@ def render_report_pdf(module: str, report_id: str, report: dict, validation: dic
             parts += [f'<p><b>业务要求：</b>{_esc(requirement["text"])}；结果：{_esc(requirement["result"])}</p>',
                 f'<p>答案/附件依据：{_esc(_business_refs(requirement["source_refs"]))}</p>',
                 f'<p>证据：{_esc(_business_refs(requirement["evidence_refs"]))}</p>']
-    css = _CSS.replace('__FOOTER_LEFT__', html.escape(f'{_MODULE_NAMES.get(module, module)}模块巡检报告｜{report_id}'))
+    css = _CSS.replace('__FOOTER_LEFT__', html.escape(f'{MODULE_LABELS.get(module, module)}模块巡检报告｜{report_id}'))
     return HTML(string='<html><head><meta charset="utf-8"><style>' + css + '</style></head><body>' + ''.join(parts) + '</body></html>').write_pdf()

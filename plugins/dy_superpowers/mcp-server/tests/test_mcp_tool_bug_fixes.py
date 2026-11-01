@@ -134,5 +134,5 @@ def test_schema_consistency():
     assert server.TOOL_SCHEMAS['dy_session_initialize']['additionalProperties'] is False
     _, error = call(Path('.'), 'dy_session_initialize', source='startup', unexpected=True)
     assert error and error['code'] == -32602
-    assert 'legacy=true且省略view时按full' in server.TOOL_SCHEMAS['dy_module_memory_read']['properties']['view']['description']
+    assert server.TOOL_SCHEMAS['dy_module_memory_read']['additionalProperties'] is False
     json.dumps(server.TOOL_SCHEMAS)

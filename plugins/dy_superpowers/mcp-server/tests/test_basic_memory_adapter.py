@@ -136,19 +136,6 @@ def test_adapter_falls_back_to_workspace_markdown_when_basic_memory_unavailable(
     assert result["results"] == [{"name": "profile.md", "matches": ["项目使用 Odoo 12"]}]
 
 
-def test_module_scoped_fallback_search_does_not_mix_project_memory(tmp_path, monkeypatch):
-    memory = tmp_path / '.dy_superpowers'
-    module_dir = memory / 'modules' / 'expense'
-    module_dir.mkdir(parents=True)
-    (memory / 'profile.md').write_text('费用项目背景配置', encoding='utf-8')
-    (module_dir / 'research.md').write_text('费用模块配置结论', encoding='utf-8')
-    adapter = BasicMemoryAdapter(tmp_path)
-    monkeypatch.setattr(adapter, '_ensure_project', lambda: (_ for _ in ()).throw(FileNotFoundError()))
-    result = adapter.search('费用', module='expense')
-    assert result['backend'] == 'local-fallback'
-    assert [row['name'] for row in result['results']] == ['modules/expense/research.md']
-
-
 def test_adapter_rejects_empty_query_and_pins_memory_root_to_workspace(tmp_path):
     workspace = tmp_path / "project"
     workspace.mkdir()

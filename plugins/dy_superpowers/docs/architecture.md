@@ -2,7 +2,7 @@
 
 插件由 Codex 插件清单（manifest）、技能入口、插件内 MCP 服务端、版本化参考资料和当前工作区记忆组成。MCP 服务集成在插件目录内，由 `.codex-plugin/plugin.json` 引用 `.mcp.json` 启动。插件不使用外部遥测服务。
 
-一个工作区只对应一个项目。`.dy_superpowers/` 保存该项目的 `preferences.md`、`profile.md`、`delivery-register.md`、`decisions.md`、`skill-candidates.md`，以及按 `modules/<module>/research.md` 隔离的模块调研记录和按 `reports/<module>/<YYYY-MM-DD>/<UTC时间戳-唯一后缀>.md` 保存的巡检报告。报告时间戳和唯一后缀由保存工具生成，避免模型猜编号和同日覆盖。这些文件不修改既有项目 Markdown。
+一个工作区只对应一个项目。`.dy_superpowers/` 保存该项目的 `preferences.md`、`profile.md`、`delivery-register.md`、`decisions.md`、`skill-candidates.md`，以及按 `modules/<module>/qa/` 隔离的模块调研答卷和按 `reports/<module>/<YYYY-MM-DD>/<UTC时间戳-唯一后缀>.md` 保存的巡检报告。报告时间戳和唯一后缀由保存工具生成，避免模型猜编号和同日覆盖。这些文件不修改既有项目 Markdown。
 
 MCP 服务端提供工作区记忆、调研记录、计划校验、Odoo 12 只读查询和运行追踪（trace），并承担 MCP 工具调用前后的参数检查与生命周期追踪。入口使用插件相对启动脚本定位代码；Codex 将启动目录设为插件根目录，业务工作区由启动前的 `DY_WORKSPACE_ROOT` 显式指定并透传。服务拒绝将插件安装目录作为业务工作区，因此 `.dy_superpowers/` 记忆按项目隔离。具体工具边界见 [hooks.md](hooks.md)、[memory.md](memory.md) 和 [odoo-config-engine.md](odoo-config-engine.md)。
 

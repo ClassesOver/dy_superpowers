@@ -4,7 +4,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
 from openpyxl import Workbook, load_workbook
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
@@ -13,7 +12,6 @@ from dy_superpowers_mcp.qa_templates import load_template
 from dy_superpowers_mcp.qa_workbook import answer_column
 from template_qa_helpers import save_answers
 import server
-from dy_superpowers_mcp import research as research_lib
 
 
 def test_mcp_forwards_only_required_business_environment_keys():
@@ -63,16 +61,6 @@ def test_partial_answers_are_visible_without_claiming_completion(tmp_path):
     state = save_answers(tmp_path, 'general-ledger', complete=False)
     assert state['confirmed_count'] == state['partial_count'] == 1
     assert state['answered'] == 0 and state['total'] == len(state['questions'])
-
-
-def test_new_progress_does_not_read_legacy_pages(tmp_path, monkeypatch):
-    monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    total=len(load_template('general-ledger')['questions'])
-    save_answers(tmp_path, 'general-ledger', count=total)
-    monkeypatch.setattr(research_lib, 'read_module_records', lambda *a, **kw: pytest.fail('新版不得读取历史分页'))
-    result, error = server.execute_tool('dy_research_progress',
-        dict(trace_id='new-routing', module='general-ledger', intent='research'), tmp_path)
-    assert error is None and result['answered'] == total and result['route'] == 'interactive'
 
 
 def test_multiple_result_sheets_are_not_silently_discarded(tmp_path):

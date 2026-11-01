@@ -6,11 +6,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
+from mcp_helpers import listed_tools
 from dy_superpowers_mcp.tools import runtime
 from dy_superpowers_mcp.odoo_jsonrpc import OdooSettings
-from dy_superpowers_mcp.memory import module_memory_path
 from dy_superpowers_mcp.trace import TraceStore
-from dy_superpowers_mcp.research import read_record
 
 
 @pytest.mark.parametrize('password', [' password ', '\tpassword\n', '   '])
@@ -70,16 +69,8 @@ def test_workspace_can_be_explicit_and_must_exist(tmp_path, monkeypatch):
         server.resolve_workspace(['--workspace', str(tmp_path / 'missing')])
 
 
-def test_orphan_research_marker_is_never_missing(tmp_path):
-    path = module_memory_path(tmp_path, 'account')
-    path.parent.mkdir(parents=True)
-    path.write_text('<!-- dy-research-record:start -->\n## account / 项目（1 + 01）\n')
-    with pytest.raises(ValueError, match='损坏'):
-        read_record(tmp_path, 'account', '1', '01')
-
-
 def test_legacy_search_alias_is_removed(tmp_path):
-    tools = server.handle({'id': 1, 'method': 'tools/list'}, tmp_path)['result']['tools']
+    tools = listed_tools()
     assert 'dy_odoo_read' not in {tool['name'] for tool in tools}
     assert 'dy_odoo_record_search' in {tool['name'] for tool in tools}
     _, error = server.execute_tool('dy_odoo_read', {'trace_id': 'alias', 'model': 'account.move'}, tmp_path)
@@ -87,7 +78,7 @@ def test_legacy_search_alias_is_removed(tmp_path):
 
 
 def test_plan_shape_only_tool_is_not_published(tmp_path):
-    tools = server.handle({'id': 1, 'method': 'tools/list'}, tmp_path)['result']['tools']
+    tools = listed_tools()
     assert 'dy_validate_plan' not in {tool['name'] for tool in tools}
 
 
@@ -111,68 +102,6 @@ def test_self_reported_trace_cannot_set_tool_status_or_span(tmp_path, monkeypatc
     assert 'status' not in event
     assert event['tool'] == 'dy_trace_event'
     assert event['span_id'] != 'forged'
-
-
-def test_module_memory_list_filters_before_pagination(tmp_path, monkeypatch):
-    monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    from dy_superpowers_mcp.research import write_record
-    for scope, scope_id in [('A', 'scope-a'), ('B', 'scope-b'), ('A2', 'scope-a2')]:
-        write_record(tmp_path, dict(module='expense', check_order='1', research_id='01', config_item='项目',
-                                    conclusion=f'结论{scope}', scope=scope, scope_id=scope_id,
-                                    confirmed_by='顾问', confirmed_at='2026-10-21', confirmed=True))
-    result, error = server.execute_tool('dy_module_memory_read', {"legacy": True,
-        'trace_id': 'scope-page', 'module': 'expense', 'scope_id': 'scope-a', 'limit': 1,
-    }, tmp_path)
-    assert error is None
-    assert [record['scope_id'] for record in result['records']] == ['scope-a']
-    assert result['has_more'] is False
-
-
-def test_module_memory_rejects_scope_and_scope_id_mismatch(tmp_path):
-    from dy_superpowers_mcp.research import read_module_records, read_record, write_record
-    write_record(tmp_path, dict(module='expense', check_order='1', research_id='01', config_item='项目',
-                                conclusion='结论', scope='A', scope_id='scope-a',
-                                confirmed_by='顾问', confirmed_at='2026-10-21', confirmed=True))
-    with pytest.raises(ValueError, match='scope'):
-        read_module_records(tmp_path, 'expense', scope='A', scope_id='scope-b')
-    with pytest.raises(ValueError, match='scope'):
-        read_record(tmp_path, 'expense', '1', '01', scope='A', scope_id='scope-b')
-
-
-def test_module_research_symlink_outside_workspace_is_rejected(tmp_path):
-    outside = tmp_path.parent / f'{tmp_path.name}-outside.md'
-    outside.write_text('工作区外秘密')
-    path = module_memory_path(tmp_path, 'expense')
-    path.parent.mkdir(parents=True)
-    path.symlink_to(outside)
-    from dy_superpowers_mcp.research import read_module_records
-    with pytest.raises(ValueError, match='符号链接'):
-        read_module_records(tmp_path, 'expense')
-    outside.unlink()
-
-
-def test_module_memory_directory_symlink_is_rejected_even_inside_workspace(tmp_path):
-    linked = tmp_path / '.dy_superpowers'
-    destination = tmp_path / 'another-project-memory'
-    destination.mkdir()
-    linked.symlink_to(destination, target_is_directory=True)
-    with pytest.raises(ValueError, match='符号链接'):
-        module_memory_path(tmp_path, 'expense')
-
-
-def test_same_day_future_confirmation_timestamp_is_rejected(tmp_path, monkeypatch):
-    from datetime import datetime, timezone
-    import dy_superpowers_mcp.research as research
-    class FixedClock(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc)
-    monkeypatch.setattr(research, 'datetime', FixedClock)
-    from dy_superpowers_mcp.research import write_record
-    with pytest.raises(ValueError, match='当前时间'):
-        write_record(tmp_path, dict(module='expense', check_order='1', research_id='01', config_item='项目',
-                                    conclusion='结论', scope='公司A', confirmed_by='顾问',
-                                    confirmed_at='2026-10-22T23:59:59+00:00', confirmed=True))
 
 
 def test_builtin_inspection_research_rejects_unknown_question_key(tmp_path, monkeypatch):
@@ -248,20 +177,6 @@ def test_rotated_trace_read_is_ordered_and_retention_isolated(tmp_path, monkeypa
     assert other_path.is_file()
 
 
-def test_new_research_has_one_body_and_detects_edits(tmp_path):
-    from dy_superpowers_mcp.research import write_record
-    data = dict(module='account', check_order='1', research_id='01', config_item='项目',
-                conclusion='唯一确认结论', scope='公司A', confirmed_by='顾问', confirmed_at='2026-10-21', confirmed=True)
-    write_record(tmp_path, data)
-    path = tmp_path / '.dy_superpowers/modules/account/research.md'
-    text = path.read_text()
-    assert text.count('唯一确认结论') == 1
-    assert 'dy-research-record:data' not in text
-    path.write_text(text.replace('唯一确认结论', '意外编辑'))
-    with pytest.raises(ValueError, match='不一致'):
-        read_record(tmp_path, 'account', '1', '01')
-
-
 def test_odoo_error_response_reports_call_failure_not_format_error():
     """错误响应即使不回显请求 id，也必须报「调用失败」而非「格式无效」。"""
     import threading
@@ -304,16 +219,3 @@ def test_search_read_preserves_odoo_rpc_error_type():
         assert isinstance(original, OdooRPCError) or "JSON-RPC" in str(exc)
     else:
         raise AssertionError("应当抛出 OdooRPCError")
-
-
-@pytest.mark.parametrize('damage', ['json', 'scope'])
-def test_scoped_lookup_cannot_hide_damaged_new_record(tmp_path, damage):
-    from dy_superpowers_mcp.research import write_record
-    write_record(tmp_path, dict(module='account', check_order='1', research_id='01', config_item='项目',
-                              conclusion='确认结论', scope='公司A', confirmed_by='顾问', confirmed_at='2026-10-21', confirmed=True))
-    path = tmp_path / '.dy_superpowers/modules/account/research.md'
-    text = path.read_text()
-    text = text.replace('"scope": "公司A"', '"scope": "公司B"') if damage == 'scope' else text.replace('"conclusion":', '"conclusion"::')
-    path.write_text(text)
-    with pytest.raises(ValueError, match='损坏'):
-        read_record(tmp_path, 'account', '1', '01', scope='公司A')

@@ -5,6 +5,8 @@ from functools import cache
 from pathlib import Path
 
 TEMPLATE_DIR = Path(__file__).parent / "data" / "research_templates"
+# 报告标题使用的模块中文简称；未登记的模块显示原始标识。
+MODULE_LABELS = {"expense": "费用", "general-ledger": "总账"}
 
 
 @cache
