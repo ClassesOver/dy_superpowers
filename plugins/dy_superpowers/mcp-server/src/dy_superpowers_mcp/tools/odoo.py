@@ -73,7 +73,13 @@ def _handle_odoo_record_read(name: str, arguments: dict, workspace: Path, store:
 
 def _handle_odoo_capability(name, arguments, workspace, store, span_id):
     with odoo_errors(rpc_message='系统查询失败，请核对连接与权限；不返回远端正文'):
-        return _run_odoo_capability(name, arguments, workspace, store, span_id)
+        try:
+            return _run_odoo_capability(name, arguments, workspace, store, span_id)
+        except ValueError as exc:
+            if isinstance(exc, runtime.OdooConfigurationError):
+                raise
+            # 答卷、知识库等参数校验错误属于可修正的请求错误，不能落成笼统的内部错误。
+            raise ToolRequestError(-32602, str(exc)) from exc
 
 
 def _run_odoo_capability(name, arguments, workspace, store, span_id):

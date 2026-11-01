@@ -17,14 +17,15 @@ MEMORY_FILES = {
 
 WRITABLE_MEMORY_FILES = MEMORY_FILES
 MODULE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-NOTE_SLUG = re.compile(r"^[a-z0-9][a-z0-9/-]{0,120}$")  # 允许 / 形成项目目录分层
+# 允许 / 形成项目目录分层；每段须以字母或数字开头，禁止空段、结尾斜杠，总长不超过 121。
+NOTE_SLUG = re.compile(r"^(?=.{1,121}$)[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*$")
 
 
 def note_path(workspace: str | Path, slug: str) -> Path:
     """wiki 记忆页位于 .dy_superpowers/notes/，纳入 Basic Memory 索引范围。"""
     workspace_path = Path(workspace).resolve()
     if not isinstance(slug, str) or NOTE_SLUG.fullmatch(slug) is None:
-        raise ValueError("note 标识必须是小写字母、数字或连字符（最多 81 字符）")
+        raise ValueError("note 标识必须由小写字母、数字或连字符组成，可用单个 / 分层，每段以字母或数字开头（最多 121 字符）")
     raw_root = workspace_path / ".dy_superpowers"
     raw_notes = raw_root / "notes"
     if any(path.is_symlink() for path in (raw_root, raw_notes)):

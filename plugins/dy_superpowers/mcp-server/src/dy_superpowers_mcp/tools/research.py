@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from .. import research as research_lib
 from ..memory import module_memory_path, validate_module
-from ..qa_store import commit_qa, export_qa, parse_qa_workbook, read_qa
+from ..qa_store import commit_qa, export_qa, normalize_scope, parse_qa_workbook, read_qa
+from ..trace import TRACE_ID_PATTERN
 from ..qa_templates import template_modules
 from ..trace import TraceStore
 from .runtime import append_trace, invalid_arguments
@@ -99,7 +100,7 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
             raise ValueError('intent 必须为 research、progress、export、import 或 confirm')
         scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
         result = read_qa(workspace, module, scope_id)
-        if scope is not None and result.get('scope') != scope:
+        if scope is not None and result.get('scope') != normalize_scope(scope):
             raise ValueError('请按最新 QA 选择真实 scope_id')
         result['unknown_count'] = 0
         result['intent'] = intent
@@ -151,7 +152,7 @@ TOOLS = {
         '确认后批次保存当前模板问题答案；答案整项替换，其他问题保留，返回同步版本答卷路径。',
         {'type': 'object', 'additionalProperties': False,
          'required': ['trace_id', 'module', 'scope', 'template_revision', 'answers', 'batch_id', 'confirmed'],
-         'properties': {'trace_id': {'type': 'string'}, 'module': {'type': 'string', 'enum': list(template_modules())},
+         'properties': {'trace_id': {'type': 'string', 'pattern': TRACE_ID_PATTERN.pattern}, 'module': {'type': 'string', 'enum': list(template_modules())},
              'scope': {'type': 'string', 'minLength': 1, 'maxLength': 500}, 'scope_id': {'type': 'string'},
              'template_revision': {'type': 'string'}, 'batch_id': {'type': 'string', 'minLength': 1},
              'confirmed': {'type': 'boolean'}, 'answers': {'type': 'array', 'items': {
@@ -172,7 +173,7 @@ TOOLS = {
     'dy_research_answers_import': (
         '仅解析工作区已登记答卷为候选，不写入记忆，不自动提升完整性。',
         {'type': 'object', 'additionalProperties': False, 'required': ['trace_id', 'path'],
-         'properties': {'trace_id': {'type': 'string'}, 'path': {'type': 'string', 'minLength': 1}}},
+         'properties': {'trace_id': {'type': 'string', 'pattern': TRACE_ID_PATTERN.pattern}, 'path': {'type': 'string', 'minLength': 1}}},
         _handle_research_answers_import,
     ),
     'dy_module_memory_read': (
@@ -185,7 +186,7 @@ TOOLS = {
                         'legacy': {'type': 'boolean', 'default': False},
                         'question_ids': {'type': 'array', 'items': {'type': 'string'}},
                         'view': {'type': 'string', 'enum': ['qa', 'current', 'summary', 'full'], 'default': 'qa',
-                                 'description': '默认qa。current/summary/full仅legacy=true历史视图；不指定legacy不会读取旧答案。'},
+                                 'description': '默认qa。current/summary/full仅legacy=true历史视图；legacy=true且省略view时按full返回。不指定legacy不会读取旧答案。'},
                         'checks': {'type': 'array', 'minItems': 1, 'maxItems': 100, 'items': {
                             'type': 'object', 'additionalProperties': False,
                             'required': ['check_order', 'research_id'],

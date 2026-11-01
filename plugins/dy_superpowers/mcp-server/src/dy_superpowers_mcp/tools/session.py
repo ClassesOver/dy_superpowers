@@ -45,7 +45,7 @@ def _handle_session_initialize(name: str, arguments: dict, workspace: Path, stor
 TOOLS = {
     'dy_session_initialize': (
         '初始化或恢复当前工作区会话并返回项目记忆索引；需要时使用记忆工具读取完整内容。',
-        {'type': 'object',
+        {'type': 'object', 'additionalProperties': False,
          'required': ['trace_id', 'source'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'source': {'type': 'string', 'enum': ['clear', 'compact', 'fork', 'resume', 'startup']}}},

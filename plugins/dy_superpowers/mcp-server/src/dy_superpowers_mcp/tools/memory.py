@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .. import basic_memory
 from ..memory import WorkspaceMemory
-from ..memory import list_notes, read_note, write_note
+from ..memory import NOTE_SLUG, list_notes, read_note, write_note
 from ..trace import TraceStore
 from .runtime import ToolRequestError, append_trace, invalid_arguments
 from pathlib import Path
@@ -124,7 +124,7 @@ TOOLS = {
         {'type': 'object',
          'required': ['trace_id', 'slug', 'title', 'body', 'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
-                        'slug': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9/-]{0,120}$'},
+                        'slug': {'type': 'string', 'maxLength': 121, 'pattern': NOTE_SLUG.pattern},
                         'title': {'type': 'string', 'minLength': 1, 'maxLength': 120},
                         'body': {'type': 'string', 'minLength': 1},
                         'tags': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 10},
@@ -140,7 +140,7 @@ TOOLS = {
         {'type': 'object',
          'required': ['trace_id', 'slug'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
-                        'slug': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9/-]{0,120}$'}}},
+                        'slug': {'type': 'string', 'maxLength': 121, 'pattern': NOTE_SLUG.pattern}}},
         _handle_notes_read,
     ),
     'dy_notes_list': (
