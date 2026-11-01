@@ -1,12 +1,20 @@
 """读取随插件发布的模块调研模板，不依赖原工作簿。"""
 
 import json
+from functools import cache
 from pathlib import Path
+
+TEMPLATE_DIR = Path(__file__).parent / "data" / "research_templates"
+
+
+@cache
+def template_modules() -> tuple[str, ...]:
+    """已发布模板的模块标识；新增模块只需发布对应模板文件。"""
+    return tuple(sorted(path.stem for path in TEMPLATE_DIR.glob("*.json")))
 
 
 def load_template(module: str) -> dict:
     """返回当前模块模板的独立副本；未知模块不使用默认模板。"""
-    if module not in ("expense", "general-ledger"):
+    if module not in template_modules():
         raise ValueError(f"未知调研模板模块：{module}")
-    path = Path(__file__).parent / "data" / "research_templates" / f"{module}.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads((TEMPLATE_DIR / f"{module}.json").read_text(encoding="utf-8"))

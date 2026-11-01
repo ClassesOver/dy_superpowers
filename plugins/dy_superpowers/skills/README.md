@@ -10,4 +10,6 @@
 - `general-ledger-inspection`：总账模块交付巡检；
 - `inspection-skill-creator`：创建或归一化领域巡检 skill，核对清单、源码配方与工具支持状态。
 
+调研、巡检、配置三个流程相互独立：调研写入答卷，巡检与配置只读取答卷。公共规则位于 [references/common/](../references/common/)：答卷读取、知识检索和 Odoo 只读查询。
+
 领域巡检共用 [执行流程](../references/inspection-workflow.md)，领域清单和源码配方保存在各自 `references/`。后续业务技能通过创建器生成；新增目录不自动获得正式巡检校验和报告能力。

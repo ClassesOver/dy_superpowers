@@ -8,7 +8,7 @@ import pytest
 import server
 from test_template_inspection import report_for, validate
 from dy_superpowers_mcp.qa_store import commit_qa
-from dy_superpowers_mcp.inspection_prepare import configured_environment_info
+from dy_superpowers_mcp.qa_basis import configured_environment_info
 from dy_superpowers_mcp.trace import TraceStore
 
 
@@ -17,7 +17,6 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
     for key in ('APP_URL', 'APP_USER', 'APP_PASSWORD', 'DB_NAME', 'DY_ODOO_ENVIRONMENT'):
         monkeypatch.delenv(key, raising=False)
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
 
 
 def independent_report(root):

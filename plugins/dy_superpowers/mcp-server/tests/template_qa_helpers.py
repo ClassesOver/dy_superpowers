@@ -28,7 +28,7 @@ def make_report(root, module='expense', *, state=None, environment='UAT'):
     state = state or save_answers(root, module)
     basis = {k: state[k] for k in ('module', 'scope_id', 'template_revision', 'answer_version')}
     basis['environment'] = environment
-    from dy_superpowers_mcp.inspection_prepare import configured_environment_info
+    from dy_superpowers_mcp.qa_basis import configured_environment_info
     basis['connection_fingerprint'] = configured_environment_info()['connection_fingerprint']
     material = root / 'independent-verification.txt'
     material.write_text('独立核验系统现状的材料', encoding='utf-8')

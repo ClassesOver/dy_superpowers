@@ -14,6 +14,14 @@ import pytest
 from test_all_mcp_live import PLUGIN, REPO, _isolated_environment, pytestmark
 
 
+ANSWER_FIELDS = ('module', 'scope_id', 'template_revision', 'question_id', 'answer_revision', 'environment')
+
+
+def answer_binding(context):
+    """配置只绑定答卷身份与环境；巡检证据的 basis 与 requirement_id 不参与配置确认。"""
+    return {key: context[key] for key in ANSWER_FIELDS}
+
+
 @pytest.mark.parametrize('module,qid,model,app', [
     ('expense', 'DY-EXP-19', 'dy.expense.personal.tax.calculation.rule', 'dy_expense'),
     ('general-ledger', 'GL-5-015', 'dy.fin.account.analytic.plan', 'dy_fin_mdm'),
@@ -124,11 +132,11 @@ def test_confirmed_answer_drives_configuration_lifecycle(tmp_path, module, qid, 
                 wrong = {**target, ('name' if module == 'general-ledger' else 'resident_flag'):
                     ('故意错误名称' if module == 'general-ledger' else False)}
                 args = dict(environment={'url': env['APP_URL'], 'database': env['DB_NAME']}, model=model,
-                    company_id=company['id'], values=wrong, idempotency_key='create', confirmed=True, trace_context=context)
+                    company_id=company['id'], values=wrong, idempotency_key='create', confirmed=True, trace_context=answer_binding(context))
                 preview = await call('dy_odoo_record_create', **args, dry_run=True)
-                assert preview['confirmation']['trace_context'] == context
+                assert preview['confirmation']['trace_context'] == answer_binding(context)
                 created = await call('dy_odoo_record_create', **args, confirmation_digest=preview['confirmation_digest'])
-                assert created['research_context'] == context and created['data_readback_status'] == 'passed'
+                assert created['answer_context'] == answer_binding(context) and created['data_readback_status'] == 'passed'
                 row = (await search('mismatch'))[0]
                 assert row['id'] == created['record_id']
                 assert not (await call('dy_inspection_validate', report=report('通过', 'mismatch')))['valid']
@@ -180,7 +188,7 @@ def test_confirmed_answer_drives_configuration_lifecycle(tmp_path, module, qid, 
                 (output / 'report.json').write_text(json.dumps(final, ensure_ascii=False, indent=2))
                 (output / 'configuration-browser-input.json').write_text(json.dumps(dict(
                     url=env['APP_URL'], database=env['DB_NAME'], company_id=company['id'], company_name=company['name'],
-                    model=model, research_context=context, report_id=saved['report_id'], data_readback_status='passed',
+                    model=model, answer_context=answer_binding(context), report_id=saved['report_id'], data_readback_status='passed',
                     records=[dict(record_id=row['id'], expected_name=target['name'],
                         **({'expected_code': target['code']} if 'code' in target else {}))]), ensure_ascii=False, indent=2))
                 checks['revised_answer_independently_rechecked'] = True

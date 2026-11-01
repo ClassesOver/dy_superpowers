@@ -12,7 +12,7 @@ Odoo JSON-RPC 使用独立 requests Session，关闭环境代理和自动重定�
 
 ## 工具、连接与工作区
 
-`TOOL_REGISTRY` 是工具说明、JSON Schema 和处理器的唯一注册源。服务仅使用锁定的 MCP 2.x SDK 和 jsonschema；SDK 或必需依赖缺失时明确启动失败，不启动第二套手写协议。SDK 错误保留数值代码，脱敏错误不回显参数正文。
+工具按领域分布在 `mcp-server/src/dy_superpowers_mcp/tools/`（session、research、inspection、memory、odoo、knowledge、configuration、wiki），各模块的 `TOOLS` 由 `tools/__init__.py` 汇总为 `TOOL_REGISTRY`，它是工具说明、JSON Schema 和处理器的唯一注册源；重复注册在启动时失败。公共运行时（参数错误转换、本地 trace、Odoo 连接缓存与查询审计）位于 `tools/runtime.py`，`server.py` 只负责协议入口。服务仅使用锁定的 MCP 2.x SDK 和 jsonschema；SDK 或必需依赖缺失时明确启动失败，不启动第二套手写协议。SDK 错误保留数值代码，脱敏错误不回显参数正文。
 
 `dy_odoo_record_search` 是公开搜索工具。旧工具名不再接受，调用统一使用当前 MCP 工具清单。
 

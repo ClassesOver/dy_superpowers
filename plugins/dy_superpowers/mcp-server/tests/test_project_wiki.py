@@ -36,7 +36,6 @@ def _workspace(tmp_path, records=None, name=PROJECT["name"], code=PROJECT["code"
 
 def _server_env(monkeypatch, tmp_path):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
 
 
 def run(tool, args, ws):

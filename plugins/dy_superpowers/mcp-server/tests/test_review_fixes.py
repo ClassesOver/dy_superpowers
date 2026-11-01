@@ -6,6 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
+from dy_superpowers_mcp.tools import runtime
 from dy_superpowers_mcp.odoo_jsonrpc import OdooSettings
 from dy_superpowers_mcp.memory import module_memory_path
 from dy_superpowers_mcp.trace import TraceStore
@@ -92,7 +93,6 @@ def test_plan_shape_only_tool_is_not_published(tmp_path):
 
 def test_self_reported_trace_cannot_create_odoo_evidence(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     result, error = server.execute_tool('dy_trace_event', {'trace_id': 'forged', 'event': {
         'event': 'odoo.read', 'operation': 'search_read', 'status': 'ok', 'model': 'account.move',
     }}, tmp_path)
@@ -102,7 +102,6 @@ def test_self_reported_trace_cannot_create_odoo_evidence(tmp_path, monkeypatch):
 
 def test_self_reported_trace_cannot_set_tool_status_or_span(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     result, error = server.execute_tool('dy_trace_event', {'trace_id': 'manual', 'event': {
         'event': 'inspection.note', 'status': 'ok', 'tool': 'dy_odoo_record_search', 'span_id': 'forged',
     }}, tmp_path)
@@ -116,7 +115,6 @@ def test_self_reported_trace_cannot_set_tool_status_or_span(tmp_path, monkeypatc
 
 def test_module_memory_list_filters_before_pagination(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     from dy_superpowers_mcp.research import write_record
     for scope, scope_id in [('A', 'scope-a'), ('B', 'scope-b'), ('A2', 'scope-a2')]:
         write_record(tmp_path, dict(module='expense', check_order='1', research_id='01', config_item='项目',
@@ -206,8 +204,8 @@ def test_odoo_connection_reused_and_credentials_invalidate_cache(tmp_path, monke
         def search_read(self, *args):
             return []
 
-    server._clear_odoo_client()
-    monkeypatch.setattr(server, 'OdooReadClient', Client)
+    runtime.clear_odoo_client()
+    monkeypatch.setattr(runtime, 'OdooReadClient', Client)
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
     try:
         assert server.execute_tool('dy_odoo_record_search', {'trace_id': 'reuse', 'model': 'account.move'}, tmp_path)[1] is None
@@ -216,11 +214,11 @@ def test_odoo_connection_reused_and_credentials_invalidate_cache(tmp_path, monke
         server.execute_tool('dy_odoo_record_search', {'trace_id': 'reuse', 'model': 'account.move'}, tmp_path)
         assert len(created) == 2
         assert len(closed) == 1
-        server._odoo_client(tmp_path / 'other-workspace')
+        runtime.odoo_client(tmp_path / 'other-workspace')
         assert len(created) == 3
         assert len(closed) == 2
     finally:
-        server._clear_odoo_client()
+        runtime.clear_odoo_client()
 
 
 def test_rotated_trace_read_is_ordered_and_retention_isolated(tmp_path, monkeypatch):

@@ -19,7 +19,6 @@ def run(tool, args, ws):
 
 def test_notes_write_requires_confirmation_and_slug_rules(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     payload = {"slug": "expense-policy-overview", "title": "费用政策概览",
                "body": "# 费用政策概览\n住宿费政策头 1 个，详见 [[expense-run-202610]]。", "tags": ["expense", "policy"],
                "source_refs": ["费用模块调研结果.xlsx#费用调研清单!G53"]}
@@ -44,7 +43,6 @@ def test_notes_write_requires_confirmation_and_slug_rules(tmp_path, monkeypatch)
 
 def test_notes_read_missing_lists_available_and_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     missing, error = run("dy_notes_read", {"slug": "no-such-note"}, tmp_path)
     assert error is None and missing["found"] is False and missing["notes"] == []
     run("dy_notes_write", {"slug": "gl-scope", "title": "总账范围", "body": "范围说明", "confirmed": True}, tmp_path)
@@ -69,7 +67,6 @@ def test_notes_read_missing_lists_available_and_roundtrip(tmp_path, monkeypatch)
 ])
 def test_notes_trace_redacts_quoted_keys_and_complete_quoted_values(tmp_path, monkeypatch, body):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     _, error = run('dy_notes_write', {'slug': 'policy', 'title': '政策', 'body': body,
                                     'confirmed': True}, tmp_path)
     assert error is None
@@ -99,7 +96,6 @@ def test_note_parent_symlinks_are_rejected_even_inside_notes(tmp_path):
 
 def test_topic_note_metadata_and_compare_and_swap(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     payload = {'slug': 'expense/policy', 'title': '费用政策', 'body': '初稿',
                'module': 'expense', 'research_topic': True, 'confirmed': True}
     _, error = run('dy_notes_write', payload, tmp_path)

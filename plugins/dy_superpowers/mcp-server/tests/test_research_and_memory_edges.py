@@ -12,9 +12,8 @@ import server
 from dy_superpowers_mcp.research import ResearchIntegrityError, read_module_records, read_record, write_record
 
 
-def disable_telemetry(monkeypatch, codex_home: Path):
+def isolate_codex_home(monkeypatch, codex_home: Path):
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
 
 
 def research_arguments(**updates):
@@ -37,7 +36,7 @@ def research_arguments(**updates):
 def test_memory_read_unsupported_name_returns_invalid_params(tmp_path, monkeypatch):
     workspace = tmp_path / "project"
     workspace.mkdir()
-    disable_telemetry(monkeypatch, tmp_path / "codex")
+    isolate_codex_home(monkeypatch, tmp_path / "codex")
 
     result, error = server.execute_tool(
         "dy_memory_read",
@@ -54,7 +53,7 @@ def test_research_record_read_reports_workspace_escape_as_invalid_params(tmp_pat
     outside = tmp_path / "outside"
     outside.mkdir()
     (workspace / ".dy_superpowers").symlink_to(outside, target_is_directory=True)
-    disable_telemetry(monkeypatch, tmp_path / "codex")
+    isolate_codex_home(monkeypatch, tmp_path / "codex")
 
     result, error = server.execute_tool(
         "dy_module_memory_read",

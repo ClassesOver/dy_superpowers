@@ -5,7 +5,6 @@ import multiprocessing
 import pytest
 
 from dy_superpowers_mcp.configuration import confirmation_digest, write_configuration
-from dy_superpowers_mcp.inspection_prepare import prepare_inspection
 from dy_superpowers_mcp.odoo_jsonrpc import OdooConfigurationError
 from dy_superpowers_mcp.qa_store import commit_qa, read_qa
 from test_configuration_write import Client, mutations, payload
@@ -17,12 +16,15 @@ def answer_payload(tmp_path, monkeypatch, payload):
     for key, value in dict(DB_NAME='demo', APP_USER='operator', APP_PASSWORD='not-logged').items():
         monkeypatch.setenv(key, value)
     monkeypatch.delenv('DY_ODOO_ENVIRONMENT', raising=False)
-    state = saved(tmp_path, module='general-ledger')
-    prepared = prepare_inspection(tmp_path, 'general-ledger', state['scope_id'], 'demo')
-    item = next(i for i in prepared['items'] if i['answer_revision'])
-    payload['trace_context'] = {**prepared['basis'], 'question_id': item['question_id'],
-        'answer_revision': item['answer_revision'], 'requirement_id': 'confirmed-config'}
+    payload['trace_context'] = answer_context(saved(tmp_path, module='general-ledger'))
     return payload
+
+
+def answer_context(state):
+    """只用答卷自身身份驱动配置，不经过巡检准备。"""
+    answer = state['records'][0]
+    return dict(module=state['module'], scope_id=state['scope_id'], template_revision=state['template_revision'],
+        question_id=answer['question_id'], answer_revision=answer['revision'], environment='demo')
 
 
 def revised(root, context, *, complete=True):
@@ -42,12 +44,12 @@ def test_answer_bound_preview_and_write_return_same_source(tmp_path, answer_payl
     preview = execute(tmp_path, {**answer_payload, 'dry_run': True})
     assert preview['confirmation']['trace_context'] == answer_payload['trace_context']
     result = execute(tmp_path, {**answer_payload, 'confirmation_digest': preview['confirmation_digest']})
-    assert result['research_context'] == answer_payload['trace_context']
+    assert result['answer_context'] == answer_payload['trace_context']
     assert result['data_readback_status'] == 'passed' and not result['accepted']
 
 
-@pytest.mark.parametrize('field', ['module', 'scope_id', 'template_revision', 'answer_version',
-    'question_id', 'answer_revision', 'environment', 'connection_fingerprint', 'requirement_id'])
+@pytest.mark.parametrize('field', ['module', 'scope_id', 'template_revision',
+    'question_id', 'answer_revision', 'environment'])
 def test_research_identity_is_bound_into_confirmation(answer_payload, field):
     original = confirmation_digest('create', answer_payload)
     changed = copy.deepcopy(answer_payload)
@@ -55,8 +57,22 @@ def test_research_identity_is_bound_into_confirmation(answer_payload, field):
     assert confirmation_digest('create', changed) != original
 
 
-@pytest.mark.parametrize('field', ['module', 'scope_id', 'template_revision', 'answer_version',
-    'question_id', 'answer_revision', 'environment', 'connection_fingerprint', 'requirement_id'])
+def test_connection_identity_is_bound_by_server(answer_payload, monkeypatch):
+    original = confirmation_digest('create', answer_payload)
+    monkeypatch.setenv('APP_USER', 'different-operator')
+    assert confirmation_digest('create', answer_payload) != original
+
+
+def test_inspection_only_identifiers_are_not_answer_binding(tmp_path, answer_payload):
+    preview = execute(tmp_path, {**answer_payload, 'dry_run': True})
+    assert set(preview['confirmation']['trace_context']) == set(answer_payload['trace_context'])
+    tagged = copy.deepcopy(answer_payload)
+    tagged['trace_context'].update(requirement_id='inspection-only', answer_version='inspection-only')
+    assert confirmation_digest('create', tagged) == confirmation_digest('create', answer_payload)
+
+
+@pytest.mark.parametrize('field', ['module', 'scope_id', 'template_revision',
+    'question_id', 'answer_revision', 'environment'])
 def test_incomplete_source_never_opens_connection(tmp_path, answer_payload, field):
     del answer_payload['trace_context'][field]
     answer_payload['confirmation_digest'] = confirmation_digest('create', answer_payload)
@@ -125,7 +141,7 @@ def test_write_readback_does_not_confuse_false_with_zero(tmp_path, payload):
 def test_incomplete_confirmed_answer_cannot_drive_configuration(tmp_path, answer_payload):
     revised(tmp_path, answer_payload['trace_context'], complete=False)
     state = read_qa(tmp_path, 'general-ledger')
-    answer_payload['trace_context'].update(answer_version=state['answer_version'], answer_revision=state['records'][0]['revision'])
+    answer_payload['trace_context'].update(answer_revision=state['records'][0]['revision'])
     with pytest.raises(OdooConfigurationError, match='未就绪'):
         execute(tmp_path, {**answer_payload, 'dry_run': True})
 
@@ -180,10 +196,7 @@ def test_multiple_processes_keep_idempotency_in_workspace(tmp_path, answer_paylo
         for index in range(1, len(roots)):
             roots[index] = tmp_path / ('workspace-' + str(index))
             roots[index].mkdir()
-            state = saved(roots[index], module='general-ledger')
-            prepared = prepare_inspection(roots[index], 'general-ledger', state['scope_id'], 'demo')
-            payloads[index]['trace_context'] = {**prepared['basis'], 'question_id': state['records'][0]['question_id'],
-                'answer_revision': state['records'][0]['revision'], 'requirement_id': 'confirmed-config'}
+            payloads[index]['trace_context'] = answer_context(saved(roots[index], module='general-ledger'))
     for args in payloads:
         args['confirmation_digest'] = confirmation_digest('create', args)
     log = tmp_path / 'mutations.txt'

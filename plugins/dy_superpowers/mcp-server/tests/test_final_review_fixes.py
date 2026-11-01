@@ -10,7 +10,8 @@ from openpyxl import Workbook, load_workbook
 import server
 from dy_superpowers_mcp import qa_workbook, report_pdf
 from dy_superpowers_mcp.inspection import validate_inspection
-from dy_superpowers_mcp.inspection_prepare import optional_attachment, prepare_inspection
+from dy_superpowers_mcp.inspection_prepare import prepare_inspection
+from dy_superpowers_mcp.qa_basis import optional_attachment
 from dy_superpowers_mcp.qa_store import commit_qa, export_qa, read_qa
 from dy_superpowers_mcp.qa_templates import load_template
 from dy_superpowers_mcp.reports import export_report_pdf, read_report, save_report
@@ -20,7 +21,6 @@ from template_qa_helpers import make_report
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     monkeypatch.delenv('DB_NAME', raising=False)
     monkeypatch.delenv('DY_ODOO_ENVIRONMENT', raising=False)
 

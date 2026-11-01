@@ -34,7 +34,7 @@ EVENT_FIELDS = {
     "field_count", "domain_term_count", "limit", "offset", "domain", "domain_truncated", "active_test",
     "found", "history_count", "requested_count", "revision_count",
     "memory_content", "research_content", "query", "content_truncated",
-    "workflow_id", "call_id", "otel_trace_id", "otel_span_id", "category",
+    "workflow_id", "call_id", "category",
     "check_key", "scope_id", "revision", "research_status", "trace_context", "valid", "error_count", "expected_count", "report_id",
     "intent", "next_action", "route", "percentage", "scope_mode", "answered", "total",
     "confirmed_count", "confirmed_percentage", "partial_count", "unknown_count", "unanswered_count",

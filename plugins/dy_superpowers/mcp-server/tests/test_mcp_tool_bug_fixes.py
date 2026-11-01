@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
 from dy_superpowers_mcp import odoo_discovery, odoo_imports
+from dy_superpowers_mcp.tools import runtime
 from dy_superpowers_mcp.odoo_jsonrpc import OdooConfigurationError, OdooSettings
 from dy_superpowers_mcp.qa_templates import load_template
 
@@ -16,7 +17,6 @@ from dy_superpowers_mcp.qa_templates import load_template
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
 
 
 def call(root, name, **args):
@@ -51,7 +51,7 @@ class GapClient:
 
 
 def test_capability_value_error_is_reported_as_request_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(server, '_odoo_client', lambda workspace: GapClient())
+    monkeypatch.setattr(runtime, 'odoo_client', lambda workspace: GapClient())
     _, error = call(tmp_path, 'dy_knowledge_community_gaps', module='expense', scope_id='bad')
     assert error == {'code': -32602, 'message': '范围标识无效'}
 
@@ -140,11 +140,6 @@ def test_discovery_has_more_is_false_on_exact_last_page():
     assert exact['count'] == 10 and exact['has_more'] is False and exact['next_offset'] is None
     more = odoo_discovery.discover(Client(11), 'model_list', {'limit': 10})
     assert more['count'] == 10 and more['has_more'] is True and more['next_offset'] == 10
-
-
-def test_server_info_version_matches_sdk_entry():
-    reply = server.handle({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize'}, Path('.'))
-    assert reply['result']['serverInfo']['version'] == server.SERVER_VERSION
 
 
 def test_schema_consistency():

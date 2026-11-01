@@ -12,15 +12,17 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from dy_superpowers_mcp import TraceStore, WorkspaceMemory, redact, validate_plan
-from dy_superpowers_mcp import telemetry, trace as trace_module
+from dy_superpowers_mcp import trace as trace_module
 from dy_superpowers_mcp.trace import REDACTED
 from dy_superpowers_mcp.research import read_record, write_record
 import server
+from dy_superpowers_mcp import basic_memory
+from dy_superpowers_mcp.tools import runtime
 from server import handle
 
 
 @pytest.fixture(autouse=True)
-def isolated_telemetry(monkeypatch):
+def isolated_environment(monkeypatch):
     for name in ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT",
                  "DY_SUPERPOWERS_OTLP_TRACES_ENDPOINT"):
         monkeypatch.delenv(name, raising=False)
@@ -173,9 +175,9 @@ def test_odoo_record_read_uses_explicit_read_operation(workspace, monkeypatch):
     monkeypatch.setenv("DB_NAME", "db")
     monkeypatch.setenv("APP_USER", "u")
     monkeypatch.setenv("APP_PASSWORD", "p")
-    monkeypatch.setattr("server.OdooReadClient.__init__", lambda self, settings: None)
+    monkeypatch.setattr("dy_superpowers_mcp.odoo_jsonrpc.OdooReadClient.__init__", lambda self, settings: None)
     read = lambda self, model, ids, fields: [{"id": 3, "name": "Demo"}]
-    monkeypatch.setattr("server.OdooReadClient.read_records", read)
+    monkeypatch.setattr("dy_superpowers_mcp.odoo_jsonrpc.OdooReadClient.read_records", read)
 
     result = call_tool(
         "dy_odoo_record_read",
@@ -192,9 +194,9 @@ def test_odoo_model_fields_is_read_only(workspace, monkeypatch):
     monkeypatch.setenv("DB_NAME", "db")
     monkeypatch.setenv("APP_USER", "u")
     monkeypatch.setenv("APP_PASSWORD", "p")
-    monkeypatch.setattr("server.OdooReadClient.__init__", lambda self, settings: None)
+    monkeypatch.setattr("dy_superpowers_mcp.odoo_jsonrpc.OdooReadClient.__init__", lambda self, settings: None)
     called = []
-    monkeypatch.setattr("server.OdooReadClient.fields_get", lambda self, model: called.append(model) or {"name": {"type": "char"}})
+    monkeypatch.setattr("dy_superpowers_mcp.odoo_jsonrpc.OdooReadClient.fields_get", lambda self, model: called.append(model) or {"name": {"type": "char"}})
 
     result = call_tool("dy_odoo_model_fields", {"trace_id": "odoo-fields", "model": "res.partner"}, workspace)
     assert "error" not in result
@@ -314,10 +316,9 @@ def test_traceable_memory_content_still_redacts_credentials():
     assert json.loads(research["research_content"]) == {"confirmed_by": REDACTED}
 
 
-def test_external_telemetry_is_inert_and_local_trace_works(workspace):
-    assert telemetry.initialize_telemetry() is False
-    with telemetry.tool_span("trace-1", workspace, "dy_trace_event") as span:
-        assert span is None
+def test_plugin_has_no_external_telemetry_and_local_trace_works(workspace):
+    import importlib.util
+    assert importlib.util.find_spec("dy_superpowers_mcp.telemetry") is None
     result = call_tool("dy_trace_event", {"trace_id": "trace-local", "event": {"event": "inspection.result", "result": "通过"}}, workspace)
     assert "error" not in result
     assert TraceStore(workspace, os.environ["CODEX_HOME"]).read("trace-local")[1]["result"] == "通过"
@@ -372,7 +373,7 @@ def test_odoo_trace_records_domain_conditions_without_returned_records(workspace
             assert offset == 10
             return [{"id": 7, "name": "Returned business row"}]
 
-    monkeypatch.setattr(server, "_odoo_client", lambda project: FakeOdoo())
+    monkeypatch.setattr(runtime, 'odoo_client', lambda project: FakeOdoo())
     result = call_tool("dy_odoo_record_search", {
         "trace_id": "odoo-domain",
         "model": "res.partner",
@@ -540,7 +541,7 @@ def test_memory_search_uses_optional_basic_memory_and_records_status_only(worksp
                 "has_more": False,
             }
 
-    monkeypatch.setattr(server, "BasicMemoryAdapter", FakeAdapter)
+    monkeypatch.setattr(basic_memory, 'BasicMemoryAdapter', FakeAdapter)
     result = call_tool("dy_memory_search", {"trace_id": "memory-search", "query": "交付台账"}, workspace)
 
     assert "error" not in result

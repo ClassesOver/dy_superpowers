@@ -41,7 +41,6 @@ def _write(workspace, row, module="expense"):
     if "\n" not in unsafe or suffix == ".json"])
 def test_rejected_attachment_never_enters_candidates_or_trace(tmp_path, monkeypatch, suffix, unsafe):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     source = tmp_path / ("qa" + suffix)
     safe = "https://example.com/public"
     if suffix == ".json":
@@ -261,7 +260,6 @@ def test_note_frontmatter_roundtrips_arbitrary_strings(tmp_path):
 
 def test_hierarchical_notes_keep_full_identifiers(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     result, error = server.execute_tool("dy_notes_write", {"trace_id": "notes-test",
         "slug": "expense/policy", "title": "费用政策", "body": "正文", "confirmed": True}, tmp_path)
     assert error is None and result["slug"] == "expense/policy"
@@ -273,7 +271,6 @@ def test_hierarchical_notes_keep_full_identifiers(tmp_path, monkeypatch):
 
 def test_notes_trace_records_page_and_redacted_content(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     args = {"trace_id": "notes-test", "slug": "expense/policy", "title": "费用政策",
             "body": "政策正文\npassword=synthetic-secret", "confirmed": True}
     _, error = server.execute_tool("dy_notes_write", args, tmp_path)

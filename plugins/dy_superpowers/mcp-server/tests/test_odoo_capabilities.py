@@ -8,12 +8,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
+from dy_superpowers_mcp.tools import runtime
 from dy_superpowers_mcp.odoo_jsonrpc import OdooRPCError, OdooSettings
 
 
-TOOLS = ('module_list_available', 'module_install', 'module_upgrade', 'module_uninstall',
+TOOLS = ('module_list_available', 'module_install', 'module_uninstall',
          'model_list', 'model_search_field', 'import_preview', 'import_execute', 'import_template',
-         'analyze_requirements', 'design_solution', 'validate_plan', 'record_delete', 'record_execute',
+         'analyze_requirements', 'design_solution', 'validate_plan', 'record_execute',
          'diagnostics_health_check')
 
 
@@ -83,8 +84,7 @@ def client(tmp_path, monkeypatch):
     for key in ('DY_ODOO_MODULE_WRITE_ENABLED', 'DY_ODOO_RECORD_DELETE_ENABLED', 'DY_ODOO_MODULE_ALLOWED'):
         monkeypatch.delenv(key, raising=False)
     fake = Client()
-    monkeypatch.setattr(server, '_odoo_client', lambda workspace: fake)
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
+    monkeypatch.setattr(runtime, 'odoo_client', lambda workspace: fake)
     return fake
 
 
@@ -118,17 +118,29 @@ def lifecycle():
                 backup_reference='已核实的备份编号', confirmed=False, dry_run=True)
 
 
-def test_module_preview_disabled_write_and_digest_binding(tmp_path, client, monkeypatch):
+def test_module_tools_are_hidden_and_rejected_while_switch_is_off(tmp_path, client):
+    listed = {tool['name'] for tool in server.handle({'id': 1, 'method': 'tools/list'}, tmp_path)['result']['tools']}
+    assert not {'dy_odoo_module_install', 'dy_odoo_module_uninstall'} & listed
+    _, error = server.execute_tool('dy_odoo_module_install', dict(trace_id='disabled', **lifecycle()), tmp_path)
+    assert error and error['code'] == -32602 and 'DY_ODOO_MODULE_WRITE_ENABLED' in error['message']
+    assert not client.calls
+
+
+def test_module_upgrade_is_not_registered():
+    assert 'dy_odoo_module_upgrade' not in server.TOOL_SCHEMAS
+
+
+def test_module_preview_and_digest_binding(tmp_path, client, monkeypatch):
+    monkeypatch.setenv('DY_ODOO_MODULE_WRITE_ENABLED', '1')
+    monkeypatch.setenv('DY_ODOO_MODULE_ALLOWED', 'dy_expense')
+    listed = {tool['name'] for tool in server.handle({'id': 1, 'method': 'tools/list'}, tmp_path)['result']['tools']}
+    assert {'dy_odoo_module_install', 'dy_odoo_module_uninstall'} <= listed
     args = lifecycle()
     preview = call(tmp_path, 'dy_odoo_module_install', **args)
     assert preview['execution_authorized'] is False
     assert not any(c[1].startswith('button_immediate_') for c in client.calls)
     calls_after_preview = len(client.calls)
     args.update(dry_run=False, confirmed=True, confirmation_digest=preview['confirmation_digest'])
-    _, error = server.execute_tool('dy_odoo_module_install', dict(trace_id='disabled', **args), tmp_path)
-    assert error and len(client.calls) == calls_after_preview
-    monkeypatch.setenv('DY_ODOO_MODULE_WRITE_ENABLED', '1')
-    monkeypatch.setenv('DY_ODOO_MODULE_ALLOWED', 'dy_expense')
     args['module_names'] = ['base']
     _, error = server.execute_tool('dy_odoo_module_install', dict(trace_id='changed', **args), tmp_path)
     assert error and len(client.calls) == calls_after_preview
@@ -183,13 +195,6 @@ def test_record_execute_cannot_dispatch_arbitrary_methods(tmp_path, client):
     assert error and not client.calls
 
 
-def test_record_delete_default_closed(tmp_path, client):
-    _, error = server.execute_tool('dy_odoo_record_delete', dict(trace_id='delete',
-        model='account.move', record_id=1, company_id=2, environment='demo', confirmed=True,
-        expected_write_date='2026-01-01', expected_values={'name': '甲'}, idempotency_key='delete-1'), tmp_path)
-    assert error and not client.calls
-
-
 def test_planning_is_candidate_only_and_plan_validation_rejects_cycles(tmp_path, client):
     requirements = call(tmp_path, 'dy_odoo_analyze_requirements', description='本期费用报销需要预算控制')
     assert requirements['execution_authorized'] is False
@@ -230,7 +235,7 @@ def test_module_wrong_environment_rejected_before_connection(tmp_path, client, m
     args.update(dry_run=False, confirmed=True, confirmation_digest=preview['confirmation_digest'])
     def forbidden(root):
         pytest.fail('环境不符不得创建连接')
-    monkeypatch.setattr(server, '_odoo_client', forbidden)
+    monkeypatch.setattr(runtime, 'odoo_client', forbidden)
     _, error = server.execute_tool('dy_odoo_module_install', dict(trace_id='other-env', **args), tmp_path)
     assert error and error['code'] == -32602
 
@@ -300,7 +305,7 @@ def test_planning_rejects_malformed_module_candidates(tmp_path, client):
 
 def test_health_configuration_failure_is_safe_and_specific(tmp_path, client, monkeypatch):
     from dy_superpowers_mcp.odoo_jsonrpc import OdooConfigurationError
-    monkeypatch.setattr(server, '_odoo_client', lambda root: (_ for _ in ()).throw(OdooConfigurationError('private-password')))
+    monkeypatch.setattr(runtime, 'odoo_client', lambda root: (_ for _ in ()).throw(OdooConfigurationError('private-password')))
     value = call(tmp_path, 'dy_odoo_diagnostics_health_check')
     assert value['overall'] == 'unhealthy'
     assert 'private-password' not in json.dumps(value)
@@ -335,7 +340,7 @@ def test_import_dry_run_never_executes(tmp_path, client, monkeypatch):
     args = dict(model='dy.fin.account.analytic.plan', company_id=2, environment='demo',
                 idempotency_key='dry-import', csv_data='name,code,company_id\n方案,B,2\n')
     preview = call(tmp_path, 'dy_odoo_import_preview', **args)
-    monkeypatch.setattr(server, '_odoo_client', lambda root: pytest.fail('dry_run不连接'))
+    monkeypatch.setattr(runtime, 'odoo_client', lambda root: pytest.fail('dry_run不连接'))
     result = call(tmp_path, 'dy_odoo_import_execute', **args, confirmed=True, dry_run=True,
                   confirmation_digest=preview['confirmation_digest'])
     assert result['status'] == 'confirmation_required'
@@ -367,7 +372,7 @@ def test_module_existing_lifecycle_readback(tmp_path, client, monkeypatch, opera
     assert client.state == ('uninstalled' if operation == 'uninstall' else 'installed')
 
 
-def test_module_upgrade_rejects_unconfirmed_installed_dependents(tmp_path, client, monkeypatch):
+def test_module_uninstall_rejects_unconfirmed_installed_dependents(tmp_path, client, monkeypatch):
     monkeypatch.setenv('DY_ODOO_MODULE_WRITE_ENABLED', '1')
     monkeypatch.setenv('DY_ODOO_MODULE_ALLOWED', 'dy_expense')
     client.state = 'installed'
@@ -380,8 +385,8 @@ def test_module_upgrade_rejects_unconfirmed_installed_dependents(tmp_path, clien
 
     monkeypatch.setattr(client, 'search_read', read)
     args = lifecycle()
-    preview = call(tmp_path, 'dy_odoo_module_upgrade', **args)
-    _, error = server.execute_tool('dy_odoo_module_upgrade', dict(trace_id='upgrade-dependent', **dict(
+    preview = call(tmp_path, 'dy_odoo_module_uninstall', **args)
+    _, error = server.execute_tool('dy_odoo_module_uninstall', dict(trace_id='uninstall-dependent', **dict(
         args, dry_run=False, confirmed=True, confirmation_digest=preview['confirmation_digest'])), tmp_path)
     assert error and error['code'] == -32602
     assert '反向依赖' in error['message']
@@ -427,7 +432,7 @@ def test_online_discovery_rejects_false_environment_label(tmp_path, client):
     assert not client.calls
 
 
-@pytest.mark.parametrize('operation', ['install', 'upgrade', 'uninstall'])
+@pytest.mark.parametrize('operation', ['install', 'uninstall'])
 def test_module_pending_global_changes_block_mutation(tmp_path, client, monkeypatch, operation):
     monkeypatch.setenv('DY_ODOO_MODULE_WRITE_ENABLED', '1')
     monkeypatch.setenv('DY_ODOO_MODULE_ALLOWED', 'dy_expense')

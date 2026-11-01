@@ -98,7 +98,7 @@ def test_odoo_evidence_requires_complete_successful_current_context(tmp_path,rep
     comparison={'expected_count':1,'expected_values':{'state':'installed'}}
     for key,value in dict(APP_URL='https://odoo.example.test',DB_NAME='UAT',APP_USER='operator',APP_PASSWORD='placeholder').items():
         monkeypatch.setenv(key,value)
-    from dy_superpowers_mcp.inspection_prepare import configured_environment_info
+    from dy_superpowers_mcp.qa_basis import configured_environment_info
     report['basis']['connection_fingerprint']=configured_environment_info()['connection_fingerprint']
     record=report['records'][0]
     evidence=dict(kind='odoo',reference='odoo://ir.module.module',trace_id='odoo-proof',model='ir.module.module',comparison=comparison)
