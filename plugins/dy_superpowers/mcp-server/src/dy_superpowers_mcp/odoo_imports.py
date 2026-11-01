@@ -117,6 +117,10 @@ def execute(workspace, client_factory, args):
         state = {'digest': fingerprint, 'execution_status': 'unknown'}
         atomic_write(journal, json.dumps(state))
         result = _execute_rows(workspace, client, args, candidate)
+        if result['attempted'] == 0:
+            # 首行预检即失败时远端未写入任何数据，释放幂等键，允许修正后用同一批次重试。
+            journal.unlink(missing_ok=True)
+            return result
         if result['attempted'] == result['total_rows'] and all(r.get('execution_status') == 'succeeded' for r in result['results']):
             state['execution_status'] = 'succeeded'
             atomic_write(journal, json.dumps(state))

@@ -25,9 +25,12 @@ def discover(client, kind, arguments):
         domain += ['|', ['name', 'ilike', arguments['query']], ['field_description', 'ilike', arguments['query']]]
         if arguments.get('model'):
             domain.append(['model', '=', arguments['model']])
-    rows = client.search_read(model, domain, fields, limit, offset)
+    # 多取一条判断是否还有下一页，避免恰好满页时误报 has_more。
+    rows = client.search_read(model, domain, fields, limit + 1, offset)
+    has_more = len(rows) > limit
+    rows = rows[:limit]
     return {key: rows, 'count': len(rows), 'offset': offset, 'limit': limit,
-            'has_more': len(rows) == limit, 'next_offset': offset + limit if len(rows) == limit else None}
+            'has_more': has_more, 'next_offset': offset + limit if has_more else None}
 
 
 def installed_modules(client):

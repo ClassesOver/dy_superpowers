@@ -24,7 +24,7 @@ if __name__ == '__main__':
         raise
 
 from dy_superpowers_mcp import TraceStore, WorkspaceMemory
-from dy_superpowers_mcp.memory import WRITABLE_MEMORY_FILES, list_notes, module_memory_files, module_memory_path, read_note, validate_module, write_note
+from dy_superpowers_mcp.memory import NOTE_SLUG, WRITABLE_MEMORY_FILES, list_notes, module_memory_files, module_memory_path, read_note, validate_module, write_note
 from dy_superpowers_mcp.trace import TRACE_CODE_PATTERN, TRACE_CONTEXT_FIELDS, TRACE_ID_PATTERN
 from dy_superpowers_mcp.telemetry import current_trace_context, initialize_telemetry, mark_otel_error, operation_span, record_otel_event, tool_span
 from dy_superpowers_mcp.odoo_jsonrpc import OdooConfigurationError, OdooReadClient, OdooRPCError, OdooSettings, validate_read_arguments
@@ -35,7 +35,7 @@ from dy_superpowers_mcp.configuration import CONFIGURATION_SCHEMAS, write_config
 from dy_superpowers_mcp.odoo_capabilities import SCHEMAS as ODOO_CAPABILITY_SCHEMAS, DESCRIPTIONS as ODOO_CAPABILITY_DESCRIPTIONS
 from dy_superpowers_mcp import odoo_discovery, odoo_imports, odoo_operations, odoo_planning
 from dy_superpowers_mcp.research import read_module_records, read_record, record_summary, write_record
-from dy_superpowers_mcp.qa_store import read_qa, commit_qa, export_qa, parse_qa_workbook
+from dy_superpowers_mcp.qa_store import read_qa, commit_qa, export_qa, parse_qa_workbook, normalize_scope
 from dy_superpowers_mcp.reports import export_report_pdf, read_report, save_report
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 from dy_superpowers_mcp.inspection import validate_inspection
@@ -52,6 +52,8 @@ MEMORY_READ_FILES = [
 MEMORY_WRITE_FILES = sorted(WRITABLE_MEMORY_FILES)
 SESSION_INDEX_FILES = tuple(MEMORY_READ_FILES)
 SESSION_SOURCES = {"startup", "resume", "clear", "compact", "fork"}
+# 两种协议入口共用同一服务版本，避免客户端看到不一致的 serverInfo。
+SERVER_VERSION = "0.2.0"
 
 # 安装即用：连接与令牌允许放在工作区 .env（已被 .gitignore 排除），服务启动时读取。
 # 只认白名单键、不覆盖已设置的环境变量、不回显任何值。
@@ -518,11 +520,12 @@ def _handle_odoo_record_read(name: str, arguments: dict, workspace: Path, store:
 def _handle_odoo_capability(name, arguments, workspace, store, span_id, otel_span):
     try:
         return _run_odoo_capability(name, arguments, workspace, store, span_id, otel_span)
-    except OdooConfigurationError as exc:
-        raise ToolRequestError(-32602, str(exc)) from exc
     except OdooRPCError as exc:
         _clear_odoo_client()
         raise ToolRequestError(-32603, '系统查询失败，请核对连接与权限；不返回远端正文') from exc
+    except ValueError as exc:
+        # OdooConfigurationError 及答卷、知识库的参数校验错误都属于可修正的请求错误。
+        raise ToolRequestError(-32602, str(exc)) from exc
 
 
 def _run_odoo_capability(name, arguments, workspace, store, span_id, otel_span):
@@ -726,7 +729,7 @@ def _handle_research_progress(name: str, arguments: dict, workspace: Path, store
             raise ValueError('intent 必须为 research、progress、export、import 或 confirm')
         scope, scope_id = arguments.get('scope'), arguments.get('scope_id')
         result = read_qa(workspace, module, scope_id)
-        if scope is not None and result.get('scope') != scope:
+        if scope is not None and result.get('scope') != normalize_scope(scope):
             raise ValueError('请按最新 QA 选择真实 scope_id')
         result['unknown_count'] = 0
         result['intent'] = intent
@@ -792,7 +795,7 @@ TOOL_REGISTRY = {
         '确认后批次保存当前模板问题答案；答案整项替换，其他问题保留，返回同步版本答卷路径。',
         {'type': 'object', 'additionalProperties': False,
          'required': ['trace_id', 'module', 'scope', 'template_revision', 'answers', 'batch_id', 'confirmed'],
-         'properties': {'trace_id': {'type': 'string'}, 'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
+         'properties': {'trace_id': {'type': 'string', 'pattern': TRACE_ID_PATTERN.pattern}, 'module': {'type': 'string', 'enum': ['expense', 'general-ledger']},
              'scope': {'type': 'string', 'minLength': 1, 'maxLength': 500}, 'scope_id': {'type': 'string'},
              'template_revision': {'type': 'string'}, 'batch_id': {'type': 'string', 'minLength': 1},
              'confirmed': {'type': 'boolean'}, 'answers': {'type': 'array', 'items': {
@@ -813,12 +816,12 @@ TOOL_REGISTRY = {
     'dy_research_answers_import': (
         '仅解析工作区已登记答卷为候选，不写入记忆，不自动提升完整性。',
         {'type': 'object', 'additionalProperties': False, 'required': ['trace_id', 'path'],
-         'properties': {'trace_id': {'type': 'string'}, 'path': {'type': 'string', 'minLength': 1}}},
+         'properties': {'trace_id': {'type': 'string', 'pattern': TRACE_ID_PATTERN.pattern}, 'path': {'type': 'string', 'minLength': 1}}},
         _handle_research_answers_import,
     ),
     'dy_session_initialize': (
         '初始化或恢复当前工作区会话并返回项目记忆索引；需要时使用记忆工具读取完整内容。',
-        {'type': 'object',
+        {'type': 'object', 'additionalProperties': False,
          'required': ['trace_id', 'source'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'source': {'type': 'string', 'enum': ['clear', 'compact', 'fork', 'resume', 'startup']}}},
@@ -875,7 +878,7 @@ TOOL_REGISTRY = {
         {'type': 'object',
          'required': ['trace_id', 'slug', 'title', 'body', 'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
-                        'slug': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9/-]{0,120}$'},
+                        'slug': {'type': 'string', 'maxLength': 121, 'pattern': NOTE_SLUG.pattern},
                         'title': {'type': 'string', 'minLength': 1, 'maxLength': 120},
                         'body': {'type': 'string', 'minLength': 1},
                         'tags': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 10},
@@ -891,7 +894,7 @@ TOOL_REGISTRY = {
         {'type': 'object',
          'required': ['trace_id', 'slug'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
-                        'slug': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9/-]{0,120}$'}}},
+                        'slug': {'type': 'string', 'maxLength': 121, 'pattern': NOTE_SLUG.pattern}}},
         _handle_notes_read,
     ),
     'dy_notes_list': (
@@ -967,7 +970,7 @@ TOOL_REGISTRY = {
                         'legacy': {'type': 'boolean', 'default': False},
                         'question_ids': {'type': 'array', 'items': {'type': 'string'}},
                         'view': {'type': 'string', 'enum': ['qa', 'current', 'summary', 'full'], 'default': 'qa',
-                                 'description': '默认qa。current/summary/full仅legacy=true历史视图；不指定legacy不会读取旧答案。'},
+                                 'description': '默认qa。current/summary/full仅legacy=true历史视图；legacy=true且省略view时按full返回。不指定legacy不会读取旧答案。'},
                         'checks': {'type': 'array', 'minItems': 1, 'maxItems': 100, 'items': {
                             'type': 'object', 'additionalProperties': False,
                             'required': ['check_order', 'research_id'],
@@ -1253,7 +1256,7 @@ def handle(request: dict, workspace: Path) -> dict | None:
     if isinstance(method, str) and method.startswith("notifications/"):
         return None
     if method == "initialize":
-        return response(request_id, {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "dy_superpowers", "version": "0.1.0"}})
+        return response(request_id, {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "dy_superpowers", "version": SERVER_VERSION}})
     if method == "ping":
         return response(request_id, {})
     if method == "tools/list":
@@ -1302,7 +1305,7 @@ def run_mcp(workspace: Path) -> None:
             raise MCPError(error["code"], error["message"])
         return types.CallToolResult(content=[types.TextContent(type="text", text=_mcp_result(result)["content"][0]["text"])])
 
-    server = Server("dy_superpowers", version="0.2.0", on_list_tools=list_tools, on_call_tool=call_tool)
+    server = Server("dy_superpowers", version=SERVER_VERSION, on_list_tools=list_tools, on_call_tool=call_tool)
     # SDK 的自动遥测可能包含请求正文；插件自身不启用外部遥测，只保留本地 JSONL trace。
     try:
         from mcp.server._otel import OpenTelemetryMiddleware

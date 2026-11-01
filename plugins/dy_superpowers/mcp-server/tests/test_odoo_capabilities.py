@@ -110,7 +110,7 @@ def test_discovery_reads_bounded_actual_metadata(tmp_path, client, name, extra, 
     value = call(tmp_path, 'dy_odoo_' + name, offset=4, limit=25, **extra)
     assert value['offset'] == 4 and value['limit'] == 25
     assert client.calls[-1][0] == model
-    assert client.calls[-1][-2:] == (25, 4)
+    assert client.calls[-1][-2:] == (26, 4)  # 多取一条判断 has_more
 
 
 def lifecycle():

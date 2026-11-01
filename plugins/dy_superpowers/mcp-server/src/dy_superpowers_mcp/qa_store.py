@@ -83,6 +83,11 @@ def publication_lock(workspace, module):
         yield
 
 
+def normalize_scope(scope):
+    """与保存时相同的范围文本规范化，供读取时比较。"""
+    return _scope_text(scope)
+
+
 def _scope_text(scope):
     text = _safe_text(scope, '适用范围')
     text = re.sub(r'\s*/\s*', '/', unicodedata.normalize('NFKC', text).strip())
@@ -384,6 +389,8 @@ def commit_qa(workspace, module, *, scope, scope_id=None, template_revision, ans
         for value in values:
             if not value['answer'] and 'attachments' not in value:
                 continue
+            if not value['answer'] and value['question_id'] not in prior:
+                raise ValueError(f'问题 {value["question_id"]} 尚无已确认答案，不能只提交附件；请同时提供答案')
             expected = prior.get(value['question_id'], {}).get('revision')
             if value['expected_revision'] != expected:
                 raise ValueError(f'问题 {value["question_id"]} 修订冲突，请重新读取并确认')
