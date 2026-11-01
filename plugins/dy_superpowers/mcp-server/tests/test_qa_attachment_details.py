@@ -9,6 +9,7 @@ import pytest
 from openpyxl import load_workbook
 
 import server
+from mcp_helpers import call_tool
 from dy_superpowers_mcp.qa_store import commit_qa, export_qa, parse_qa_workbook, read_qa
 from dy_superpowers_mcp.qa_templates import load_template
 
@@ -42,10 +43,9 @@ def _business_rows(path):
 
 def test_chat_attachment_details_mcp_save_and_both_workbooks_preserve_real_columns(tmp_path):
     bound = _bound(tmp_path)
-    request = dict(jsonrpc='2.0', id=1, method='tools/call', params=dict(name='dy_research_answers_save', arguments=dict(
+    response = call_tool('dy_research_answers_save', dict(
         trace_id='details-save', module='expense', scope='甲院/一期', template_revision=load_template('expense')['revision'],
-        answers=[_answer(bound)], batch_id='实时回答附件', confirmed=True)))
-    response = server.handle(request, tmp_path)
+        answers=[_answer(bound)], batch_id='实时回答附件', confirmed=True), tmp_path)
     assert 'error' not in response, response
     state = json.loads(response['result']['content'][0]['text'])
     assert state['records'][0]['attachments'] == [bound]

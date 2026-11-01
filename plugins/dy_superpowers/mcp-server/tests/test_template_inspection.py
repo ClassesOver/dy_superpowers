@@ -112,20 +112,7 @@ def test_inspection_and_history_do_not_read_static_matrix(tmp_path, monkeypatch,
     assert validate(tmp_path, report)['valid'] is True
     result = call(tmp_path, 'dy_inspection_report_save', report=report, confirmed=True)
     assert (tmp_path / result['path']).is_file()
-    from dy_superpowers_mcp.research import write_record
-    write_record(tmp_path, dict(module=module, check_order='historical', research_id='01',
-        config_item='历史记录', conclusion='仅供历史回查，不作为当前巡检依据', scope='历史范围',
-        confirmed=True, confirmed_by='测试', confirmed_at='2026-10-30'))
     assert call(tmp_path, 'dy_module_memory_read', module=module)['confirmed_count'] == 1
-
-
-def test_legacy_answers_never_enter_default_read_or_progress(tmp_path):
-    from dy_superpowers_mcp.research import write_record
-    write_record(tmp_path, dict(module='expense', check_order='1', research_id='01', config_item='历史',
-        conclusion='历史答案', scope='历史范围', confirmed=True, research_complete=True, confirmed_by='测试', confirmed_at='2026-10-30'))
-    assert call(tmp_path, 'dy_module_memory_read', module='expense')['records'] == []
-    assert call(tmp_path, 'dy_research_progress', module='expense', intent='progress')['answered'] == 0
-    assert call(tmp_path, 'dy_module_memory_read', module='expense', legacy=True)['records']
 
 
 @pytest.mark.parametrize('module', ['expense', 'general-ledger'])
@@ -347,7 +334,6 @@ def test_read_multiple_scopes_keeps_progress_independent(tmp_path):
 def test_new_memory_view_rejects_legacy_filters_instead_of_ignoring(tmp_path, filters):
     result, error = server.execute_tool('dy_module_memory_read', dict(trace_id='filter-boundary', module='expense', **filters), tmp_path)
     assert result is None and error['code'] == -32602
-    assert 'legacy' in error['message']
 
 
 def test_manual_signature_and_odoo_evidence_cannot_postdate_verification(tmp_path):

@@ -2,10 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
-import json
 from pathlib import Path
-import re
 import sqlite3
 import struct
 from typing import Any, Iterable
@@ -168,11 +165,3 @@ class SemanticIndex:
                                        'semantic_score': round(score, 6), 'knowledge_type': 'source'}))
         scored.sort(key=lambda item: (-item[0], item[1]['path'], item[1]['line']))
         return [row for _, row in scored[:limit]]
-
-
-def model_file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open('rb') as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b''):
-            digest.update(block)
-    return digest.hexdigest()

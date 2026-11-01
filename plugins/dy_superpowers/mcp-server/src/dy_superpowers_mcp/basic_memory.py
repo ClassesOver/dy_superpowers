@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .memory import MEMORY_FILES, WorkspaceMemory, module_memory_files, validate_module
+from .memory import MEMORY_FILES, WorkspaceMemory, validate_module
 
 
 BASIC_MEMORY_VERSION = "0.23.2"
@@ -100,7 +100,6 @@ class BasicMemoryAdapter:
                 raise ValueError("记忆与索引目录不允许使用符号链接")
         for name in MEMORY_FILES:
             WorkspaceMemory(self.workspace)._paths(name)
-        module_memory_files(self.workspace)
 
     def _filter_results(self, results: list[Any], module: str | None) -> list[dict[str, Any]]:
         normalized = []
@@ -201,8 +200,6 @@ class BasicMemoryAdapter:
         if module is None:
             sources.extend((name, WorkspaceMemory(self.workspace).read(name), None)
                            for name in sorted(MEMORY_FILES))
-        for path in module_memory_files(self.workspace, module):
-            sources.append((str(path.relative_to(self.memory_root)), path.read_text(encoding="utf-8"), module))
         for name, content, module_name in sources:
             matches = [
                 line.strip()

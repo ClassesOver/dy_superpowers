@@ -11,10 +11,9 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 import server
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
-from dy_superpowers_mcp.memory import WorkspaceMemory, module_memory_path
+from dy_superpowers_mcp.memory import WorkspaceMemory
 from dy_superpowers_mcp.knowledge import module_info
 from dy_superpowers_mcp.odoo_jsonrpc import OdooReadClient, OdooSettings
-from dy_superpowers_mcp.research import read_record, write_record, _legacy_visible
 from dy_superpowers_mcp.trace import TraceStore, sanitize_trace_event
 
 
@@ -121,35 +120,8 @@ def test_malformed_basic_memory_config_falls_back(tmp_path, monkeypatch, config)
 
 def test_trace_preserves_operation_metadata_without_body():
     event = {"model": "account.move", "module": "account", "count": 3,
-             "research_id": "01", "content": "业务正文"}
+             "scope_id": "scope-1", "content": "业务正文"}
     assert sanitize_trace_event(event) == {key: value for key, value in event.items() if key != "content"}
-
-
-def test_manual_visible_edit_is_rejected_before_research_use(tmp_path):
-    write_record(tmp_path, research_data())
-    path = module_memory_path(tmp_path, "account")
-    current = read_record(tmp_path, "account", "1", "01")
-    current.pop("revision")
-    path.write_text("\n".join(_legacy_visible(current)))
-    path.write_text(path.read_text().replace("- 调研结论：按月关闭", "- 调研结论：按年关闭"))
-    with pytest.raises(ValueError, match="不一致"):
-        read_record(tmp_path, "account", "1", "01")
-    with pytest.raises(ValueError, match="不一致"):
-        write_record(tmp_path, research_data(conclusion="新结论"))
-
-
-def test_research_keeps_independent_current_scope_and_history(tmp_path):
-    write_record(tmp_path, research_data())
-    write_record(tmp_path, research_data(scope="公司B", conclusion="按季关闭"))
-    write_record(tmp_path, research_data(conclusion="按月复核关闭", expected_revision=read_record(tmp_path, "account", "1", "01", scope="公司A")["revision"]))
-    with pytest.raises(ValueError, match="适用范围"):
-        read_record(tmp_path, "account", "1", "01")
-    first = read_record(tmp_path, "account", "1", "01", scope="公司A")
-    second = read_record(tmp_path, "account", "1", "01", scope="公司B")
-    assert first["conclusion"] == "按月复核关闭"
-    assert first["history"][0]["conclusion"] == "按月关闭"
-    assert second["conclusion"] == "按季关闭"
-    assert second["history"] == []
 
 
 def test_memory_update_requires_original_content(tmp_path):
@@ -220,19 +192,3 @@ def test_memory_conflict_is_actionable_tool_error(tmp_path, monkeypatch):
     assert result is None
     assert error["code"] == -32602
     assert "冲突" in error["message"]
-
-
-def test_scoped_research_is_accessible_through_tool(tmp_path, monkeypatch):
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    write_record(tmp_path, research_data())
-    write_record(tmp_path, research_data(scope="公司B"))
-    result, error = server.execute_tool("dy_module_memory_read", {"legacy": True,
-        "trace_id": "scope-read", "module": "account", "check_order": "1", "research_id": "01", "scope": "公司A",
-    }, tmp_path)
-    assert error is None
-    assert result["records"][0]["scope"] == "公司A"
-    result, error = server.execute_tool("dy_module_memory_read", {"legacy": True,
-        "trace_id": "scope-ambiguous", "module": "account", "check_order": "1", "research_id": "01",
-    }, tmp_path)
-    assert result is None
-    assert error["code"] == -32602

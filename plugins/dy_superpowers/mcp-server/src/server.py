@@ -66,22 +66,6 @@ def load_workspace_env(workspace: Path) -> list[str]:
     return loaded
 
 
-def response(request_id: object, result: object = None, error: dict | None = None) -> dict:
-    payload = {"jsonrpc": "2.0", "id": request_id}
-    payload["error" if error is not None else "result"] = error if error is not None else result
-    return payload
-
-
-def parse_request(line: str) -> dict:
-    try:
-        request = json.loads(line)
-    except json.JSONDecodeError:
-        return response(None, error={"code": -32700, "message": "parse error"})
-    if not isinstance(request, dict) or request.get("jsonrpc") != "2.0":
-        return response(None, error={"code": -32600, "message": "invalid request"})
-    return request
-
-
 def execute_tool(name: str, arguments: object, workspace: Path) -> tuple[object, dict | None]:
     if not isinstance(arguments, dict):
         return None, {"code": -32602, "message": "tool arguments must be an object"}
@@ -140,28 +124,6 @@ def execute_tool(name: str, arguments: object, workspace: Path) -> tuple[object,
 def _mcp_result(value: object) -> dict:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     return {"content": [{"type": "text", "text": text}]}
-
-
-def handle(request: dict, workspace: Path) -> dict | None:
-    method = request.get("method")
-    request_id = request.get("id")
-    if isinstance(method, str) and method.startswith("notifications/"):
-        return None
-    if method == "initialize":
-        return response(request_id, {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "dy_superpowers", "version": PLUGIN_VERSION}})
-    if method == "ping":
-        return response(request_id, {})
-    if method == "tools/list":
-        return response(request_id, {"tools": [{"name": name, "description": spec[0], "inputSchema": spec[1]} for name, spec in enabled_tools()]})
-    if method != "tools/call":
-        return response(request_id, error={"code": -32601, "message": f"method not found: {method}"})
-    params = request.get("params")
-    if not isinstance(params, dict):
-        return response(request_id, error={"code": -32602, "message": "params must be an object"})
-    value, error = execute_tool(params.get("name"), params.get("arguments") or {}, workspace)
-    if error is not None:
-        return response(request_id, error=error)
-    return response(request_id, _mcp_result(value))
 
 
 def resolve_workspace(argv=None) -> Path:

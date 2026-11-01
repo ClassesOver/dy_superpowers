@@ -12,9 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .qa_store import publication_lock
+from .qa_templates import MODULE_LABELS
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
-_MODULE_NAMES = {"expense": "费用", "general-ledger": "总账"}
 _MARKDOWN_SPECIAL = set(r"\`*_{}[]<>()#+-.!|")
 
 
@@ -220,7 +220,7 @@ def export_report_pdf(workspace: str | Path, module: str, report_id: str) -> tup
 def _render_report(module: str, report_id: str, report: dict, validation: dict) -> str:
     from .qa_templates import load_template
     questions = {q['question_id']: q for q in load_template(module)['questions']}
-    lines = [f'# {_MODULE_NAMES.get(module, module)}模块巡检报告', '',
+    lines = [f'# {MODULE_LABELS.get(module, module)}模块巡检报告', '',
         f'- 报告编号：{report_id}', f'- 校验时间：{validation["validated_at"]}',
         f'- 门禁：{validation["gate"]}', f'- 范围：{_markdown_text(report.get("scope", "未提供业务范围"))}',
         f'- 模板覆盖：{len(report["records"])}/{len(questions)} 提取点；未检查项仍保留。', '',

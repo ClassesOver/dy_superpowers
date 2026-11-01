@@ -101,7 +101,7 @@ async def _workflow(workspace, module, connection, *, live=False):
             discovered = {item.name for item in (await session.list_tools()).tools}
             required = {"dy_session_initialize", "dy_knowledge_module_info", "dy_odoo_module_list_installed",
                         "dy_odoo_module_info", "dy_odoo_model_fields", "dy_odoo_record_search",
-                        "dy_odoo_record_read", "dy_module_memory_read", "dy_research_record_write",
+                        "dy_odoo_record_read", "dy_module_memory_read", "dy_research_answers_save",
                         "dy_inspection_validate", "dy_inspection_report_save", "dy_inspection_report_read",
                         "dy_trace_read"}
             assert required <= discovered

@@ -29,7 +29,7 @@ def _handle_session_initialize(name: str, arguments: dict, workspace: Path, stor
             state = dict(module=module, scope_mode='unscoped', scopes=[], template_revision=template['revision'],
                          answer_version=None, total=len(template['questions']), answered=0, confirmed_count=0)
         summaries.append({k: state[k] for k in ('module', 'scope_mode', 'scopes', 'template_revision', 'answer_version', 'total', 'answered', 'confirmed_count')})
-    context += '\n最新模板 QA 概要（不注入答案正文）：' + json.dumps(summaries, ensure_ascii=False) + '\n默认入口 dy_module_memory_read；历史旧存储须 legacy=true。'
+    context += '\n最新模板 QA 概要（不注入答案正文）：' + json.dumps(summaries, ensure_ascii=False) + '\n默认入口 dy_module_memory_read。'
     event = {'event': 'session.initialize', 'operation': 'session_start', 'tool': name, 'status': 'ok', 'source_ref': source, 'span_id': span_id}
     append_trace(store, arguments['trace_id'], event)
     return context

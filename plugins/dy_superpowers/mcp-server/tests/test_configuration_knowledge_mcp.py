@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
+from mcp_helpers import listed_tools
 from dy_superpowers_mcp import knowledge as knowledge_lib
 
 
@@ -116,7 +117,7 @@ def test_configuration_tools_are_discoverable_but_not_generic_rpc(tool):
 
 def test_configuration_write_tools_are_hidden_and_rejected_while_switch_is_off(tmp_path, monkeypatch):
     monkeypatch.delenv('DY_ODOO_CONFIG_WRITE_ENABLED', raising=False)
-    listed = {tool['name'] for tool in server.handle({'id': 1, 'method': 'tools/list'}, tmp_path)['result']['tools']}
+    listed = {tool['name'] for tool in listed_tools()}
     assert not {'dy_odoo_record_create', 'dy_odoo_record_update', 'dy_odoo_import_execute'} & listed
     arguments = {'trace_id': 'config-preview',
         'environment': {'url': 'https://odoo.example.test', 'database': 'test'},
@@ -131,7 +132,7 @@ def test_configuration_write_tools_are_hidden_and_rejected_while_switch_is_off(t
 
 def test_configuration_preview_is_available_once_switch_is_on(tmp_path, monkeypatch):
     monkeypatch.setenv('DY_ODOO_CONFIG_WRITE_ENABLED', '1')
-    listed = {tool['name'] for tool in server.handle({'id': 1, 'method': 'tools/list'}, tmp_path)['result']['tools']}
+    listed = {tool['name'] for tool in listed_tools()}
     assert {'dy_odoo_record_create', 'dy_odoo_record_update', 'dy_odoo_import_execute'} <= listed
     preview, error = server.execute_tool('dy_odoo_record_create', {'trace_id': 'config-preview-on',
         'environment': {'url': 'https://odoo.example.test', 'database': 'test'},

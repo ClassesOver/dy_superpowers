@@ -24,46 +24,6 @@ def validate_module(module: str) -> str:
     return module
 
 
-def module_memory_path(workspace: str | Path, module: str) -> Path:
-    workspace_path = Path(workspace).resolve()
-    module = validate_module(module)
-    raw_memory_root = workspace_path / ".dy_superpowers"
-    raw_modules_dir = raw_memory_root / "modules"
-    raw_module_dir = raw_modules_dir / module
-    if any(path.is_symlink() for path in (raw_memory_root, raw_modules_dir, raw_module_dir)):
-        raise ValueError("模块记忆目录不允许使用符号链接")
-    memory_root = raw_memory_root.resolve()
-    module_dir = raw_module_dir.resolve()
-    if not memory_root.is_relative_to(workspace_path) or not module_dir.is_relative_to(memory_root):
-        raise ValueError("模块记忆必须位于当前工作区")
-    research_path = module_dir / "research.md"
-    if research_path.is_symlink() or not research_path.resolve().is_relative_to(memory_root):
-        raise ValueError("模块记忆文件必须位于当前工作区且不能使用符号链接")
-    return research_path
-
-
-def module_memory_files(workspace: str | Path, module: str | None = None) -> list[Path]:
-    workspace_path = Path(workspace).resolve()
-    raw_root = workspace_path / ".dy_superpowers" / "modules"
-    if workspace_path.joinpath(".dy_superpowers").is_symlink() or raw_root.is_symlink():
-        raise ValueError("模块记忆目录必须位于当前工作区且不能使用符号链接")
-    root = raw_root.resolve()
-    if not root.exists():
-        return []
-    if root.is_symlink() or not root.is_relative_to(workspace_path):
-        raise ValueError("模块记忆目录必须位于当前工作区")
-    modules = [validate_module(module)] if module is not None else [
-        path.name for path in sorted(root.iterdir())
-        if path.is_dir() and not path.is_symlink() and MODULE_PATTERN.fullmatch(path.name)
-    ]
-    paths = []
-    for name in modules:
-        path = module_memory_path(workspace_path, name)
-        if path.is_file() and not path.is_symlink():
-            paths.append(path)
-    return paths
-
-
 class WorkspaceMemory:
     def __init__(self, workspace: str | Path) -> None:
         self.workspace = Path(workspace).resolve()

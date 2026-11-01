@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .storage import atomic_write, record_lock
+from .storage import record_lock
 
 SENSITIVE_PARTS = ("password", "passwd", "token", "secret", "api_key", "apikey", "credential",
                    "密码", "口令", "令牌", "密钥")
@@ -24,18 +24,18 @@ DOMAIN_PRIVATE_PARTS = (
 )
 REDACTED = "[REDACTED]"
 TRACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
-TRACE_FILE_PATTERN = re.compile(r"^(?P<trace_id>[A-Za-z0-9_-]{1,128})(?:\.(?P<day>\d{4}-\d{2}-\d{2}))?\.jsonl(?P<backup>\.1)?$")
+TRACE_FILE_PATTERN = re.compile(r"^(?P<trace_id>[A-Za-z0-9_-]{1,128})\.(?P<day>\d{4}-\d{2}-\d{2})\.jsonl(?P<backup>\.1)?$")
 EVENT_FIELDS = {
     "comparison_digest", "comparison_status",
     "event", "span_id", "parent_span_id", "operation", "tool", "status", "workspace_id",
     "duration_ms", "error_type", "error_code", "project_id", "target_id", "plan_version", "source_ref", "memory_file",
-    "skill", "check_order", "research_id", "result", "evidence_ref",
+    "skill", "result", "evidence_ref",
     "model", "module", "count", "result_count", "content_bytes", "backend", "has_more",
     "field_count", "domain_term_count", "limit", "offset", "domain", "domain_truncated", "active_test",
-    "found", "history_count", "requested_count", "revision_count",
+    "found", "requested_count",
     "memory_content", "research_content", "query", "content_truncated",
     "workflow_id", "call_id", "category",
-    "check_key", "scope_id", "revision", "research_status", "trace_context", "valid", "error_count", "expected_count", "report_id",
+    "scope_id", "trace_context", "valid", "error_count", "expected_count", "report_id",
     "intent", "next_action", "route", "percentage", "scope_mode", "answered", "total",
     "confirmed_count", "confirmed_percentage", "partial_count", "unknown_count", "unanswered_count",
 }
@@ -56,7 +56,7 @@ SECRET_VALUE_PATTERN = re.compile(
     r"(?P<bearer>Bearer\s+)([A-Za-z0-9._~+/=-]+)"
 )
 TRACE_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_.:/#-]{1,256}$")
-TRACE_CONTEXT_FIELDS = {"skill", "module", "check_order", "research_id", "scope_id", "revision", "environment", "connection_fingerprint", "question_id", "template_revision", "answer_version", "answer_revision", "requirement_id"}
+TRACE_CONTEXT_FIELDS = {"skill", "module", "scope_id", "environment", "connection_fingerprint", "question_id", "template_revision", "answer_version", "answer_revision", "requirement_id"}
 TRACE_RESULTS = {"通过", "部分通过", "不通过", "不适用", "待确认", "未检查", "未知", "ok", "error"}
 
 MAX_TRACE_DOMAIN_CHARS = 2048
@@ -248,32 +248,6 @@ class TraceStore:
             self._prune()
         return path
 
-    def _prune_legacy(self, path: Path, oldest_day: date):
-        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-        retained = []
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                timestamp = datetime.fromisoformat(json.loads(line)["timestamp"].replace("Z", "+00:00"))
-                if timestamp.tzinfo is None:
-                    raise ValueError("旧日志时间必须包含时区")
-            except (ValueError, KeyError, TypeError, AttributeError):
-                # 中断写入可能留下残行；保留原文供恢复，不能阻断其他追踪。
-                if datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).date() < oldest_day:
-                    path.unlink()
-                    return False
-                sys.stderr.write("旧追踪日志含损坏行，已保留原文；请恢复备份，其他追踪继续。\n")
-                return True
-            if timestamp.astimezone(timezone.utc).date() >= oldest_day:
-                retained.append(line)
-        if not retained:
-            path.unlink()
-            return False
-        if retained != lines:
-            atomic_write(path, "".join(retained))
-        return True
-
     def _prune(self):
         files = []
         oldest_day = datetime.now(timezone.utc).date() - timedelta(days=self.max_age_days - 1)
@@ -284,12 +258,8 @@ class TraceStore:
             if not path.is_file():
                 continue
             try:
-                day = match.group("day")
-                if day is not None:
-                    if date.fromisoformat(day) < oldest_day:
-                        path.unlink()
-                        continue
-                elif not self._prune_legacy(path, oldest_day):
+                if date.fromisoformat(match.group("day")) < oldest_day:
+                    path.unlink()
                     continue
             except ValueError:
                 # 包含 UTF-8 解码和文件名日期错误，按 mtime 清理并继续其他文件。

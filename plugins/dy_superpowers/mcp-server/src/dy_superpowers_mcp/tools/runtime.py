@@ -25,8 +25,6 @@ _trace_context: ContextVar[dict] = ContextVar('dy_trace_context', default={})
 @contextmanager
 def trace_scope(call_id: str, trace_context: dict | None = None) -> Iterator[None]:
     context = {key: value for key, value in (trace_context or {}).items() if key in TRACE_CONTEXT_FIELDS}
-    if all(key in context for key in ('module', 'check_order', 'research_id')):
-        context['check_key'] = f"{context['module']}:{context['check_order']}:{context['research_id']}"
     token = _trace_context.set({**context, 'call_id': call_id})
     try:
         yield

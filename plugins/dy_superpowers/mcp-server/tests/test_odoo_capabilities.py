@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 import server
+from mcp_helpers import listed_tools
 from dy_superpowers_mcp.tools import runtime
 from dy_superpowers_mcp.odoo_jsonrpc import OdooRPCError, OdooSettings
 
@@ -119,7 +120,7 @@ def lifecycle():
 
 
 def test_module_tools_are_hidden_and_rejected_while_switch_is_off(tmp_path, client):
-    listed = {tool['name'] for tool in server.handle({'id': 1, 'method': 'tools/list'}, tmp_path)['result']['tools']}
+    listed = {tool['name'] for tool in listed_tools()}
     assert not {'dy_odoo_module_install', 'dy_odoo_module_uninstall'} & listed
     _, error = server.execute_tool('dy_odoo_module_install', dict(trace_id='disabled', **lifecycle()), tmp_path)
     assert error and error['code'] == -32602 and 'DY_ODOO_MODULE_WRITE_ENABLED' in error['message']
@@ -133,7 +134,7 @@ def test_module_upgrade_is_not_registered():
 def test_module_preview_and_digest_binding(tmp_path, client, monkeypatch):
     monkeypatch.setenv('DY_ODOO_MODULE_WRITE_ENABLED', '1')
     monkeypatch.setenv('DY_ODOO_MODULE_ALLOWED', 'dy_expense')
-    listed = {tool['name'] for tool in server.handle({'id': 1, 'method': 'tools/list'}, tmp_path)['result']['tools']}
+    listed = {tool['name'] for tool in listed_tools()}
     assert {'dy_odoo_module_install', 'dy_odoo_module_uninstall'} <= listed
     args = lifecycle()
     preview = call(tmp_path, 'dy_odoo_module_install', **args)

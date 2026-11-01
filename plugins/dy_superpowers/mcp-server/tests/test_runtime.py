@@ -3,22 +3,18 @@ import hashlib
 import os
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
-from dy_superpowers_mcp import TraceStore, WorkspaceMemory, redact, validate_plan
+from dy_superpowers_mcp import TraceStore, WorkspaceMemory, redact
 from dy_superpowers_mcp import trace as trace_module
 from dy_superpowers_mcp.trace import REDACTED
-from dy_superpowers_mcp.research import read_record, write_record
-import server
+from mcp_helpers import call_tool, listed_tools
 from dy_superpowers_mcp import basic_memory
 from dy_superpowers_mcp.tools import runtime
-from server import handle
 
 
 @pytest.fixture(autouse=True)
@@ -41,13 +37,6 @@ def workspace(tmp_path, monkeypatch):
     return project
 
 
-def call_tool(name, arguments, project):
-    return handle(
-        {"id": 1, "method": "tools/call", "params": {"name": name, "arguments": arguments}},
-        Path(project),
-    )
-
-
 def research_arguments(**updates):
     arguments = {
         "module": "expense",
@@ -63,110 +52,6 @@ def research_arguments(**updates):
     }
     arguments.update(updates)
     return arguments
-
-
-def test_confirmed_research_record_is_stored_by_key_and_keeps_history(workspace):
-    first = research_arguments(trace_id="research-a")
-    saved = call_tool("dy_research_record_write", first, workspace)
-    assert "error" not in saved
-
-    updated = {**first, "trace_id": "research-b", "conclusion": "费用模块及OCR本期上线", "evidence_ref": "需求文档#7"}
-    updated["expected_revision"] = read_record(workspace, "expense", "1", "01")["revision"]
-    saved = call_tool("dy_research_record_write", updated, workspace)
-    assert "error" not in saved
-
-    read = call_tool(
-        "dy_module_memory_read",
-        {"legacy": True, "trace_id": "research-c", "module": "expense", "check_order": "1", "research_id": "01"},
-        workspace,
-    )
-    payload = json.loads(read["result"]["content"][0]["text"])["records"][0]
-    assert payload["conclusion"] == "费用模块及OCR本期上线"
-    assert payload["status"] == "confirmed"
-    assert payload["history"][0]["status"] == "superseded"
-    assert len(payload["history"]) == 1
-    research_trace = str(TraceStore(workspace, os.environ["CODEX_HOME"]).read("research-b"))
-    assert "费用模块及OCR本期上线" in research_trace
-    assert "需求文档#7" in research_trace
-
-
-def test_research_record_write_requires_confirmation(workspace):
-    arguments = research_arguments(trace_id="research-no", confirmed=False)
-    result = call_tool("dy_research_record_write", arguments, workspace)
-    assert "error" in result
-    assert not (workspace / ".dy_superpowers/modules/expense/research.md").exists()
-
-
-def test_research_write_uses_feishu_sender_and_system_time(workspace, monkeypatch):
-    sender_id = "ou_test_sender"
-    monkeypatch.setenv("FEISHU_CODEX_BOT_SENDER_USER_ID", sender_id)
-    arguments = research_arguments(trace_id="research-metadata-runtime",
-                                   confirmed_by="伪造确认人", confirmed_at="2020-01-01")
-    arguments.pop("confirmed_by")
-    arguments.pop("confirmed_at")
-    saved = call_tool("dy_research_record_write", arguments, workspace)
-    assert "error" not in saved
-
-    read = call_tool(
-        "dy_module_memory_read",
-        {"legacy": True, "trace_id": "research-metadata-read", "module": "expense", "check_order": "1", "research_id": "01"},
-        workspace,
-    )
-    record = json.loads(read["result"]["content"][0]["text"])["records"][0]
-    assert record["status"] == "confirmed"
-    assert record["confirmed_by"] == sender_id
-    confirmed_at = datetime.fromisoformat(record["confirmed_at"])
-    assert confirmed_at.tzinfo is not None
-    assert confirmed_at.year >= 2026
-    required = server.TOOL_REGISTRY["dy_research_record_write"][1]["required"]
-    assert "confirmed_by" not in required
-    assert "confirmed_at" not in required
-
-
-def test_research_record_write_rejects_invalid_key_and_date(workspace):
-    with pytest.raises(ValueError, match="check_order"):
-        write_record(workspace, research_arguments(check_order="../outside"))
-    with pytest.raises(ValueError, match="confirmed_at"):
-        write_record(workspace, research_arguments(confirmed_at="yesterday"))
-
-
-def test_research_record_write_rejects_workspace_symlink_escape(workspace, tmp_path):
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (workspace / ".dy_superpowers").symlink_to(outside, target_is_directory=True)
-    with pytest.raises(ValueError):
-        write_record(workspace, research_arguments())
-
-
-def test_concurrent_research_updates_preserve_every_revision(workspace):
-    def update(index):
-        # 每次冲突后重新读取；测试重试只针对这些人工构造的独立确认修订。
-        for _ in range(8):
-            current = read_record(workspace, "expense", "1", "01")
-            arguments = research_arguments(conclusion=f"费用模块第{index}次确认", evidence_ref=f"需求文档#{index}")
-            if current:
-                arguments["expected_revision"] = current["revision"]
-            try:
-                return write_record(workspace, arguments)
-            except ValueError as exc:
-                if "冲突" not in str(exc) and "expected_revision" not in str(exc):
-                    raise
-        raise AssertionError("并发修订未能在重试预算内提交")
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        results = list(executor.map(update, range(8)))
-
-    record = json.loads(
-        call_tool(
-            "dy_module_memory_read",
-            {"legacy": True, "trace_id": "research-read", "module": "expense", "check_order": "1", "research_id": "01"},
-            workspace,
-        )["result"]["content"][0]["text"]
-    )["records"][0]
-    assert all(result["stored"] for result in results)
-    assert record["status"] == "confirmed"
-    assert len(record["history"]) == 7
-    assert all(revision["status"] == "superseded" for revision in record["history"])
 
 
 def test_odoo_record_read_uses_explicit_read_operation(workspace, monkeypatch):
@@ -235,13 +120,6 @@ def test_odoo_read_requires_connection_environment(workspace):
     assert "APP_URL" in result["error"]["message"]
 
 
-def test_invalid_json_is_reported_without_crashing_server():
-    from server import parse_request
-
-    result = parse_request("{bad json")
-    assert result["error"]["code"] == -32700
-
-
 def test_trace_redacts_sensitive_fields():
     assert redact({"token": "secret", "nested": {"password": "pw"}}) == {
         "token": REDACTED,
@@ -297,10 +175,10 @@ def test_trace_rejects_path_separators(workspace):
 
 def test_trace_keeps_inspection_metadata(workspace):
     store = TraceStore(workspace, os.environ["CODEX_HOME"])
-    store.append("trace-1", {"event": "inspection.result", "skill": "expense-inspection", "check_order": "1", "research_id": "01", "result": "通过", "evidence_ref": "odoo://x"})
+    store.append("trace-1", {"event": "inspection.result", "skill": "expense-inspection", "scope_id": "scope-1", "result": "通过", "evidence_ref": "odoo://x"})
     record = store.read("trace-1")[0]
     assert record["skill"] == "expense-inspection"
-    assert record["research_id"] == "01"
+    assert record["scope_id"] == "scope-1"
     assert record["evidence_ref"] == "odoo://x"
 
 
@@ -421,40 +299,6 @@ def test_oversized_odoo_domain_is_marked_as_truncated():
     assert event["domain_truncated"] is True
 
 
-def test_research_read_traces_memory_content(workspace):
-    arguments = research_arguments(trace_id="research-source")
-    assert "error" not in call_tool("dy_research_record_write", arguments, workspace)
-    result = call_tool("dy_module_memory_read", {"legacy": True,
-        "trace_id": "research-read-metadata", "module": "expense",
-        "check_order": "1", "research_id": "01",
-    }, workspace)
-
-    assert "error" not in result
-    events = TraceStore(workspace, os.environ["CODEX_HOME"]).read("research-read-metadata")
-    research_event = next(event for event in events if event.get("event") == "memory.module.read")
-    assert research_event["found"] is True
-    assert research_event["history_count"] == 0
-    assert research_event["module"] == "expense"
-    research_content = json.loads(research_event["research_content"])[0]
-    assert research_content["conclusion"] == "费用模块本期上线"
-    assert research_content["evidence_ref"] == "需求文档#4"
-
-
-def test_module_research_cannot_be_overwritten_by_generic_memory_tool(workspace):
-    arguments = {"trace_id": "research-1", "name": "module-research.md", "content": "# 费用模块\n\n调研点待补充。", "confirmed": False}
-    rejected = call_tool("dy_memory_write", arguments, workspace)
-    assert "error" in rejected
-    assert not (workspace / ".dy_superpowers/modules/expense/research.md").exists()
-
-    arguments["confirmed"] = True
-    rejected = call_tool("dy_memory_write", arguments, workspace)
-    assert "error" in rejected
-    assert not (workspace / ".dy_superpowers/modules/expense/research.md").exists()
-    tools = {tool["name"]: tool for tool in handle({"id": 3, "method": "tools/list"}, workspace)["result"]["tools"]}
-    assert "module-research.md" not in tools["dy_memory_read"]["inputSchema"]["properties"]["name"]["enum"]
-    assert "module-research.md" not in tools["dy_memory_write"]["inputSchema"]["properties"]["name"]["enum"]
-
-
 def test_business_event_cannot_forge_tool_end(workspace):
     result = call_tool("dy_trace_event", {"trace_id": "trace-1", "event": {"event": "tool.end", "status": "ok"}}, workspace)
     assert "error" in result
@@ -495,19 +339,6 @@ def test_server_requires_mcp_sdk_instead_of_starting_compatibility_protocol(work
     assert not (plugin_root / ".dy_superpowers/profile.md").exists()
 
 
-def test_workspace_memory_is_scoped_and_allowlisted(workspace):
-    memory = WorkspaceMemory(workspace)
-    memory.write("profile.md", "项目：HRP", confirmed=True)
-    assert memory.read("profile.md") == "项目：HRP"
-    assert (workspace / ".dy_superpowers/profile.md").is_file()
-    with pytest.raises(ValueError):
-        memory.write("../outside.md", "bad", confirmed=True)
-    with pytest.raises(PermissionError):
-        memory.write("profile.md", "未确认内容")
-    with pytest.raises(ValueError, match="unsupported memory file"):
-        memory.write("module-research.md", "whole-file overwrite", confirmed=True)
-
-
 def test_workspace_memory_rejects_directory_symlink_escape(workspace, tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -517,8 +348,7 @@ def test_workspace_memory_rejects_directory_symlink_escape(workspace, tmp_path):
 
 
 def test_tool_schemas_register_memory_tools_with_trace_id(workspace):
-    result = handle({"id": 1, "method": "tools/list"}, workspace)
-    tools = {tool["name"]: tool for tool in result["result"]["tools"]}
+    tools = {tool["name"]: tool for tool in listed_tools()}
     assert "dy_memory_read" in tools
     assert "dy_memory_write" in tools
     assert "trace_id" in tools["dy_memory_read"]["inputSchema"]["required"]
@@ -563,20 +393,3 @@ def test_memory_search_rejects_empty_query_without_creating_memory(workspace):
 
     assert result["error"]["code"] == -32602
     assert not (workspace / ".dy_superpowers").exists()
-
-
-def test_plan_requires_verification_and_approval_for_writes():
-    result = validate_plan({"steps": [{"target": "odoo", "operation": "write", "read_write": "write", "verification": "read back"}]})
-    assert result["valid"] is False
-    assert any(error["path"].endswith("approval_required") for error in result["errors"])
-
-
-def test_string_approval_does_not_authorize_write():
-    result = validate_plan({"steps": [{"target": "odoo", "operation": "write", "read_write": "write", "verification": "read back", "approval_required": "true"}]})
-    assert result["valid"] is False
-
-
-def test_valid_plan_does_not_grant_execution_authorization():
-    result = validate_plan({"steps": [{"target": "odoo", "operation": "write", "read_write": "write", "verification": "read back", "approval_required": True}]})
-    assert result["valid"] is True
-    assert result["execution_authorized"] is False

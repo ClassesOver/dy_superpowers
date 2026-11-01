@@ -7,6 +7,7 @@ PLUGIN_ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(PLUGIN_ROOT / "mcp-server/src"))
 
 import server
+from mcp_helpers import listed_tools
 
 
 def isolate_codex_home(monkeypatch, codex_home: Path):
@@ -159,9 +160,7 @@ def test_plugin_session_start_hook_targets_registered_mcp_tool():
 
 
 def test_mcp_tools_list_exposes_session_initialize_contract(tmp_path):
-    response = server.handle({"id": 1, "method": "tools/list"}, tmp_path)
-
-    tools = {tool["name"]: tool for tool in response["result"]["tools"]}
+    tools = {tool["name"]: tool for tool in listed_tools()}
     initialize_tool = tools["dy_session_initialize"]
     assert initialize_tool["inputSchema"]["required"] == ["trace_id", "source"]
     assert initialize_tool["inputSchema"]["properties"]["source"]["enum"] == [

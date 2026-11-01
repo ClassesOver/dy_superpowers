@@ -62,9 +62,10 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
                 assert 'dy_memory_search' in {tool.name for tool in tools.tools}
                 schemas = {tool.name: tool.model_dump(by_alias=True)["inputSchema"] for tool in tools.tools}
                 assert 'expected_content' in schemas['dy_memory_write']['properties']
-                assert 'scope' in schemas['dy_module_memory_read']['properties']
+                assert 'question_ids' in schemas['dy_module_memory_read']['properties']
                 assert 'scope_id' in schemas['dy_module_memory_read']['properties']
-                assert 'expected_revision' in schemas['dy_research_record_write']['properties']
+                answer_schema = schemas['dy_research_answers_save']['properties']['answers']['items']
+                assert 'expected_revision' in answer_schema['properties']
                 assert 'dy_inspection_validate' in schemas
                 assert schemas['dy_knowledge_search']['properties']['limit']['maximum'] == 50
                 found = await session.call_tool('dy_knowledge_search', {
@@ -109,41 +110,30 @@ def test_stdio_initialize_discover_and_read_confirmed_memory(tmp_path):
                     'expected_content': '协议测试记忆',
                 })
                 assert updated.model_dump(by_alias=True)["isError"] is False
-                research_args = {
-                    'trace_id': 'protocol-research', 'module': 'expense', 'check_order': '1',
-                    'research_id': '01', 'config_item': '应用安装', 'scope': '公司A/本期',
-                    'conclusion': '协议调研确认', 'confirmed': True, 'confirmed_by': '顾问',
-                    'confirmed_at': '2026-10-21',
-                }
-                await session.call_tool('dy_research_record_write', research_args)
-                research = await session.call_tool('dy_module_memory_read', {
-                    'legacy': True, 'trace_id': 'protocol-research-read', 'module': 'expense', 'check_order': '1', 'research_id': '01',
-                })
-                current = json.loads(research.content[0].text)['records'][0]
-                # 旧记录只读可查，但不能成为新巡检依据。
-                default = await session.call_tool('dy_module_memory_read', {
-                    'trace_id': 'protocol-new-read', 'module': 'expense',
-                })
-                assert json.loads(default.content[0].text)['records'] == []
+                empty = json.loads((await session.call_tool('dy_module_memory_read', {
+                    'trace_id': 'protocol-research-read', 'module': 'expense',
+                })).content[0].text)
+                assert empty['records'] == []
+                question_id = empty['questions'][0]['question_id']
+                answer = {'question_id': question_id, 'answer': '协议调研确认', 'research_complete': True,
+                          'expected_revision': None}
+                save_args = {'trace_id': 'protocol-research', 'module': 'expense', 'scope': '公司A/本期',
+                             'template_revision': empty['template_revision'], 'answers': [answer],
+                             'batch_id': 'protocol-batch', 'confirmed': True}
+                saved = json.loads((await session.call_tool('dy_research_answers_save', save_args)).content[0].text)
+                current = json.loads((await session.call_tool('dy_module_memory_read', {
+                    'trace_id': 'protocol-research-current', 'module': 'expense', 'scope_id': saved['scope_id'],
+                    'question_ids': [question_id],
+                })).content[0].text)
+                assert current['records'][0]['answer'] == '协议调研确认'
                 with pytest.raises(MCPError):
-                    await session.call_tool('dy_inspection_prepare', {
-                        'trace_id': 'protocol-prepare', 'module': 'expense',
-                        'scope_id': current['scope_id'], 'environment': 'db',
-                        'checks': [{'check_order': '1', 'research_id': '01'}],
+                    await session.call_tool('dy_module_memory_read', {
+                        'trace_id': 'protocol-old-keys', 'module': 'expense', 'check_order': '1', 'research_id': '01',
                     })
-                compact = await session.call_tool('dy_module_memory_read', {
-                    'legacy': True, 'trace_id': 'protocol-current', 'module': 'expense', 'scope_id': current['scope_id'],
-                    'checks': [{'check_order': '1', 'research_id': '01'}], 'view': 'current',
-                })
-                compact_record = json.loads(compact.content[0].text)['records'][0]
-                assert compact_record['revision'] == current['revision'] and 'history' not in compact_record
-                with pytest.raises(MCPError, match='expected_revision'):
-                    await session.call_tool('dy_research_record_write', research_args)
-                retired = await session.call_tool('dy_research_record_write', {
-                    **research_args, 'scope_id': current['scope_id'], 'expected_revision': current['revision'],
-                    'status': 'retired', 'retirement_reason': '协议测试停用',
-                })
-                assert json.loads(retired.content[0].text)['status'] == 'retired'
+                with pytest.raises(MCPError, match='修订冲突'):
+                    await session.call_tool('dy_research_answers_save', {
+                        **save_args, 'scope_id': saved['scope_id'], 'batch_id': 'protocol-stale',
+                        'answers': [{**answer, 'answer': '过期修订'}]})
                 validation = await session.call_tool('dy_inspection_validate', {
                     'trace_id': 'protocol-inspection', 'report': {'expected_checks': [], 'records': []},
                 })
