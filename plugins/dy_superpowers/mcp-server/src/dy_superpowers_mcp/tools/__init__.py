@@ -4,7 +4,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 import os
 
-from . import configuration, inspection, knowledge, memory, odoo, research, session, wiki
+from . import configuration, inspection, knowledge, memory, odoo, research, session
 from ..odoo_capabilities import SCHEMAS as ODOO_CAPABILITY_SCHEMAS
 from ..qa_basis import configured_environment_info
 from ..trace import TRACE_CODE_PATTERN, TRACE_CONTEXT_FIELDS
@@ -12,7 +12,7 @@ from .runtime import ToolRequestError, odoo_lock
 
 # 工具名、说明、schema 和处理器在各领域模块中唯一注册。
 TOOL_REGISTRY = {}
-for _domain in (odoo, research, session, inspection, memory, wiki, knowledge, configuration):
+for _domain in (odoo, research, session, inspection, memory, knowledge, configuration):
     duplicated = TOOL_REGISTRY.keys() & _domain.TOOLS.keys()
     if duplicated:
         raise RuntimeError(f'工具重复注册：{sorted(duplicated)}')

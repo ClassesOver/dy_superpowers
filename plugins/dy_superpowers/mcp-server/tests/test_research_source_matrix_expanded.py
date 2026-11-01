@@ -12,7 +12,7 @@ SCRIPT = Path(__file__).parents[2] / 'skills/module-research/scripts/research_so
 
 def cli(workspace, source, *extra):
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith(('OTEL_', 'DY_WIKI_', 'DY_SUPERPOWERS_OTLP_'))}
+           if not k.startswith(('OTEL_', 'DY_SUPERPOWERS_OTLP_'))}
     env['CODEX_HOME'] = str(workspace / 'codex')
     env['PATH'] = str(Path(sys.executable).parent)
     return subprocess.run(
