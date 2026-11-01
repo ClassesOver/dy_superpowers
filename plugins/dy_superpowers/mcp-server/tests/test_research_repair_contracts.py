@@ -12,7 +12,6 @@ from dy_superpowers_mcp.qa_store import read_qa, export_qa, parse_qa_workbook
 from dy_superpowers_mcp.qa_templates import load_template
 from dy_superpowers_mcp.qa_workbook import answer_column
 from template_qa_helpers import save_answers
-from dy_superpowers_mcp.wiki_sync import sync_wiki
 import server
 from dy_superpowers_mcp import research as research_lib
 
@@ -64,24 +63,6 @@ def test_partial_answers_are_visible_without_claiming_completion(tmp_path):
     state = save_answers(tmp_path, 'general-ledger', complete=False)
     assert state['confirmed_count'] == state['partial_count'] == 1
     assert state['answered'] == 0 and state['total'] == len(state['questions'])
-
-
-@pytest.mark.parametrize('confirmed', [None, False])
-def test_wiki_requires_explicit_authorization_before_local_or_remote_work(tmp_path, monkeypatch, confirmed):
-    import dy_superpowers_mcp.wiki_sync as wiki
-    monkeypatch.setattr(wiki, 'load_staged', lambda *_: pytest.fail('未授权不能读取发布清单'))
-    with pytest.raises(PermissionError, match='确认'):
-        if confirmed is None:
-            sync_wiki(tmp_path)
-        else:
-            sync_wiki(tmp_path, confirmed=confirmed)
-
-
-def test_wiki_failure_stops_dependent_work(tmp_path, monkeypatch):
-    monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    result, error = server.execute_tool('dy_wiki_sync', {'trace_id': 'failure', 'confirmed': True}, tmp_path)
-    assert error is not None
-    assert result is None
 
 
 def test_new_progress_does_not_read_legacy_pages(tmp_path, monkeypatch):

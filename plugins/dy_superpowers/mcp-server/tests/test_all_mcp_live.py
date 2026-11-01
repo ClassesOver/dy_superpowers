@@ -1,4 +1,4 @@
-"""显式启用的全工具真实 stdio 验证；不读取仓库 .env，不发布外部 Wiki。
+"""显式启用的全工具真实 stdio 验证；不读取仓库 .env。
 
 运行前由操作者准备真实隔离 Odoo，并设置 DY_ALL_MCP_LIVE=1、APP_URL、
 DB_NAME、APP_USER、APP_PASSWORD。第二独立进程仅启用已批准配置模型写入，
@@ -26,8 +26,7 @@ EXPECTED_TOOLS = {
     'dy_research_answers_save', 'dy_research_answers_import',
     'dy_inspection_prepare', 'dy_inspection_validate', 'dy_inspection_report_save',
     'dy_inspection_report_read', 'dy_inspection_report_export_pdf',
-    'dy_notes_write', 'dy_notes_read', 'dy_notes_list', 'dy_project_configure',
-    'dy_wiki_build', 'dy_wiki_sync', 'dy_trace_event', 'dy_trace_read',
+    'dy_trace_event', 'dy_trace_read',
     'dy_memory_read', 'dy_memory_write', 'dy_memory_search', 'dy_module_memory_read',
     'dy_research_progress', 'dy_research_unanswered_export', 'dy_research_record_write',
     'dy_odoo_record_search', 'dy_odoo_record_read', 'dy_odoo_model_fields',
@@ -87,7 +86,6 @@ def test_all_50_mcp_tools_over_real_stdio_and_isolated_odoo(tmp_path):
     def persist():
         payload = {'database': env['DB_NAME'], 'transport': '真实 MCP stdio',
                    'odoo': '真实隔离 Odoo 12；独立进程验证白名单配置真实写入，模块只预览',
-                   'wiki': '未访问外部服务；缺少发布配置明确阻塞',
                    'tools': matrix}
         (output / 'tool-results.json').write_text(json.dumps(payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
@@ -98,7 +96,7 @@ def test_all_50_mcp_tools_over_real_stdio_and_isolated_odoo(tmp_path):
             async with ClientSession(reader, writer) as session:
                 await session.initialize()
                 listed = {tool.name for tool in (await session.list_tools()).tools}
-                assert len(EXPECTED_TOOLS) == 43
+                assert len(EXPECTED_TOOLS) == 37
                 assert listed == EXPECTED_TOOLS, f'工具清单漂移：缺少{EXPECTED_TOOLS-listed}，新增{listed-EXPECTED_TOOLS}'
                 active_session = session
 
@@ -170,10 +168,6 @@ def test_all_50_mcp_tools_over_real_stdio_and_isolated_odoo(tmp_path):
                     await call('dy_memory_write', {'name': 'profile.md', 'content': '隔离验证项目记忆', 'confirmed': True})
                     await call('dy_memory_read', {'name': 'profile.md'}, check=lambda r: r == '隔离验证项目记忆')
                     await call('dy_memory_search', {'query': '隔离验证'}, check=lambda r: bool(r['results']))
-                    await call('dy_notes_write', {'slug': 'live-policy', 'title': '隔离验证政策', 'body': '此为测试主题，不代表业务交付结论。', 'module': 'expense', 'research_topic': True, 'confirmed': True})
-                    await call('dy_notes_read', {'slug': 'live-policy'}, check=lambda r: '隔离验证政策' in str(r))
-                    await call('dy_notes_list', check=lambda r: 'live-policy' in str(r))
-                    await call('dy_project_configure', {'name': '全工具隔离验证项目', 'code': 'all-mcp-live', 'confirmed': True})
                     await call('dy_research_record_write', {'module': 'expense', 'check_order': '1', 'research_id': '01', 'config_item': '历史兼容入口验证', 'conclusion': '仅验证历史入口，不能作为当前业务验收依据。', 'scope': '隔离测试范围', 'confirmed': True}, check=lambda r: r['status'] == 'confirmed')
                     for module in ('expense', 'general-ledger'):
                         initial = await call('dy_module_memory_read', {'module': module}, check=lambda r: r['total'] > 0 and r['records'] == [])
@@ -194,9 +188,6 @@ def test_all_50_mcp_tools_over_real_stdio_and_isolated_odoo(tmp_path):
                         report_args = {'module': module, 'report_id': saved['report_id']}
                         await call('dy_inspection_report_read', report_args, check=lambda r: '未检查' in r and '机器可读数据' not in r)
                         await call('dy_inspection_report_export_pdf', report_args, check=lambda r: r['exported'] is True and r['created'] is False)
-                    await call('dy_wiki_build', {'confirmed': True}, check=lambda r: r['built'] is True and r['pages'] > 0 and r['published'] is False)
-                    await call('dy_wiki_sync', {'confirmed': False}, kind='外部发布授权门禁', denied='确认')
-                    await call('dy_wiki_sync', {'confirmed': True}, kind='外部发布依赖检查；未发布', blocked='DY_WIKI')
                     await call('dy_trace_event', {'event': {'event': 'live.validation', 'memory_content': 'password=live-redaction-probe'}}, check=lambda r: r['stored'] is True)
                     await call('dy_trace_read', check=lambda r: 'live.validation' in str(r) and 'live-redaction-probe' not in str(r) and '[REDACTED]' in str(r) and all(not ({'rows', 'actual_values', 'expected_values'} & event.keys()) for event in r if event.get('event') == 'odoo.read'))
 

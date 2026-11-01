@@ -37,7 +37,7 @@ class Handler(BaseHTTPRequestHandler):
         if payload['Q'] == 'slow': time.sleep(0.4)
         value = {{'pid': os.getpid(), 'query': payload['Q'],
                  'index_available': bool(list(Path(a.index).glob('*.zoekt'))),
-                 'private_env': any(k in os.environ for k in ['APP_PASSWORD', 'DY_WIKI_TOKEN']),
+                 'private_env': any(k in os.environ for k in ['APP_PASSWORD', 'DY_KNOWLEDGE_EMBEDDING_TOKEN']),
                  'tracing_disabled': os.environ.get('OPENTELEMETRY_DISABLED')}}
         self.send_response(200); self.end_headers()
         self.wfile.write(json.dumps(value).encode())
@@ -144,7 +144,7 @@ def test_shared_index_survives_first_install_directory_removal(bundle, tmp_path)
 
 def test_child_does_not_inherit_business_credentials_or_telemetry(bundle, monkeypatch):
     monkeypatch.setenv('APP_PASSWORD', 'not-forwarded')
-    monkeypatch.setenv('DY_WIKI_TOKEN', 'not-forwarded')
+    monkeypatch.setenv('DY_KNOWLEDGE_EMBEDDING_TOKEN', 'not-forwarded')
     monkeypatch.setenv('OPENTELEMETRY_DISABLED', 'false')
     reply = client(bundle).request('/api/search', {'Q': 'literal-not-persisted'})
     assert reply['private_env'] is False

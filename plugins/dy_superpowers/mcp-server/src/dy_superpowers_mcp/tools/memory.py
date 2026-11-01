@@ -5,44 +5,9 @@ import json
 from pathlib import Path
 
 from .. import basic_memory
-from ..memory import MEMORY_FILES, NOTE_SLUG, WRITABLE_MEMORY_FILES, WorkspaceMemory, list_notes, read_note, write_note
+from ..memory import MEMORY_FILES, WRITABLE_MEMORY_FILES, WorkspaceMemory
 from ..trace import TraceStore
 from .runtime import ToolRequestError, append_trace, invalid_arguments
-
-
-def _handle_notes_write(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):
-    if arguments.get('confirmed') is not True:
-        raise ToolRequestError(-32602, 'wiki 记忆写入需要用户明确确认')
-    with invalid_arguments(ValueError, PermissionError, TypeError):
-        path = write_note(workspace, arguments.get('slug', ''), arguments.get('title', ''),
-                          arguments.get('body', ''), arguments.get('tags', []),
-                          confirmed=True, source_refs=arguments.get('source_refs', []),
-                          module=arguments.get('module'), research_topic=arguments.get('research_topic', False),
-                          expected_content=arguments.get('expected_content'))
-    content = path.read_text(encoding='utf-8')
-    slug = path.relative_to(workspace / '.dy_superpowers' / 'notes').with_suffix('').as_posix()
-    event = {'event': 'notes.write', 'operation': 'write', 'tool': name, 'status': 'ok',
-             'memory_file': str(path.relative_to(workspace)), 'memory_content': content,
-             'content_bytes': len(content.encode('utf-8')),
-             'span_id': span_id}
-    append_trace(store, arguments['trace_id'], event)
-    return {'written': True, 'slug': slug, 'path': str(path.relative_to(workspace))}
-
-
-def _handle_notes_read(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):
-    with invalid_arguments():
-        content = read_note(workspace, arguments.get('slug', ''))
-    if not content:
-        return {'found': False, 'slug': arguments.get('slug', ''), 'notes': list_notes(workspace)}
-    event = {'event': 'notes.read', 'operation': 'read', 'tool': name, 'status': 'ok',
-             'memory_file': '.dy_superpowers/notes/' + arguments.get('slug', '') + '.md',
-             'memory_content': content, 'content_bytes': len(content.encode('utf-8')), 'span_id': span_id}
-    append_trace(store, arguments['trace_id'], event)
-    return content
-
-
-def _handle_notes_list(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):
-    return {'notes': list_notes(workspace)}
 
 
 def _handle_trace_event(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):
@@ -119,37 +84,6 @@ def _handle_memory_write(name: str, arguments: dict, workspace: Path, store: Tra
 
 
 TOOLS = {
-    'dy_notes_write': (
-        '用户确认后写入主题笔记；更新须先读取并传完整 expected_content。仅标记 research_topic 且绑定 module 的确认主题进入项目 Wiki，不驱动巡检。',
-        {'type': 'object',
-         'required': ['trace_id', 'slug', 'title', 'body', 'confirmed'],
-         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
-                        'slug': {'type': 'string', 'maxLength': 121, 'pattern': NOTE_SLUG.pattern},
-                        'title': {'type': 'string', 'minLength': 1, 'maxLength': 120},
-                        'body': {'type': 'string', 'minLength': 1},
-                        'tags': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 10},
-                        'source_refs': {'type': 'array', 'items': {'type': 'string'}, 'maxItems': 20},
-                        'module': {'type': 'string', 'pattern': '^[a-z0-9][a-z0-9_-]{0,63}$'},
-                        'research_topic': {'type': 'boolean', 'default': False},
-                        'expected_content': {'type': 'string'},
-                        'confirmed': {'type': 'boolean'}}},
-        _handle_notes_write,
-    ),
-    'dy_notes_read': (
-        '读取指定 wiki 记忆页；不存在时返回可用页面清单。',
-        {'type': 'object',
-         'required': ['trace_id', 'slug'],
-         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
-                        'slug': {'type': 'string', 'maxLength': 121, 'pattern': NOTE_SLUG.pattern}}},
-        _handle_notes_read,
-    ),
-    'dy_notes_list': (
-        '列出当前工作区全部 wiki 记忆页标识。',
-        {'type': 'object',
-         'required': ['trace_id'],
-         'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'}}},
-        _handle_notes_list,
-    ),
     'dy_trace_event': (
         '追加经过字段过滤和脱敏的插件运行追踪事件。',
         {'type': 'object',

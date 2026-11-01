@@ -1,4 +1,4 @@
-"""真实 stdio 跨会话验证调研、主题、Wiki、报告与工作区隔离。"""
+"""真实 stdio 跨会话验证调研、报告与工作区隔离。"""
 import asyncio
 from datetime import datetime, timezone
 import json
@@ -13,7 +13,6 @@ from mcp.shared.exceptions import MCPError
 
 PLUGIN = Path(__file__).parents[2]
 sys.path.insert(0, str(PLUGIN / "mcp-server/src"))
-from dy_superpowers_mcp.project_wiki import load_staged
 from dy_superpowers_mcp.qa_templates import load_template
 from dy_superpowers_mcp.qa_store import read_qa
 from template_qa_helpers import make_report
@@ -203,36 +202,14 @@ def test_stdio_research_resume_report_and_workspace_isolation(tmp_path, module):
                             "conclusion": "乙医院独立范围结论，不复用甲医院结论。"})
                 await call(session, "dy_memory_write", {"name": "delivery-register.md",
                            "content": todo, "expected_content": "", "confirmed": True})
-                topic = dict(slug="research/confirmed-policy", title="已确认模块政策",
-                             body="这是单独确认的模块政策，不能替代巡检验收。", module=module,
-                             research_topic=True, confirmed=True)
-                await call(session, "dy_notes_write", topic)
-                original = await call(session, "dy_notes_read", {"slug": topic["slug"]})
-                with pytest.raises(MCPError):
-                    await call(session, "dy_notes_write", {**topic, "body": "过期覆盖",
-                               "expected_content": "旧版本"})
-                assert await call(session, "dy_notes_read", {"slug": topic["slug"]}) == original
-                await call(session, "dy_notes_write", dict(slug="private", title="普通内部笔记",
-                           body="普通笔记不得发布的唯一标记", confirmed=True))
-                await call(session, "dy_project_configure", dict(name="虚构交付扩展测试",
-                           code="expanded-project", confirmed=True))
-                built = await call(session, "dy_wiki_build", {"confirmed": True})
-                assert built["pages"] == 4 and not built["published"]
-                pages = "\n".join(load_staged(workspace)[1].values())
-                assert f"- 检查编号：{order}" in pages
-                assert "普通笔记不得发布的唯一标记" not in pages
-                assert "附件缺口是什么" not in pages
                 updated = await call(session, "dy_research_record_write", {**payload,
                            "scope_id": first["scope_id"], "expected_revision": first["revision"],
                            "conclusion": "甲医院修订后结论：包含必需依赖，尚未验收。"})
                 saved.update(updated)
-                with pytest.raises(ValueError):
-                    load_staged(workspace)
                 with pytest.raises(MCPError) as conflict:
                     await call(session, "dy_research_record_write", {**payload,
                                "scope_id": first["scope_id"], "expected_revision": first["revision"]})
                 assert conflict.value.code == -32602
-                await call(session, "dy_wiki_build", {"confirmed": True})
                 from template_qa_helpers import save_answers
                 qa = save_answers(workspace, module)
                 report = _uninspected_report(workspace, module, qa["scope_id"])
@@ -276,10 +253,6 @@ def test_stdio_research_resume_report_and_workspace_isolation(tmp_path, module):
                 await session.initialize()
                 records = await call(session, "dy_module_memory_read", {"module": module, "legacy": True})
                 assert records["records"] == []
-                notes = await call(session, "dy_notes_list", {})
-                assert notes["notes"] == []
-                with pytest.raises(MCPError):
-                    await call(session, "dy_wiki_build", {"confirmed": True})
                 with pytest.raises(MCPError):
                     await call(session, "dy_inspection_report_read",
                                {"module": module, "report_id": saved["reports"][0]["report_id"]})

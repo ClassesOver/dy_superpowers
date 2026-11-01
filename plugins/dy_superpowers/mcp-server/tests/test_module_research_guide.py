@@ -89,7 +89,7 @@ def test_research_preserves_workspace_memory_and_trace_privacy_boundaries():
     assert 'trace正文脱敏且不展开附件明细' in text
 
 
-def test_research_does_not_route_new_qa_to_legacy_write_or_wiki():
+def test_research_does_not_route_new_qa_to_legacy_write():
     text = SKILL.read_text()
     assert 'dy_research_record_write(' not in text
     assert '历史版本' in text and '续答读取当前版本，不自动回滚' in text
