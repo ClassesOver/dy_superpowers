@@ -1,11 +1,12 @@
 """项目身份与 Wiki 构建、发布工具。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 from ..project_wiki import configure_project, stage_wiki
 from ..trace import TraceStore
 from ..wiki_sync import sync_wiki
 from .runtime import ToolRequestError, append_trace, invalid_arguments
-from pathlib import Path
 
 
 def _handle_project_configure(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):

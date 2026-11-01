@@ -394,6 +394,18 @@ def test_module_uninstall_rejects_unconfirmed_installed_dependents(tmp_path, cli
     assert not list((tmp_path / '.dy_superpowers/configuration').glob('*.json'))
 
 
+@pytest.mark.parametrize('enabled', [False, True])
+def test_plan_validation_only_accepts_currently_callable_tools(tmp_path, client, monkeypatch, enabled):
+    if enabled:
+        monkeypatch.setenv('DY_ODOO_MODULE_WRITE_ENABLED', '1')
+    step = {'tool': 'dy_odoo_module_install', 'params': dict(module_names=['dy_expense'], environment='demo',
+            idempotency_key='plan-step', backup_reference='已核实的备份编号')}
+    result = call(tmp_path, 'dy_odoo_validate_plan', plan={'phases': [{'phase': 1, 'steps': [step]}]})
+    assert result['valid'] is enabled
+    assert ('计划包含未接入或未启用的工具' in result['errors']) is not enabled
+    assert not client.calls
+
+
 @pytest.mark.parametrize('tool', [[], {}, None, 1, True])
 def test_plan_validation_reports_invalid_tool_types(tmp_path, client, tool):
     result = call(tmp_path, 'dy_odoo_validate_plan', plan={

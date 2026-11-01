@@ -1,13 +1,13 @@
 """MCP 工具注册表：汇总各领域工具，统一 schema、写开关、参数校验与分发。"""
 from __future__ import annotations
 
-import os
 from contextlib import nullcontext
+import os
 
+from . import configuration, inspection, knowledge, memory, odoo, research, session, wiki
 from ..odoo_capabilities import SCHEMAS as ODOO_CAPABILITY_SCHEMAS
 from ..qa_basis import configured_environment_info
 from ..trace import TRACE_CODE_PATTERN, TRACE_CONTEXT_FIELDS
-from . import configuration, inspection, knowledge, memory, odoo, research, session, wiki
 from .runtime import ToolRequestError, odoo_lock
 
 # 工具名、说明、schema 和处理器在各领域模块中唯一注册。
@@ -60,6 +60,13 @@ def _validator(name):
         from jsonschema import Draft202012Validator
         validator = _VALIDATORS[name] = Draft202012Validator(TOOL_SCHEMAS[name])
     return validator
+
+
+def available_validator(name):
+    """当前实际可调用工具的已编译校验器；未注册或写开关关闭的工具返回 None。"""
+    if not isinstance(name, str) or name not in TOOL_REGISTRY or not tool_enabled(name):
+        return None
+    return _validator(name)
 
 
 def dispatch_tool(name, arguments, workspace, store, span_id):

@@ -1,10 +1,10 @@
 """工具运行时：参数错误、本地 trace 写入与上下文、Odoo 连接缓存及查询审计。"""
 from __future__ import annotations
 
-import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
+import sys
 from threading import RLock
 from typing import Iterator
 

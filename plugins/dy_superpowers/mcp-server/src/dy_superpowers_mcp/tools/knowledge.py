@@ -1,10 +1,11 @@
 """本地 HRP 知识检索工具。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 from .. import knowledge as knowledge_lib
 from ..trace import TraceStore
 from .runtime import ToolRequestError, invalid_arguments
-from pathlib import Path
 
 
 def _handle_knowledge_module_info(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):
