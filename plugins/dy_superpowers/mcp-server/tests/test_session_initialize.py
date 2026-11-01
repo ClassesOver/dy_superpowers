@@ -9,9 +9,8 @@ sys.path.insert(0, str(PLUGIN_ROOT / "mcp-server/src"))
 import server
 
 
-def disable_telemetry(monkeypatch, codex_home: Path):
+def isolate_codex_home(monkeypatch, codex_home: Path):
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
 
 
 def test_session_initialize_injects_memory_index_without_reading_memory_bodies(
@@ -30,7 +29,7 @@ def test_session_initialize_injects_memory_index_without_reading_memory_bodies(
     }
     for name, content in memory_content.items():
         (memory_dir / name).write_text(content, encoding="utf-8")
-    disable_telemetry(monkeypatch, tmp_path / "codex")
+    isolate_codex_home(monkeypatch, tmp_path / "codex")
 
     result, error = server.execute_tool(
         "dy_session_initialize",
@@ -67,7 +66,7 @@ def test_session_initialize_with_no_memory_does_not_create_memory_directory(
     tmp_path, monkeypatch
 ):
     workspace = tmp_path / "empty-project"
-    disable_telemetry(monkeypatch, tmp_path / "codex")
+    isolate_codex_home(monkeypatch, tmp_path / "codex")
 
     result, error = server.execute_tool(
         "dy_session_initialize",
@@ -88,7 +87,7 @@ def test_memory_read_returns_full_memory_without_truncation(tmp_path, monkeypatc
     memory_dir.mkdir(parents=True)
     content = "完整记忆内容" * 1500
     (memory_dir / "profile.md").write_text(content, encoding="utf-8")
-    disable_telemetry(monkeypatch, tmp_path / "codex")
+    isolate_codex_home(monkeypatch, tmp_path / "codex")
 
     result, error = server.execute_tool(
         "dy_memory_read",
@@ -105,7 +104,7 @@ def test_session_initialize_does_not_read_memory_files(tmp_path, monkeypatch):
     memory_dir = workspace / ".dy_superpowers"
     memory_dir.mkdir(parents=True)
     (memory_dir / "preferences.md").write_text("仅供记忆读取", encoding="utf-8")
-    disable_telemetry(monkeypatch, tmp_path / "codex")
+    isolate_codex_home(monkeypatch, tmp_path / "codex")
 
     result, error = server.execute_tool(
         "dy_session_initialize",
@@ -122,7 +121,7 @@ def test_session_initialize_does_not_read_memory_files(tmp_path, monkeypatch):
 
 def test_session_initialize_rejects_unknown_source(tmp_path, monkeypatch):
     workspace = tmp_path / "project"
-    disable_telemetry(monkeypatch, tmp_path / "codex")
+    isolate_codex_home(monkeypatch, tmp_path / "codex")
 
     result, error = server.execute_tool(
         "dy_session_initialize",

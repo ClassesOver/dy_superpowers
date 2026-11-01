@@ -9,11 +9,12 @@ PLUGIN_ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(PLUGIN_ROOT / "mcp-server/src"))
 
 import server
+from dy_superpowers_mcp.odoo_jsonrpc import OdooReadClient
+from dy_superpowers_mcp.tools import runtime
 
 
-def disable_telemetry(monkeypatch, codex_home: Path):
+def isolate_codex_home(monkeypatch, codex_home: Path):
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
 
 
 def stub_odoo_client(monkeypatch):
@@ -22,13 +23,13 @@ def stub_odoo_client(monkeypatch):
     monkeypatch.setenv("DB_NAME", "db")
     monkeypatch.setenv("APP_USER", "u")
     monkeypatch.setenv("APP_PASSWORD", "p")
-    monkeypatch.setattr(server.OdooReadClient, "__init__", lambda self, settings: None)
+    monkeypatch.setattr(OdooReadClient, "__init__", lambda self, settings: None)
 
 
 def test_module_list_passes_offset_and_defaults_to_first_page(tmp_path, monkeypatch):
     workspace = tmp_path / "project"
     workspace.mkdir()
-    disable_telemetry(monkeypatch, tmp_path / "codex")
+    isolate_codex_home(monkeypatch, tmp_path / "codex")
     stub_odoo_client(monkeypatch)
     calls = []
 
@@ -36,7 +37,7 @@ def test_module_list_passes_offset_and_defaults_to_first_page(tmp_path, monkeypa
         calls.append((module, installed_only, offset))
         return [{"name": "dy_fin_acc", "state": "installed"}]
 
-    monkeypatch.setattr(server.OdooReadClient, "module_records", module_records)
+    monkeypatch.setattr(OdooReadClient, "module_records", module_records)
 
     result, error = server.execute_tool(
         "dy_odoo_module_list_installed",
@@ -58,7 +59,7 @@ def test_module_list_passes_offset_and_defaults_to_first_page(tmp_path, monkeypa
 def test_module_list_rejects_invalid_offset_as_invalid_params(tmp_path, monkeypatch):
     workspace = tmp_path / "project"
     workspace.mkdir()
-    disable_telemetry(monkeypatch, tmp_path / "codex")
+    isolate_codex_home(monkeypatch, tmp_path / "codex")
     stub_odoo_client(monkeypatch)
     # 校验发生在真实 module_records 内部且先于任何远端调用，因此这里不打桩替换该方法。
 
@@ -75,7 +76,7 @@ def test_module_list_rejects_invalid_offset_as_invalid_params(tmp_path, monkeypa
 def test_module_info_does_not_accept_offset_passthrough(tmp_path, monkeypatch):
     workspace = tmp_path / "project"
     workspace.mkdir()
-    disable_telemetry(monkeypatch, tmp_path / "codex")
+    isolate_codex_home(monkeypatch, tmp_path / "codex")
     stub_odoo_client(monkeypatch)
     calls = []
 
@@ -83,7 +84,7 @@ def test_module_info_does_not_accept_offset_passthrough(tmp_path, monkeypatch):
         calls.append((module, installed_only, offset))
         return [{"name": module, "state": "installed"}]
 
-    monkeypatch.setattr(server.OdooReadClient, "module_records", module_records)
+    monkeypatch.setattr(OdooReadClient, "module_records", module_records)
 
     result, error = server.execute_tool(
         "dy_odoo_module_info",
@@ -104,12 +105,12 @@ def test_tools_list_exposes_optional_offset_property(tmp_path):
 
 @pytest.mark.parametrize('module', ['', '   ', '\t\n'])
 def test_module_info_rejects_blank_name_before_connecting(tmp_path, monkeypatch, module):
-    disable_telemetry(monkeypatch, tmp_path / 'codex')
+    isolate_codex_home(monkeypatch, tmp_path / 'codex')
 
     def must_not_connect(workspace):
         pytest.fail('空模块名不应建立 Odoo 连接')
 
-    monkeypatch.setattr(server, '_odoo_client', must_not_connect)
+    monkeypatch.setattr(runtime, 'odoo_client', must_not_connect)
     result, error = server.execute_tool('dy_odoo_module_info',
                                        {'trace_id': 'blank-module', 'module': module}, tmp_path)
     assert result is None
@@ -129,13 +130,13 @@ def test_module_client_rejects_blank_name_without_broad_query(module):
 def test_module_info_trims_surrounding_whitespace_before_exact_query(tmp_path, monkeypatch):
     workspace = tmp_path / 'project'
     workspace.mkdir()
-    disable_telemetry(monkeypatch, tmp_path / 'codex')
+    isolate_codex_home(monkeypatch, tmp_path / 'codex')
     from dy_superpowers_mcp.odoo_jsonrpc import OdooReadClient
 
     client = object.__new__(OdooReadClient)
     calls = []
     client.search_read = lambda *args: calls.append(args) or [{'name': 'account'}]
-    monkeypatch.setattr(server, '_odoo_client', lambda _workspace: client)
+    monkeypatch.setattr(runtime, 'odoo_client', lambda _workspace: client)
     result, error = server.execute_tool('dy_odoo_module_info',
                                        {'trace_id': 'padded-module', 'module': ' account '}, workspace)
     assert error is None

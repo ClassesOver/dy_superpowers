@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 import pytest
 
 import server
+from dy_superpowers_mcp.tools import runtime
 from dy_superpowers_mcp import knowledge, odoo_planning
-from dy_superpowers_mcp.inspection_prepare import configured_environment_info
+from dy_superpowers_mcp.qa_basis import configured_environment_info
 from test_template_inspection import report_for, validate
 
 
@@ -55,7 +56,6 @@ def live_comparison(tmp_path, monkeypatch):
     for key, value in dict(APP_URL='https://test.example', DB_NAME='UAT', APP_USER='test', APP_PASSWORD='test').items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     report = report_for(tmp_path)
     report['basis']['connection_fingerprint'] = configured_environment_info()['connection_fingerprint']
     record = report['records'][0]
@@ -67,7 +67,7 @@ def live_comparison(tmp_path, monkeypatch):
         def read_records(self, *args):
             return self.search_read()
 
-    monkeypatch.setattr(server, '_odoo_client', lambda root: Client())
+    monkeypatch.setattr(runtime, 'odoo_client', lambda root: Client())
 
     def query(expected, *, count=1, read=False):
         comparison = {'expected_count': count, 'expected_values': expected}
@@ -137,7 +137,7 @@ def test_pagination_limit_cannot_prove_exact_count(tmp_path, live_comparison):
 def test_latest_comparison_on_same_trace_cannot_reuse_old_pass(tmp_path, live_comparison, monkeypatch):
     old = copy.deepcopy(live_comparison({'name': '真实名称'}))
     from types import SimpleNamespace
-    monkeypatch.setattr(server, '_odoo_client', lambda _: SimpleNamespace(
+    monkeypatch.setattr(runtime, 'odoo_client', lambda _: SimpleNamespace(
         search_read=lambda *args, **kwargs: [{'id': 7, 'name': '后来被修改的名称'}]))
     live_comparison({'name': '真实名称'})
     old['records'][0]['verified_at'] = datetime.now(timezone.utc).isoformat()

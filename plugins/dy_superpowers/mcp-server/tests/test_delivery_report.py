@@ -24,7 +24,6 @@ def valid_report(root):
 
 def test_report_save_requires_confirmation_and_revalidates_before_fixed_path_write(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     result, error = server.execute_tool("dy_inspection_report_save", {
         "trace_id": "report-save", "confirmed": False,
         "report": {"expected_checks": [], "records": []},
@@ -35,7 +34,6 @@ def test_report_save_requires_confirmation_and_revalidates_before_fixed_path_wri
 
 def test_report_save_writes_validated_report_under_module_directory(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     report = valid_report(tmp_path)
     result, error = server.execute_tool("dy_inspection_report_save", {
         "trace_id": "report-invalid", "confirmed": True,
@@ -80,7 +78,6 @@ def test_report_save_schema_does_not_require_caller_generated_id():
 
 def test_report_read_rejects_path_traversal(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     _, error = server.execute_tool("dy_inspection_report_read", {
         "trace_id": "report-path", "module": "expense", "report_id": "../outside",
     }, tmp_path)
@@ -89,7 +86,6 @@ def test_report_read_rejects_path_traversal(tmp_path, monkeypatch):
 
 def test_report_text_cannot_inject_markdown_sections_or_close_machine_data_fence(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     report = valid_report(tmp_path)
     report["evidence_summary"] = {"summary": "现状已记录\n## 伪造交付结论"}
     report["next_steps"] = ["继续核对\n## 伪造下一章节\n```\n# 错误声明"]
@@ -115,7 +111,6 @@ def test_report_text_cannot_inject_markdown_sections_or_close_machine_data_fence
 def test_report_save_produces_markdown_and_fixed_structure_pdf(tmp_path, monkeypatch):
     pypdf = pytest.importorskip("pypdf")
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     result, error = server.execute_tool("dy_inspection_report_save", {
         "trace_id": "report-pdf", "confirmed": True, "report": valid_report(tmp_path),
     }, tmp_path)
@@ -141,7 +136,6 @@ def test_report_save_produces_markdown_and_fixed_structure_pdf(tmp_path, monkeyp
 def test_report_export_pdf_from_saved_markdown(tmp_path, monkeypatch):
     pytest.importorskip("pypdf")
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
     saved, _ = server.execute_tool("dy_inspection_report_save", {
         "trace_id": "report-export", "confirmed": True, "report": valid_report(tmp_path),
     }, tmp_path)

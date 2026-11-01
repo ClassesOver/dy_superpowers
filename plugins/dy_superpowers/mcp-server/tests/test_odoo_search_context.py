@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parents[1] / 'src'))
 
 import server
+from dy_superpowers_mcp.tools import runtime
 from dy_superpowers_mcp.odoo_jsonrpc import OdooReadClient, OdooRPCError
 from dy_superpowers_mcp.trace import TraceStore
 
@@ -70,7 +71,6 @@ def test_rpc_error_returns_safe_category_and_local_request_id(remote_name, categ
 ])
 def test_company_context_is_model_scoped(tmp_path, monkeypatch, model, value, accepted):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     client = object.__new__(OdooReadClient)
 
     def execute(actual_model, method, args, kwargs):
@@ -80,7 +80,7 @@ def test_company_context_is_model_scoped(tmp_path, monkeypatch, model, value, ac
         return [{'id': 1}]
 
     monkeypatch.setattr(client, '_execute_kw', execute)
-    monkeypatch.setattr(server, '_odoo_client', lambda workspace: client)
+    monkeypatch.setattr(runtime, 'odoo_client', lambda workspace: client)
     result, error = server.execute_tool('dy_odoo_record_search', {
         'trace_id': 'company-context', 'model': model,
         'kwargs': {'fields': ['id'], 'context': {'view_company': value}}}, tmp_path)
@@ -94,7 +94,6 @@ def test_company_context_is_model_scoped(tmp_path, monkeypatch, model, value, ac
 @pytest.mark.parametrize('active_test', [False, True])
 def test_search_context_reaches_rpc_and_trace(tmp_path, monkeypatch, active_test):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     client = object.__new__(OdooReadClient)
     calls = []
 
@@ -103,7 +102,7 @@ def test_search_context_reaches_rpc_and_trace(tmp_path, monkeypatch, active_test
         return [{'id': 2, 'active': False}] if kwargs.get('context') == {'active_test': False} else []
 
     monkeypatch.setattr(client, '_execute_kw', execute)
-    monkeypatch.setattr(server, '_odoo_client', lambda workspace: client)
+    monkeypatch.setattr(runtime, 'odoo_client', lambda workspace: client)
     result, error = server.execute_tool('dy_odoo_record_search', {
         'trace_id': 'archive-read', 'model': 'dy.expense.city.season', 'args': [[]],
         'kwargs': {'fields': ['id', 'active'], 'limit': 10, 'offset': 3,
@@ -127,8 +126,7 @@ def test_search_context_reaches_rpc_and_trace(tmp_path, monkeypatch, active_test
 ])
 def test_unsupported_search_options_fail_before_rpc(tmp_path, monkeypatch, kwargs):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
-    monkeypatch.setattr(server, '_odoo_client', lambda workspace: pytest.fail('无效参数不得连接 Odoo'))
+    monkeypatch.setattr(runtime, 'odoo_client', lambda workspace: pytest.fail('无效参数不得连接 Odoo'))
     _, error = server.execute_tool('dy_odoo_record_search', {
         'trace_id': 'invalid-context', 'model': 'dy.expense.city.season', 'kwargs': kwargs}, tmp_path)
     assert error and error['code'] == -32602
@@ -141,8 +139,7 @@ def test_unsupported_search_options_fail_before_rpc(tmp_path, monkeypatch, kwarg
 ])
 def test_top_level_search_options_are_rejected_without_read_evidence(tmp_path, monkeypatch, extra):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
-    monkeypatch.setattr(server, '_odoo_client', lambda workspace: pytest.fail('无效参数不得连接 Odoo'))
+    monkeypatch.setattr(runtime, 'odoo_client', lambda workspace: pytest.fail('无效参数不得连接 Odoo'))
     result, error = server.execute_tool('dy_odoo_record_search', {
         'trace_id': 'misplaced-options', 'model': 'account.journal', **extra}, tmp_path)
     assert result is None
@@ -154,7 +151,6 @@ def test_top_level_search_options_are_rejected_without_read_evidence(tmp_path, m
 
 def test_scoped_search_preserves_shared_records_domain_and_pagination(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
     client = object.__new__(OdooReadClient)
     calls = []
 
@@ -163,7 +159,7 @@ def test_scoped_search_preserves_shared_records_domain_and_pagination(tmp_path, 
         return [{'id': 12, 'journal_company_ids': []}]
 
     monkeypatch.setattr(client, '_execute_kw', execute)
-    monkeypatch.setattr(server, '_odoo_client', lambda workspace: client)
+    monkeypatch.setattr(runtime, 'odoo_client', lambda workspace: client)
     result, error = server.execute_tool('dy_odoo_record_search', {
         'trace_id': 'scoped-read', 'model': 'account.journal',
         'trace_context': {'module': 'general-ledger', 'scope_id': 'company-7'},

@@ -14,6 +14,7 @@ from dy_superpowers_mcp.qa_workbook import answer_column
 from template_qa_helpers import save_answers
 from dy_superpowers_mcp.wiki_sync import sync_wiki
 import server
+from dy_superpowers_mcp import research as research_lib
 
 
 def test_mcp_forwards_only_required_business_environment_keys():
@@ -87,7 +88,7 @@ def test_new_progress_does_not_read_legacy_pages(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
     total=len(load_template('general-ledger')['questions'])
     save_answers(tmp_path, 'general-ledger', count=total)
-    monkeypatch.setattr(server, 'read_module_records', lambda *a, **kw: pytest.fail('新版不得读取历史分页'))
+    monkeypatch.setattr(research_lib, 'read_module_records', lambda *a, **kw: pytest.fail('新版不得读取历史分页'))
     result, error = server.execute_tool('dy_research_progress',
         dict(trace_id='new-routing', module='general-ledger', intent='research'), tmp_path)
     assert error is None and result['answered'] == total and result['route'] == 'interactive'

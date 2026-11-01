@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .odoo_jsonrpc import OdooConfigurationError, OdooRPCError, OdooReadClient, OdooSettings
 from .odoo_comparison import compare_records
-from .inspection_prepare import prepare_inspection
+from .qa_basis import READY, configured_environment_info, confirmed_answer
 from .storage import atomic_write, record_lock
 
 
@@ -56,43 +56,44 @@ CONFIGURATION_SCHEMAS = {
 }
 
 
-RESEARCH_CONTEXT_FIELDS = {'module', 'scope_id', 'template_revision', 'answer_version',
-    'question_id', 'answer_revision', 'environment', 'connection_fingerprint', 'requirement_id'}
+# 答卷驱动配置的依据：只绑定答卷自身身份与环境，不依赖巡检准备结果。
+ANSWER_CONTEXT_FIELDS = {'module', 'scope_id', 'template_revision', 'question_id', 'answer_revision', 'environment'}
 
 
 def _confirmation_payload(arguments):
     payload = {key: value for key, value in arguments.items()
                if key not in {'trace_id', 'trace_context', 'confirmed', 'confirmation_digest', 'dry_run'}}
     context = arguments.get('trace_context', {})
-    if isinstance(context, dict) and set(context) & (RESEARCH_CONTEXT_FIELDS - {'environment', 'connection_fingerprint'}):
-        payload['trace_context'] = {key: value for key, value in context.items() if key in RESEARCH_CONTEXT_FIELDS}
+    if isinstance(context, dict) and set(context) & (ANSWER_CONTEXT_FIELDS - {'environment'}):
+        payload['trace_context'] = {key: value for key, value in context.items() if key in ANSWER_CONTEXT_FIELDS}
     return payload
 
 
 def confirmation_digest(operation: str, arguments: dict) -> str:
-    """操作、业务参数及关联答卷身份 UTF-8 规范 JSON 的 SHA-256。"""
+    """操作、业务参数、关联答卷身份及服务连接身份 UTF-8 规范 JSON 的 SHA-256。"""
     payload = _confirmation_payload(arguments)
-    content = json.dumps({'operation': operation, **payload}, sort_keys=True, ensure_ascii=False,
-                         separators=(',', ':'), allow_nan=False)
+    fingerprint = configured_environment_info()['connection_fingerprint']
+    content = json.dumps({'operation': operation, **payload, 'connection_fingerprint': fingerprint},
+                         sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 
-def _validate_research_context(workspace, arguments):
+def _validate_answer_context(workspace, arguments):
     context = _confirmation_payload(arguments).get('trace_context')
     if context is None:
         return None
-    if set(context) != RESEARCH_CONTEXT_FIELDS or any(not isinstance(v, str) or not v for v in context.values()):
-        raise OdooConfigurationError('答卷驱动配置必须提供完整的巡检依据、问题修订及 requirement_id')
+    if set(context) != ANSWER_CONTEXT_FIELDS or any(not isinstance(v, str) or not v for v in context.values()):
+        raise OdooConfigurationError('答卷驱动配置必须提供完整答卷依据：模块、范围、模板版本、问题、答案修订及环境')
+    if context['environment'] != configured_environment_info()['environment']:
+        raise OdooConfigurationError('配置答卷依据的环境与当前服务配置身份不一致')
     try:
-        prepared = prepare_inspection(workspace, context['module'], context['scope_id'], context['environment'])
+        current = confirmed_answer(workspace, context['module'], context['scope_id'], context['question_id'])
     except ValueError as exc:
-        raise OdooConfigurationError('配置答卷依据无效，请重新读取答卷并准备巡检') from exc
-    if (not prepared['basis']['connection_fingerprint']
-            or any(context.get(key) != value for key, value in prepared['basis'].items())):
-        raise OdooConfigurationError('配置答卷版本或连接身份已变化，请重新核对并确认')
-    item = next((i for i in prepared['items'] if i['question_id'] == context['question_id']), None)
-    if not item or item['answer_revision'] != context['answer_revision'] or item['readiness'] != 'research_ready':
-        raise OdooConfigurationError('配置所依据的确认答案或附件未就绪，请重新调研确认')
+        raise OdooConfigurationError('配置答卷依据无效，请重新读取答卷') from exc
+    if any(context[key] != current[key] for key in ('module', 'scope_id', 'template_revision', 'answer_revision')):
+        raise OdooConfigurationError('配置答卷版本已变化，请重新读取答卷并确认')
+    if current['readiness'] != READY:
+        raise OdooConfigurationError('配置所依据的确认答案或附件未就绪，请重新读取答卷')
     return context
 
 
@@ -249,7 +250,7 @@ def _preflight(client, operation, arguments, policy):
 def write_configuration(workspace: Path, operation: str, arguments: dict, *, client_factory=None) -> dict:
     """仅由 MCP handler 使用。dry_run 仅生成确认摘要，不连接或授予写权限。"""
     policy = _validate(operation, arguments)
-    research_context = _validate_research_context(workspace, arguments)
+    answer_context = _validate_answer_context(workspace, arguments)
     digest = confirmation_digest(operation, arguments)
     if arguments.get('dry_run') is True:
         return {'status': 'confirmation_required', 'confirmation_digest': digest,
@@ -276,7 +277,7 @@ def write_configuration(workspace: Path, operation: str, arguments: dict, *, cli
         try:
             fields = _preflight(client, operation, arguments, policy)
             # 线上预检可能耗时；落盘尝试及写入前再次核实答卷，不能沿用旧预览。
-            _validate_research_context(workspace, arguments)
+            _validate_answer_context(workspace, arguments)
             state = {'digest': digest, 'execution_status': 'unknown', 'record_id': arguments.get('record_id')}
             # 先持久化尝试占位：超时、崩溃及无法确定远端结果均不得自动重放。
             atomic_write(journal, json.dumps(state))
@@ -284,8 +285,8 @@ def write_configuration(workspace: Path, operation: str, arguments: dict, *, cli
                       'data_readback_status': 'not_checked', 'browser_acceptance_status': 'not_checked',
                       'accepted': False, 'model': arguments['model'], 'company_id': arguments['company_id'],
                       'expected_values': arguments['values'], 'next_action': '只读回读并完成浏览器验收'}
-            if research_context is not None:
-                result['research_context'] = research_context
+            if answer_context is not None:
+                result['answer_context'] = answer_context
             try:
                 company, model = arguments['company_id'], arguments['model']
                 context = {'force_company': company}

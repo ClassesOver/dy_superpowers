@@ -1,0 +1,49 @@
+# 合并前校验：空白检查、MCP 与市场布局测试、官方 Codex CLI 插件安装校验。
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 空白检查
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          git diff --check "$(git merge-base "$base" HEAD)" HEAD
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.17"
+
+      - name: 安装 WeasyPrint 系统依赖
+        run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 安装 Codex CLI
+        run: npm install -g @openai/codex
+
+      - name: MCP 测试
+        env:
+          PYTHONPATH: plugins/dy_superpowers/mcp-server/src
+        run: uv run --frozen --project plugins/dy_superpowers/mcp-server --extra test pytest -q plugins/dy_superpowers/mcp-server/tests
+
+      - name: 市场布局测试
+        run: uv run --frozen --project plugins/dy_superpowers/mcp-server --extra test pytest -q tests
+
+      - name: 插件校验
+        run: bash scripts/validate-plugin.sh

@@ -205,7 +205,6 @@ async def test_research_to_project_wiki_pipeline(tmp_path, monkeypatch):
             #    test_wiki_sync 的 stdio 用例覆盖。
             import server as server_module
 
-            monkeypatch.setattr(server_module, "initialize_telemetry", lambda: False)
             _gitlab_mock(monkeypatch, state)
             monkeypatch.setenv("DY_WIKI_API_URL", API)
             monkeypatch.setenv("DY_WIKI_TOKEN", "pat-e2e")

@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from dy_superpowers_mcp.basic_memory import BasicMemoryAdapter
 from dy_superpowers_mcp.memory import write_note
 import server
+from dy_superpowers_mcp import basic_memory
 
 
 def test_basic_memory_required_version_is_installed():
@@ -193,12 +194,11 @@ def test_memory_search_dispatch_rejects_leading_dash_before_building_adapter(tmp
     workspace = tmp_path / "project"
     workspace.mkdir()
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
 
     def must_not_construct(workspace_arg):
         raise AssertionError("参数校验应先于适配器构造")
 
-    monkeypatch.setattr(server, "BasicMemoryAdapter", must_not_construct)
+    monkeypatch.setattr(basic_memory, 'BasicMemoryAdapter', must_not_construct)
 
     result, error = server.execute_tool(
         "dy_memory_search",

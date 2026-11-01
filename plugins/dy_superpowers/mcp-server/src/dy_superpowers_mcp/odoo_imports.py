@@ -99,7 +99,7 @@ def execute(workspace, client_factory, args):
         raise OdooConfigurationError('配置导入默认关闭')
     if args.get('confirmed') is not True or args.get('confirmation_digest') != digest('import', args):
         raise OdooConfigurationError('必须先预览并确认同一批CSV和环境、公司')
-    from .inspection_prepare import configured_environment_info
+    from .qa_basis import configured_environment_info
     if args['environment'] != configured_environment_info()['environment']:
         raise OdooConfigurationError('导入确认环境不一致')
     journal = _journal(workspace, 'imports-' + args['idempotency_key'])

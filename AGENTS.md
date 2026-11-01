@@ -18,8 +18,8 @@
 - 每次执行 `git commit` 前，必须更新 `plugins/dy_superpowers/.codex-plugin/plugin.json` 的 `version`，并将版本号变更包含在同一次提交中；不得沿用上一次提交的版本号。
 - 使用中文编写新增文档、skill 和用户可见文本。
 - 新功能先写 pytest 测试；不要新增 `unittest` 测试。`plugins/dy_superpowers/mcp-server/tests/test_runtime.py` 是迁移前的既有测试，除非专门安排测试迁移，不要复制其风格到新测试。
-- MCP 测试：`PYTHONPATH=... python3 -m pytest -q plugins/dy_superpowers/mcp-server/tests`。
-- 市场布局测试：`python3 -m pytest -q tests`。
+- MCP 测试（在仓库根目录执行，使用插件锁定的 uv 环境）：`PYTHONPATH=plugins/dy_superpowers/mcp-server/src uv run --frozen --project plugins/dy_superpowers/mcp-server --extra test pytest -q plugins/dy_superpowers/mcp-server/tests`。
+- 市场布局测试：`uv run --frozen --project plugins/dy_superpowers/mcp-server --extra test pytest -q tests`。
 - 完成前运行 `git diff --check` 和 `bash scripts/validate-plugin.sh`。缺少 Codex CLI 或 uv 时必须明确失败，不得把跳过安装测试视为校验通过。
 
 ## 文档与 Skill 边界

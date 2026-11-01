@@ -151,7 +151,6 @@ def _env(monkeypatch, api=API, pid="123", group=None, name=None):
 
 def _server_env(monkeypatch, tmp_path):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    monkeypatch.setattr(server, "initialize_telemetry", lambda: False)
 
 
 def test_sync_confirmation_project_and_manifest_gates(tmp_path, monkeypatch):

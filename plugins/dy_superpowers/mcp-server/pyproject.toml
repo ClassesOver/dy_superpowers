@@ -23,6 +23,7 @@ test = [
     "pytest>=8",
     "pyyaml>=6,<7",
     "pypdf>=4,<7",
+    "reportlab>=4,<5",
 ]
 
 [tool.pytest.ini_options]

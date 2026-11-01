@@ -27,8 +27,10 @@ def test_inspection_uses_current_question_ids_and_dependency_blocks(module):
     assert 'question_id' in text and '当前模板的全部question_id' in text
     assert '分母取自prepare返回的expected_checks' in text
     assert '62' not in text
-    assert 'dy_odoo_environment_info' in text and '独立' in text
-    assert 'requirements' in text and 'sha256' in text
+    assert '../../references/inspection-workflow.md' in text
+    workflow = (ROOT / 'references/inspection-workflow.md').read_text()
+    assert 'dy_odoo_environment_info' in workflow and '独立' in workflow
+    assert 'requirements' in workflow and 'sha256' in workflow
 
 
 @pytest.mark.parametrize('contract', [

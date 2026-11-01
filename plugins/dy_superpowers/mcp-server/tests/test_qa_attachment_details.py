@@ -16,7 +16,6 @@ from dy_superpowers_mcp.qa_templates import load_template
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setenv('CODEX_HOME', str(tmp_path / 'codex'))
-    monkeypatch.setattr(server, 'initialize_telemetry', lambda: False)
 
 
 def _bound(root, name='材料.txt', *, app='实时附件提取的应用', row=None):
