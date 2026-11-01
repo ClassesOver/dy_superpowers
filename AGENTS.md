@@ -32,6 +32,6 @@
 
 ## 安全边界
 
-- Odoo 工具默认只读，不新增任意 RPC、SQL 或写操作。
+- Odoo 工具默认只读。写能力仅限白名单配置创建/更新（`dy_odoo_record_create/update`）、配置导入（`dy_odoo_import_execute`）和模块安装/卸载（`dy_odoo_module_install/uninstall`）：对应写开关（`DY_ODOO_CONFIG_WRITE_ENABLED`、`DY_ODOO_MODULE_WRITE_ENABLED`）由宿主进程显式开启前，这些工具不出现也不可调用；执行前须预览并取得用户对精确确认摘要的确认，使用幂等键，执行后回读。不新增任意 RPC、SQL、记录删除、模块升级或业务单据动作；扩大写能力须同步修改本约定。
 - 记忆只属于当前工作区 `.dy_superpowers/`；调研写入必须有用户确认。
 - trace 按工作区稳定标识分组，不得包含密码或令牌；按项目要求记录记忆正文和 Odoo 查询 domain，敏感值必须脱敏，Odoo 返回行不得记录。

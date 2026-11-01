@@ -16,7 +16,7 @@
 
 跨轮任务按 `workflow_id` 关联。可用可选 `trace_context` 将记忆和 Odoo 调用标记到模块、检查项、范围和调研版本；初始化会话返回工作区追踪标识。通过 `dy_trace_read` 查询本地事件，并区分工具异常、后端降级与巡检待确认。
 
-当前通过受限的 Odoo 12 JSON-RPC 只读工具连接真实 Odoo，不执行远程写操作、SQL 或附加模块代码生成。已加入模块多轮调研技能 `module-research`，以及两个 Odoo 12 HRP 交付巡检技能：`expense-inspection` 和 `general-ledger-inspection`；后续技能继续通过 `skills/<name>/SKILL.md` 加入，确定性的 Odoo 能力通过 MCP 工具加入。
+当前通过受限的 Odoo 12 JSON-RPC 工具连接真实 Odoo：默认只读；白名单配置写入、配置导入和模块安装/卸载仅在宿主显式开启写开关后可用，并须预览确认（见 [配置引擎边界](docs/odoo-config-engine.md)）。不执行 SQL、任意 RPC 或附加模块代码生成。已加入模块多轮调研技能 `module-research`，以及两个 Odoo 12 HRP 交付巡检技能：`expense-inspection` 和 `general-ledger-inspection`；后续技能继续通过 `skills/<name>/SKILL.md` 加入，确定性的 Odoo 能力通过 MCP 工具加入。
 
 Odoo 只读工具包括 `dy_odoo_record_search`、`dy_odoo_record_read`、`dy_odoo_model_fields`、`dy_odoo_module_list_installed` 和 `dy_odoo_module_info`。`dy_knowledge_module_info` 与 `dy_knowledge_search` 只提供本地模块解释，不替代实时账套事实或项目调研结论。
 
