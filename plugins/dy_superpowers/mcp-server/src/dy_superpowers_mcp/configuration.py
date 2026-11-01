@@ -248,7 +248,7 @@ def _preflight(client, operation, arguments, policy):
 
 
 def write_configuration(workspace: Path, operation: str, arguments: dict, *, client_factory=None) -> dict:
-    """仅由 MCP handler 使用。dry_run 仅生成确认摘要，不连接或授予写权限。"""
+    """仅由 MCP handler 使用；写开关已在工具分发层拦截，此处的开关检查是第二道防线。dry_run 仅生成确认摘要，不连接或授予写权限。"""
     policy = _validate(operation, arguments)
     answer_context = _validate_answer_context(workspace, arguments)
     digest = confirmation_digest(operation, arguments)

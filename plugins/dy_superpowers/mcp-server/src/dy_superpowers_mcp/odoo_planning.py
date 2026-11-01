@@ -69,7 +69,8 @@ def design(requirements, user_answers=None):
         'limitations': '仅生成核对计划；不自动安装模块、执行写入或宣称需求已确认。'}
 
 
-def validate(plan, available_tools):
+def validate(plan, validator_for):
+    """validator_for(name) 返回当前可调用工具的校验器，不可用工具返回 None。"""
     errors, warnings = [], []
     phases = plan.get('phases')
     if not isinstance(phases, list) or not phases:
@@ -86,14 +87,12 @@ def validate(plan, available_tools):
             errors.append('步骤必须为列表')
             continue
         for step in steps:
-            if (not isinstance(step, dict) or not isinstance(step.get('tool'), str)
-                    or step['tool'] not in available_tools):
-                errors.append('计划包含未接入工具')
+            validator = validator_for(step.get('tool')) if isinstance(step, dict) else None
+            if validator is None:
+                errors.append('计划包含未接入或未启用的工具')
                 continue
-            from jsonschema import Draft202012Validator
-            schema = available_tools[step['tool']]
             params = step.get('params', {})
-            if not isinstance(params, dict) or next(Draft202012Validator(schema).iter_errors({'trace_id': 'plan-validation', **params}), None):
+            if not isinstance(params, dict) or next(validator.iter_errors({'trace_id': 'plan-validation', **params}), None):
                 errors.append('步骤参数不符合实际工具合同')
             if any(s in step['tool'] for s in ('install', 'upgrade', 'uninstall', 'create', 'update', 'execute', 'delete')):
                 warnings.append('包含潜在变更；执行前仍须独立预览、环境核对及用户授权')

@@ -1,11 +1,12 @@
 """受限配置写入工具（create/update）。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 from ..configuration import CONFIGURATION_SCHEMAS, write_configuration
 from ..odoo_jsonrpc import OdooConfigurationError, OdooRPCError
 from ..trace import TraceStore
 from .runtime import ToolRequestError, append_trace
-from pathlib import Path
 
 
 def _handle_configuration_write(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):

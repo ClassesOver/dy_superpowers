@@ -1,13 +1,13 @@
 """工作区记忆、主题笔记与本地 trace 工具。"""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from .. import basic_memory
-from ..memory import WorkspaceMemory
-from ..memory import list_notes, read_note, write_note
+from ..memory import MEMORY_FILES, WRITABLE_MEMORY_FILES, WorkspaceMemory, list_notes, read_note, write_note
 from ..trace import TraceStore
 from .runtime import ToolRequestError, append_trace, invalid_arguments
-from pathlib import Path
-import json
 
 
 def _handle_notes_write(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):
@@ -170,8 +170,7 @@ TOOLS = {
          'required': ['trace_id', 'name'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'name': {'type': 'string',
-                                 'enum': ['preferences.md', 'profile.md', 'decisions.md', 'delivery-register.md',
-                                          'skill-candidates.md']}}},
+                                 'enum': list(MEMORY_FILES)}}},
         _handle_memory_read,
     ),
     'dy_memory_search': (
@@ -187,8 +186,7 @@ TOOLS = {
          'required': ['trace_id', 'name', 'content', 'confirmed'],
          'properties': {'trace_id': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,128}$'},
                         'name': {'type': 'string',
-                                 'enum': ['decisions.md', 'delivery-register.md', 'preferences.md', 'profile.md',
-                                          'skill-candidates.md']},
+                                 'enum': sorted(WRITABLE_MEMORY_FILES)},
                         'content': {'type': 'string'},
                         'confirmed': {'type': 'boolean'},
                         'expected_content': {'type': 'string', 'description': '更新已有文件必须提供最近读取的完整原文；冲突时重新读取合并。'}}},

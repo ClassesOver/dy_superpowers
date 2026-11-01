@@ -7,13 +7,14 @@ from pathlib import Path
 
 from .storage import atomic_write, record_lock
 
-MEMORY_FILES = {
+# 项目记忆文件的唯一清单；顺序即会话索引的展示顺序。
+MEMORY_FILES = (
     "preferences.md",
     "profile.md",
     "decisions.md",
     "delivery-register.md",
     "skill-candidates.md",
-}
+)
 
 WRITABLE_MEMORY_FILES = MEMORY_FILES
 MODULE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")

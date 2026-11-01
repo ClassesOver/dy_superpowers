@@ -1,16 +1,15 @@
 """Odoo 只读查询与能力工具；全部 search_read 经 AuditedOdoo 审计。"""
 from __future__ import annotations
 
+from pathlib import Path
+
 from . import runtime
 from .. import odoo_discovery, odoo_imports, odoo_operations, odoo_planning
-from ..odoo_capabilities import DESCRIPTIONS as ODOO_CAPABILITY_DESCRIPTIONS
-from ..odoo_capabilities import SCHEMAS as ODOO_CAPABILITY_SCHEMAS
+from ..odoo_capabilities import DESCRIPTIONS as ODOO_CAPABILITY_DESCRIPTIONS, SCHEMAS as ODOO_CAPABILITY_SCHEMAS
 from ..odoo_jsonrpc import validate_read_arguments
 from ..qa_basis import configured_environment_info
-from ..trace import TRACE_ID_PATTERN
-from ..trace import TraceStore
+from ..trace import TRACE_ID_PATTERN, TraceStore
 from .runtime import AuditedOdoo, ToolRequestError, append_trace, invalid_arguments, odoo_errors
-from pathlib import Path
 
 
 def _handle_odoo_environment_info(name, arguments, workspace, store, span_id):
@@ -20,7 +19,7 @@ def _handle_odoo_environment_info(name, arguments, workspace, store, span_id):
 def _handle_odoo_record_search(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):
     with odoo_errors():
         model, domain, fields, limit, offset, context = validate_read_arguments(arguments)
-        from ..odoo_comparison import validate_comparison, compare_records
+        from ..odoo_comparison import compare_records, validate_comparison
         with invalid_arguments():
             validate_comparison(arguments.get('comparison'), fields, limit=limit, offset=offset)
         client = AuditedOdoo(runtime.odoo_client(workspace), store, arguments, name, span_id)
@@ -39,7 +38,7 @@ def _handle_odoo_record_read(name: str, arguments: dict, workspace: Path, store:
                 raise ToolRequestError(-32602, 'ids 必须是 1 到 100 个正整数')
             if not isinstance(fields, list) or not all((isinstance(item, str) and item for item in fields)):
                 raise ToolRequestError(-32602, 'fields 必须是字符串列表')
-            from ..odoo_comparison import validate_comparison, compare_records
+            from ..odoo_comparison import compare_records, validate_comparison
             with invalid_arguments():
                 validate_comparison(arguments.get('comparison'), fields)
             result = client.read_records(arguments['model'], ids, fields)
@@ -83,8 +82,8 @@ def _run_odoo_capability(name, arguments, workspace, store, span_id):
     if name == 'dy_odoo_design_solution':
         return odoo_planning.design(arguments['requirements'], arguments.get('user_answers'))
     if name == 'dy_odoo_validate_plan':
-        from . import TOOL_SCHEMAS
-        return odoo_planning.validate(arguments['plan'], TOOL_SCHEMAS)
+        from . import available_validator
+        return odoo_planning.validate(arguments['plan'], available_validator)
     if name == 'dy_odoo_diagnostics_health_check':
         return odoo_discovery.health_check(factory)
     if name in {'dy_odoo_module_install', 'dy_odoo_module_uninstall'}:

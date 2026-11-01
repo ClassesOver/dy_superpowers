@@ -1,16 +1,16 @@
 """巡检工具：准备、校验、保存、读取与 PDF 导出。"""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from ..inspection import validate_inspection
 from ..inspection_prepare import prepare_inspection
 from ..qa_basis import configured_environment_info
 from ..qa_templates import template_modules
 from ..reports import export_report_pdf, read_report, save_report
-from ..trace import TRACE_CODE_PATTERN, TRACE_ID_PATTERN
-from ..trace import TraceStore
+from ..trace import TRACE_CODE_PATTERN, TRACE_ID_PATTERN, TraceStore
 from .runtime import ToolRequestError, append_trace, invalid_arguments
-from pathlib import Path
-import json
 
 
 def _handle_inspection_prepare(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):
