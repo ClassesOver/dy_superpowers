@@ -9,8 +9,11 @@ TEMPLATE_DIR = Path(__file__).parent / "data" / "research_templates"
 
 @cache
 def template_modules() -> tuple[str, ...]:
-    """已发布模板的模块标识；新增模块只需发布对应模板文件。"""
-    return tuple(sorted(path.stem for path in TEMPLATE_DIR.glob("*.json")))
+    """已发布模板的模块标识；模板目录缺失或为空视为安装损坏，立即失败而非返回空清单。"""
+    modules = tuple(sorted(path.stem for path in TEMPLATE_DIR.glob("*.json")))
+    if not modules:
+        raise RuntimeError(f"调研模板未随插件打包：{TEMPLATE_DIR} 下没有模板文件，请重新安装插件")
+    return modules
 
 
 def load_template(module: str) -> dict:

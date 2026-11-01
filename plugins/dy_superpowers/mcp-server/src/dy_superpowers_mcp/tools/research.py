@@ -1,6 +1,10 @@
 """模块调研答卷工具。"""
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import os
+from pathlib import Path
+
 from .. import research as research_lib
 from ..memory import module_memory_path, validate_module
 from ..qa_store import commit_qa, export_qa, normalize_scope, parse_qa_workbook, read_qa
@@ -8,9 +12,6 @@ from ..trace import TRACE_ID_PATTERN
 from ..qa_templates import template_modules
 from ..trace import TraceStore
 from .runtime import append_trace, invalid_arguments
-from datetime import datetime, timezone
-from pathlib import Path
-import os
 
 
 def _handle_research_record_write(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):

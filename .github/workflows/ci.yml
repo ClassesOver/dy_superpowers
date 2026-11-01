@@ -15,13 +15,19 @@ jobs:
           fetch-depth: 0
 
       - name: 空白检查
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="origin/${{ github.base_ref }}"
+            base="$(git merge-base "origin/$BASE_REF" HEAD)"
+          elif git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            base="$BEFORE"
           else
-            base="${{ github.event.before }}"
+            # 分支首次推送（全零 SHA）或强制推送后旧提交不可达：检查整个树。
+            base="$(git hash-object -t tree /dev/null)"
           fi
-          git diff --check "$(git merge-base "$base" HEAD)" HEAD
+          git diff --check "$base" HEAD
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -35,7 +41,7 @@ jobs:
           node-version: "22"
 
       - name: 安装 Codex CLI
-        run: npm install -g @openai/codex
+        run: npm install -g @openai/codex@0.163.0
 
       - name: MCP 测试
         env:

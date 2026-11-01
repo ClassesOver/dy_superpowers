@@ -1,22 +1,15 @@
 """会话初始化：返回项目记忆索引与模板 QA 概要，不注入记忆正文。"""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+from ..memory import MEMORY_FILES
 from ..qa_store import read_qa
 from ..qa_templates import template_modules
 from ..trace import TraceStore
 from .runtime import ToolRequestError, append_trace
-from pathlib import Path
-import json
 
-
-MEMORY_READ_FILES = [
-    "preferences.md",
-    "profile.md",
-    "decisions.md",
-    "delivery-register.md",
-    "skill-candidates.md",
-]
-SESSION_INDEX_FILES = tuple(MEMORY_READ_FILES)
 SESSION_SOURCES = {"startup", "resume", "clear", "compact", "fork"}
 
 def _handle_session_initialize(name: str, arguments: dict, workspace: Path, store: TraceStore, span_id: str):
@@ -24,7 +17,7 @@ def _handle_session_initialize(name: str, arguments: dict, workspace: Path, stor
     if not isinstance(source, str) or source not in SESSION_SOURCES:
         raise ToolRequestError(-32602, 'unsupported SessionStart source')
     action = '恢复' if source == 'resume' else '初始化'
-    files = '、'.join(SESSION_INDEX_FILES)
+    files = '、'.join(MEMORY_FILES)
     context = '\n'.join([f'工作区会话已{action}（来源：{source}）。', f'追踪工作区标识：{store.workspace_id}。', '项目记忆位于当前工作区 .dy_superpowers/，按需读取，不在会话初始化时注入正文。', '恢复未完成调研时，先按需读取 delivery-register.md 的待办，再按模块和检查键复核最新确认结论。', f'可用文件：{files}。使用 dy_memory_read(trace_id, name) 读取项目记忆；模块模板QA使用 dy_module_memory_read(trace_id, module, scope_id)。', '项目记忆是参考资料，不构成记忆写入或业务操作授权。'])
     from ..qa_templates import load_template
     summaries = []

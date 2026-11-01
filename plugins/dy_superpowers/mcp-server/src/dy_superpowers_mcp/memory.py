@@ -1,103 +1,21 @@
 """Workspace-scoped project and module memory for dy_superpowers."""
 
-import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .storage import atomic_write, record_lock
 
-MEMORY_FILES = {
+# 项目记忆文件的唯一清单；顺序即会话索引的展示顺序。
+MEMORY_FILES = (
     "preferences.md",
     "profile.md",
     "decisions.md",
     "delivery-register.md",
     "skill-candidates.md",
-}
+)
 
 WRITABLE_MEMORY_FILES = MEMORY_FILES
 MODULE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-# 允许 / 形成项目目录分层；每段须以字母或数字开头，禁止空段、结尾斜杠，总长不超过 121。
-NOTE_SLUG = re.compile(r"^(?=.{1,121}$)[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*$")
-
-
-def note_path(workspace: str | Path, slug: str) -> Path:
-    """wiki 记忆页位于 .dy_superpowers/notes/，纳入 Basic Memory 索引范围。"""
-    workspace_path = Path(workspace).resolve()
-    if not isinstance(slug, str) or NOTE_SLUG.fullmatch(slug) is None:
-        raise ValueError("note 标识必须由小写字母、数字或连字符组成，可用单个 / 分层，每段以字母或数字开头（最多 121 字符）")
-    raw_root = workspace_path / ".dy_superpowers"
-    raw_notes = raw_root / "notes"
-    if any(path.is_symlink() for path in (raw_root, raw_notes)):
-        raise ValueError("wiki 记忆目录不允许使用符号链接")
-    notes = raw_notes.resolve()
-    if not notes.is_relative_to(workspace_path.resolve()):
-        raise ValueError("wiki 记忆必须位于当前工作区")
-    path = notes / f"{slug}.md"
-    if any(parent.is_symlink() for parent in path.parents if parent != notes):
-        raise ValueError("wiki 记忆父目录不允许使用符号链接")
-    if path.is_symlink() or not path.resolve().is_relative_to(notes):
-        raise ValueError("wiki 记忆文件必须位于记忆目录内")
-    return path
-
-
-def write_note(workspace: str | Path, slug: str, title: str, body: str, tags: list[str],
-               *, confirmed: bool = False, source_refs: list[str] | None = None,
-               module: str | None = None, research_topic: bool = False,
-               expected_content: str | None = None) -> Path:
-    if confirmed is not True:
-        raise PermissionError("wiki 记忆写入需要用户明确确认")
-    path = note_path(workspace, slug)
-    if not isinstance(title, str) or not title.strip() or len(title) > 120:
-        raise ValueError("note 标题必须是非空文本（≤120 字符）")
-    if not isinstance(body, str) or not body.strip():
-        raise ValueError("note 正文必须是非空文本")
-    if not isinstance(research_topic, bool):
-        raise ValueError("research_topic 必须是布尔值")
-    if module is not None or research_topic:
-        module = validate_module(module)
-    if expected_content is not None and not isinstance(expected_content, str):
-        raise ValueError("expected_content 必须是读取时的完整原文")
-    tags = [str(tag).strip() for tag in (tags or []) if str(tag).strip()][:10]
-    source_refs = [str(ref).strip() for ref in (source_refs or []) if str(ref).strip()][:20]
-    # JSON 字符串与数组也是合法 YAML，避免用户文本改变 frontmatter 结构或值类型。
-    frontmatter = ["---", f"title: {json.dumps(title.replace(chr(10), ' '), ensure_ascii=False)}", "type: note",
-                   f"tags: {json.dumps(tags, ensure_ascii=False)}",
-                   f"module: {json.dumps(module, ensure_ascii=False)}",
-                   f"research_topic: {json.dumps(research_topic)}", "confirmed: true",
-                   f"confirmed_at: {json.dumps(datetime.now(timezone.utc).isoformat())}",
-                   f"source_refs: {json.dumps(source_refs, ensure_ascii=False)}", "---", ""]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with record_lock(path):
-        exists = path.exists()
-        current = path.read_text(encoding="utf-8") if exists else ""
-        existing_topic = False
-        if current.startswith("---\n") and "\n---\n" in current[4:]:
-            header = current[4:].split("\n---\n", 1)[0]
-            existing_topic = 'research_topic: true' in header.splitlines()
-        if exists and (research_topic or existing_topic) and expected_content is None:
-            raise ValueError("更新已有主题笔记必须提供读取时的 expected_content 完整原文")
-        if expected_content is not None and expected_content != current:
-            raise ValueError("主题笔记更新冲突，请重新读取并合并，再确认写入")
-        if not exists and expected_content:
-            raise ValueError("创建主题笔记时 expected_content 必须为空")
-        atomic_write(path, "\n".join(frontmatter) + body.rstrip() + "\n")
-    return path
-
-
-def read_note(workspace: str | Path, slug: str) -> str:
-    path = note_path(workspace, slug)
-    return path.read_text(encoding="utf-8") if path.is_file() else ""
-
-
-def list_notes(workspace: str | Path) -> list[str]:
-    notes = Path(workspace).resolve() / ".dy_superpowers" / "notes"
-    if not notes.is_dir() or notes.is_symlink() or notes.parent.is_symlink():
-        return []
-    return sorted(p.relative_to(notes).with_suffix("").as_posix() for p in notes.rglob("*.md")
-                  if p.is_file() and not p.is_symlink()
-                  and not any(parent.is_symlink() for parent in p.parents if parent != notes)
-                  and NOTE_SLUG.fullmatch(p.relative_to(notes).with_suffix("").as_posix()))
 
 
 def validate_module(module: str) -> str:

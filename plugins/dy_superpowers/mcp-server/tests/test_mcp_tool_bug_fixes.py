@@ -56,20 +56,6 @@ def test_capability_value_error_is_reported_as_request_error(tmp_path, monkeypat
     assert error == {'code': -32602, 'message': '范围标识无效'}
 
 
-@pytest.mark.parametrize('slug', ['a/', 'a//b', '/a', 'a/-b', 'a' * 122])
-def test_note_slug_rejects_empty_segments_and_overlength(tmp_path, slug):
-    _, error = call(tmp_path, 'dy_notes_write', slug=slug, title='标题', body='正文', confirmed=True)
-    assert error and error['code'] == -32602
-    assert not (tmp_path / '.dy_superpowers' / 'notes').exists()
-
-
-@pytest.mark.parametrize('slug', ['a', 'project/topic-1', 'a' * 121])
-def test_note_slug_accepts_layered_names(tmp_path, slug):
-    value, error = call(tmp_path, 'dy_notes_write', slug=slug, title='标题', body='正文', confirmed=True)
-    assert error is None and value['slug'] == slug
-    assert call(tmp_path, 'dy_notes_list')[0]['notes'] == [slug]
-
-
 def save(root, answers, scope='集团 / 总部', batch='b1'):
     template = load_template('expense')
     return call(root, 'dy_research_answers_save', module='expense', scope=scope,

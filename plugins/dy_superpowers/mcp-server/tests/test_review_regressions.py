@@ -15,8 +15,6 @@ sys.path.insert(0, str(PLUGIN / "skills/module-research/scripts"))
 import research_incremental as ri
 import research_sources as rs
 import server
-from dy_superpowers_mcp.memory import list_notes, read_note, write_note
-from dy_superpowers_mcp.project_wiki import configure_project, load_staged, stage_wiki
 from dy_superpowers_mcp.research import write_record
 from dy_superpowers_mcp.trace import TraceStore
 
@@ -245,54 +243,6 @@ def test_record_import_requires_all_changed_fields_to_match(tmp_path, field, val
     assert len(ri.classify(tmp_path, "expense", [changed])["changed"]) == 1
     assert ri.record_import(tmp_path, "expense", "qa.json", "new", [changed])["recorded"] is False
     assert ledger.read_bytes() == before
-
-
-def test_note_frontmatter_roundtrips_arbitrary_strings(tmp_path):
-    title = '费用政策: 住宿 [政策], "特殊"'
-    tags = ["a,b", "[政策]", "true", "a: b"]
-    refs = ["https://example.com/file?a=1,b=2", "[附件]", "null"]
-    path = write_note(tmp_path, "policy", title, "正文", tags, confirmed=True, source_refs=refs)
-    metadata = yaml.safe_load(path.read_text(encoding="utf-8").split("---", 2)[1])
-    assert metadata["title"] == title
-    assert metadata["tags"] == tags
-    assert metadata["source_refs"] == refs
-
-
-def test_hierarchical_notes_keep_full_identifiers(tmp_path, monkeypatch):
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    result, error = server.execute_tool("dy_notes_write", {"trace_id": "notes-test",
-        "slug": "expense/policy", "title": "费用政策", "body": "正文", "confirmed": True}, tmp_path)
-    assert error is None and result["slug"] == "expense/policy"
-    assert list_notes(tmp_path) == ["expense/policy"]
-    assert "正文" in read_note(tmp_path, result["slug"])
-    missing, error = server.execute_tool("dy_notes_read", {"trace_id": "notes-test", "slug": "missing"}, tmp_path)
-    assert error is None and missing["notes"] == ["expense/policy"]
-
-
-def test_notes_trace_records_page_and_redacted_content(tmp_path, monkeypatch):
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
-    args = {"trace_id": "notes-test", "slug": "expense/policy", "title": "费用政策",
-            "body": "政策正文\npassword=synthetic-secret", "confirmed": True}
-    _, error = server.execute_tool("dy_notes_write", args, tmp_path)
-    assert error is None
-    _, error = server.execute_tool("dy_notes_read", {"trace_id": "notes-test", "slug": args["slug"]}, tmp_path)
-    assert error is None
-    events = [e for e in TraceStore(tmp_path).read("notes-test") if e["event"] in {"notes.write", "notes.read"}]
-    assert len(events) == 2
-    for event in events:
-        assert event["memory_file"] == ".dy_superpowers/notes/expense/policy.md"
-        assert "政策正文" in event["memory_content"] and "synthetic-secret" not in event["memory_content"]
-        assert "[REDACTED]" in event["memory_content"]
-
-
-def test_wiki_loads_all_legal_module_identifiers_without_collisions(tmp_path):
-    configure_project(tmp_path, "测试项目", "demo", confirmed=True)
-    for module in ["dy_expense", "dy-expense", "dy--expense", "dy-expense_"]:
-        _write(tmp_path, _candidate(), module=module)
-    stage_wiki(tmp_path)
-    manifest, pages = load_staged(tmp_path)
-    assert len(pages) == 9
-    assert len({entry["slug"] for entry in manifest["entries"]}) == 9
 
 
 @pytest.mark.parametrize("raw,expected", [('"abc\'"', "abc'"), ("'abc\"'", 'abc"'),

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .memory import MEMORY_FILES, WorkspaceMemory, list_notes, module_memory_files, note_path, read_note, validate_module
+from .memory import MEMORY_FILES, WorkspaceMemory, module_memory_files, validate_module
 
 
 BASIC_MEMORY_VERSION = "0.23.2"
@@ -201,9 +201,6 @@ class BasicMemoryAdapter:
         if module is None:
             sources.extend((name, WorkspaceMemory(self.workspace).read(name), None)
                            for name in sorted(MEMORY_FILES))
-            sources.extend((str(note_path(self.workspace, slug).relative_to(self.memory_root)),
-                            read_note(self.workspace, slug), None)
-                           for slug in list_notes(self.workspace))
         for path in module_memory_files(self.workspace, module):
             sources.append((str(path.relative_to(self.memory_root)), path.read_text(encoding="utf-8"), module))
         for name, content, module_name in sources:

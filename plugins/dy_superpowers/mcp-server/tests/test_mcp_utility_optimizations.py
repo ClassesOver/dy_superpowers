@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 import server
+from dy_superpowers_mcp import tools
 from dy_superpowers_mcp.tools import runtime
 from dy_superpowers_mcp import knowledge, odoo_planning
 from dy_superpowers_mcp.qa_basis import configured_environment_info
@@ -40,7 +41,7 @@ def test_plan_lists_missing_information_and_readonly_checks():
     assert any(step['tool'] == 'dy_odoo_record_search' and step['params']['comparison']['expected_values']['company_id'] == 4 for step in steps)
     assert any(step['tool'] == 'dy_odoo_model_fields' for step in steps)
     assert plan['blockers'] and plan['implementation_ready'] is False
-    assert odoo_planning.validate(plan, server.TOOL_SCHEMAS)['valid']
+    assert odoo_planning.validate(plan, tools.available_validator)['valid']
     assert all(step['tool'] not in {'dy_odoo_record_create', 'dy_odoo_record_update'} for step in steps)
 
 
@@ -48,7 +49,7 @@ def test_empty_plan_does_not_look_implementation_ready():
     plan = odoo_planning.design({'modules_needed': []})
     assert plan['missing_information'] and plan['blockers']
     assert all(phase['steps'] for phase in plan['phases'])
-    assert odoo_planning.validate(plan, server.TOOL_SCHEMAS)['implementation_ready'] is False
+    assert odoo_planning.validate(plan, tools.available_validator)['implementation_ready'] is False
 
 
 @pytest.fixture

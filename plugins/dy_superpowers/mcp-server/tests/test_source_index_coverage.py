@@ -136,4 +136,3 @@ def test_new_knowledge_dependencies_match_source_manifests():
         manifest = SOURCE_ROOT / (info["source_repo"] + "-dev") / module / "__manifest__.py"
         assert info["depends"] == ast.literal_eval(manifest.read_text(encoding="utf-8"))["depends"]
         assert "不证明线上安装状态或工作流" in info["limitations"]
-

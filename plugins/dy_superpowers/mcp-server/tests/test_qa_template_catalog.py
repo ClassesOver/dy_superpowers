@@ -21,3 +21,14 @@ def test_new_catalog_entry_is_loadable_without_code_change(tmp_path, monkeypatch
         assert qa_templates.load_template('demo')['module'] == 'demo'
     finally:
         qa_templates.template_modules.cache_clear()
+
+
+def test_missing_template_catalog_fails_loudly(tmp_path, monkeypatch):
+    monkeypatch.setattr(qa_templates, 'TEMPLATE_DIR', tmp_path)
+    qa_templates.template_modules.cache_clear()
+    try:
+        import pytest
+        with pytest.raises(RuntimeError, match='调研模板未随插件打包'):
+            qa_templates.template_modules()
+    finally:
+        qa_templates.template_modules.cache_clear()

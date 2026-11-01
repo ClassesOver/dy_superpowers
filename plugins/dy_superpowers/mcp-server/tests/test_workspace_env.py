@@ -19,20 +19,20 @@ def test_env_loader_reads_whitelist_without_override(tmp_path, monkeypatch):
         "DB_PORT=5432\n"
         "DB_USER=db-reader\n"
         "DB_PASSWORD='db-pw'\n"
-        "DY_WIKI_TOKEN=\"pat-secret\"\n"
+        "DY_KNOWLEDGE_EMBEDDING_TOKEN=\"pat-secret\"\n"
         "NOT_ALLOWED_KEY=whatever\n"
-        "DY_WIKI_API_URL=\n",
+        "DY_KNOWLEDGE_EMBEDDING_URL=\n",
         encoding="utf-8")
-    for key in ("APP_URL", "DB_NAME", "APP_USER", "APP_PASSWORD", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DY_WIKI_TOKEN", "DY_WIKI_API_URL"):
+    for key in ("APP_URL", "DB_NAME", "APP_USER", "APP_PASSWORD", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DY_KNOWLEDGE_EMBEDDING_TOKEN", "DY_KNOWLEDGE_EMBEDDING_URL"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DB_NAME", "existing-db")
 
     loaded = server.load_workspace_env(workspace)
-    assert loaded == ["APP_URL", "APP_USER", "APP_PASSWORD", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DY_WIKI_TOKEN"]  # 按文件行序；空值不加载
+    assert loaded == ["APP_URL", "APP_USER", "APP_PASSWORD", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DY_KNOWLEDGE_EMBEDDING_TOKEN"]  # 按文件行序；空值不加载
     import os
     assert os.environ["APP_URL"] == "http://erp.example.com"
     assert os.environ["DB_NAME"] == "existing-db"  # 已设置的环境变量优先
-    assert os.environ["DY_WIKI_TOKEN"] == "pat-secret"
+    assert os.environ["DY_KNOWLEDGE_EMBEDDING_TOKEN"] == "pat-secret"
     assert os.environ["APP_PASSWORD"] == "pw"
     assert os.environ["DB_HOST"] == "db.example.com"
     assert os.environ["DB_PORT"] == "5432"
